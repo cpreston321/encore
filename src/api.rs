@@ -181,11 +181,12 @@ impl Catalog {
 
 }
 
-fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(8)))
-        .build()
-        .into()
+/// One shared agent, so requests reuse connections instead of a new TLS handshake each.
+fn agent() -> &'static ureq::Agent {
+    static AGENT: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
+        ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(8))).build().into()
+    });
+    &AGENT
 }
 
 fn with_auth<B>(mut req: ureq::RequestBuilder<B>, auth: Option<&Auth>) -> ureq::RequestBuilder<B> {
@@ -270,10 +271,19 @@ pub fn download_cached(url: &str, kind: &str, ext: &str) -> Result<PathBuf> {
         .with_config()
         .limit(50 * 1024 * 1024)
         .read_to_vec()?;
-    // Write-then-rename so a concurrent reader never sees a partial file.
-    let tmp = path.with_extension(format!("{ext}.part{}", std::process::id()));
+    // Write-then-rename so a concurrent reader never sees a partial file. The temp name is
+    // unique per call: two threads can fetch the same URL at once (playback and analysis).
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("{ext}.part{}-{n}", std::process::id()));
     std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, &path)?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        // Another download of the same URL finished first; its file is just as good.
+        if !path.exists() {
+            return Err(e.into());
+        }
+    }
     Ok(path)
 }
 
@@ -301,7 +311,7 @@ fn opt(v: &Value, key: &str) -> Option<String> {
     Some(s(v, key)).filter(|s| !s.is_empty())
 }
 
-fn query_escape(term: &str) -> String {
+pub fn query_escape(term: &str) -> String {
     let mut out = String::new();
     for b in term.bytes() {
         match b {
@@ -492,9 +502,14 @@ mod public {
     }
 
     pub fn search(term: &str) -> Result<SearchResults> {
-        let songs = itunes_search(term, "song", 25)?;
-        let albums = itunes_search(term, "album", 20)?;
-        let artists = itunes_search(term, "musicArtist", 8)?;
+        let (songs, albums, artists) = std::thread::scope(|s| {
+            let songs = s.spawn(|| itunes_search(term, "song", 25));
+            let albums = s.spawn(|| itunes_search(term, "album", 20));
+            let artists = s.spawn(|| itunes_search(term, "musicArtist", 8));
+            (songs.join(), albums.join(), artists.join())
+        });
+        let join = |r: std::thread::Result<Result<Vec<Value>>>| r.map_err(|_| anyhow!("search request panicked"))?;
+        let (songs, albums, artists) = (join(songs)?, join(albums)?, join(artists)?);
         Ok(SearchResults {
             top: Vec::new(),
             songs: songs.iter().map(song).collect(),
@@ -528,7 +543,6 @@ mod musickit {
         get_json(&format!("{ME}/{path}"), Some(auth))
     }
 
-    /// Follows `next` links until `max` items have been collected.
     /// Pages through a library collection. When the first page reports `meta.total`, the
     /// remaining pages are fetched several at a time instead of following `next` serially.
     fn get_me_pages(auth: &Auth, path: &str, max: usize) -> Result<Vec<Value>> {
@@ -568,8 +582,13 @@ mod musickit {
     }
 
     fn get_me_all(auth: &Auth, path: &str, max: usize) -> Result<Vec<Value>> {
+        get_all(auth, &format!("{ME}/{path}"), max)
+    }
+
+    /// Follows `next` links from `url` until `max` items have been collected.
+    fn get_all(auth: &Auth, url: &str, max: usize) -> Result<Vec<Value>> {
         let mut out = Vec::new();
-        let mut url = format!("{ME}/{path}");
+        let mut url = url.to_string();
         loop {
             let page = get_json(&url, Some(auth))?;
             out.extend(page["data"].as_array().cloned().unwrap_or_default());
@@ -715,8 +734,8 @@ mod musickit {
             let tracks = get_me_all(auth, &format!("library/playlists/{id}/tracks?include=catalog&limit=100"), 1000)?;
             return Ok(tracks.iter().map(library_song).collect());
         }
-        let json = get(auth, &format!("playlists/{id}/tracks?limit=100"))?;
-        Ok(list(&json["data"], song))
+        let tracks = get_all(auth, &format!("{API}/{STOREFRONT}/playlists/{id}/tracks?limit=100"), 1000)?;
+        Ok(tracks.iter().map(song).collect())
     }
 
     pub fn artist(auth: &Auth, id: &str) -> Result<ArtistDetail> {
@@ -870,7 +889,7 @@ mod musickit {
         }
     }
 
-    /// Songs rated "favorite" (formerly "love") among `songs`, checked in batches.
+    /// Songs rated "favorite" among `songs`, checked in batches.
     fn favorites(auth: &Auth, songs: &[Song]) -> Result<Vec<Song>> {
         let mut liked = std::collections::HashSet::new();
         for kind in ["songs", "library-songs"] {

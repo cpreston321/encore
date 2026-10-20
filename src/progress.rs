@@ -113,8 +113,6 @@ impl Progress {
         true
     }
 
-    /// Animated level bars. DRM-protected streams can't be analysed, so this is a
-    /// procedural visualizer: layered waves per bar, settling flat while paused.
     /// Level bars from the song's own audio: the preview clip's frequency analysis, in sync
     /// for previews and looped for full songs (whose DRM-protected audio can't be read).
     fn equalizer(&self, color: gpui::Hsla, playing: bool, position: f32) -> Vec<gpui::Div> {

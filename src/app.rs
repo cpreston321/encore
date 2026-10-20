@@ -271,6 +271,7 @@ pub struct MusicApp {
     pub(crate) notice: Option<String>,
     notice_task: Option<Task<()>>,
     sign_in_task: Option<Task<()>>,
+    sign_in_stop: Option<crate::localhost::StopFlag>,
     pub(crate) show_key_help: bool,
     pub(crate) route: Route,
     pub(crate) history: Vec<Route>,
@@ -415,6 +416,7 @@ impl MusicApp {
             notice: None,
             notice_task: None,
             sign_in_task: None,
+            sign_in_stop: None,
             show_key_help: false,
             route: Route::New,
             history: Vec::new(),
@@ -856,6 +858,10 @@ impl MusicApp {
             Err(e) => return self.show_notice(format!("Couldn't start sign-in: {e:#}"), cx),
         };
         cx.open_url(&server.url);
+        // A new attempt replaces any earlier one still waiting.
+        if let Some(stop) = self.sign_in_stop.replace(server.stop_flag()) {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.account = Account::SigningIn;
         self.sign_in_task = Some(cx.spawn(async move |this, cx| {
             let result = cx
@@ -883,6 +889,10 @@ impl MusicApp {
     }
 
     pub(crate) fn cancel_sign_in(&mut self, cx: &mut Context<Self>) {
+        // Stops the local sign-in server too, not just our wait on it.
+        if let Some(stop) = self.sign_in_stop.take() {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         self.sign_in_task = None;
         self.account = Account::SignedOut;
         cx.notify();
@@ -1789,6 +1799,10 @@ impl MusicApp {
                         self.full_unavailable = true;
                     }
                     self.loading_since = None;
+                    // Stop the web player too, or a late-starting stream would play over the preview.
+                    if let Some(audio) = self.audio.borrow_mut().as_mut() {
+                        audio.stop();
+                    }
                     if let Some(song) = self.queue.current().cloned() {
                         self.start_preview(song, cx);
                     }

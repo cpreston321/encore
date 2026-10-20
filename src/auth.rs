@@ -2,13 +2,11 @@
 //! `authorize()`, so the app serves a one-page sign-in site on localhost, opens it in the
 //! browser, and waits for the page to post the token back.
 
-use std::{
-    io::{BufRead, BufReader, Read, Write},
-    net::{TcpListener, TcpStream},
-    time::{Duration, Instant},
-};
+use std::{net::TcpListener, sync::atomic::Ordering, time::Duration};
 
-use anyhow::{Context as _, Result, anyhow, bail};
+use anyhow::{Context as _, Result, anyhow};
+
+use crate::localhost::{self, StopFlag, random_hex};
 
 const KEYCHAIN_SERVICE: &str = "GPUI Music";
 const KEYCHAIN_ACCOUNT: &str = "music-user-token";
@@ -38,13 +36,13 @@ pub struct SignInServer {
     listener: TcpListener,
     page: String,
     state: String,
+    stop: StopFlag,
     pub url: String,
 }
 
 impl SignInServer {
     pub fn start(developer_token: &str) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").context("starting sign-in server")?;
-        listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let state = random_hex(16)?;
         let page = PAGE
@@ -54,89 +52,42 @@ impl SignInServer {
             listener,
             page,
             state,
+            stop: localhost::stop_flag(),
             url: format!("http://localhost:{port}/"),
         })
     }
 
-    /// Serves the sign-in page until it posts back a token, or the timeout passes.
+    /// Setting this flag ends `wait_for_token` (used when the user cancels sign-in).
+    pub fn stop_flag(&self) -> StopFlag {
+        self.stop.clone()
+    }
+
+    /// Serves the sign-in page until it posts back a token, sign-in is cancelled, or the
+    /// timeout passes.
     pub fn wait_for_token(self) -> Result<String> {
-        let deadline = Instant::now() + SIGN_IN_TIMEOUT;
-        while Instant::now() < deadline {
-            match self.listener.accept() {
-                Ok((stream, _)) => {
-                    if let Some(token) = self.handle(stream)? {
-                        return Ok(token);
+        let timeout = self.stop.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(SIGN_IN_TIMEOUT);
+            timeout.store(true, Ordering::Relaxed);
+        });
+        let token = localhost::serve(&self.listener, &self.stop, |stream, req| {
+            match (req.method.as_str(), req.path.as_str()) {
+                ("GET", "/") => localhost::respond(stream, "200 OK", "text/html; charset=utf-8", &self.page)?,
+                ("POST", "/token") if req.query == format!("state={}", self.state) => {
+                    let token = String::from_utf8(req.body).unwrap_or_default().trim().to_string();
+                    if token.is_empty() {
+                        localhost::respond(stream, "400 Bad Request", "text/plain", "bad token")?;
+                    } else {
+                        localhost::respond(stream, "200 OK", "text/plain", "ok")?;
+                        return Ok(Some(token));
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(e) => return Err(e.into()),
+                _ => localhost::respond(stream, "404 Not Found", "text/plain", "not found")?,
             }
-        }
-        bail!("sign-in timed out")
+            Ok(None)
+        });
+        token.ok_or_else(|| anyhow!("sign-in was cancelled or timed out"))
     }
-
-    fn handle(&self, mut stream: TcpStream) -> Result<Option<String>> {
-        stream.set_nonblocking(false)?;
-        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-        let mut reader = BufReader::new(stream.try_clone()?);
-        let mut request_line = String::new();
-        reader.read_line(&mut request_line)?;
-        let mut content_length = 0usize;
-        loop {
-            let mut line = String::new();
-            if reader.read_line(&mut line)? == 0 || line == "\r\n" {
-                break;
-            }
-            if let Some((name, value)) = line.split_once(':')
-                && name.eq_ignore_ascii_case("content-length")
-            {
-                content_length = value.trim().parse().unwrap_or(0);
-            }
-        }
-        let mut parts = request_line.split_whitespace();
-        let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-
-        match (method, path) {
-            ("GET", "/") => {
-                respond(&mut stream, "200 OK", "text/html; charset=utf-8", &self.page)?;
-                Ok(None)
-            }
-            ("POST", p) if p == format!("/token?state={}", self.state) => {
-                if content_length == 0 || content_length > 16 * 1024 {
-                    respond(&mut stream, "400 Bad Request", "text/plain", "bad token")?;
-                    return Ok(None);
-                }
-                let mut body = vec![0; content_length];
-                reader.read_exact(&mut body)?;
-                let token = String::from_utf8(body)?.trim().to_string();
-                respond(&mut stream, "200 OK", "text/plain", "ok")?;
-                Ok(Some(token))
-            }
-            _ => {
-                respond(&mut stream, "404 Not Found", "text/plain", "not found")?;
-                Ok(None)
-            }
-        }
-    }
-}
-
-fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> Result<()> {
-    write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )?;
-    Ok(())
-}
-
-fn random_hex(bytes: usize) -> Result<String> {
-    let mut buf = vec![0u8; bytes];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut buf))
-        .map_err(|e| anyhow!("reading /dev/urandom: {e}"))?;
-    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 const PAGE: &str = r#"<!doctype html>
@@ -198,6 +149,11 @@ const PAGE: &str = r#"<!doctype html>
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+    };
+
     use super::*;
 
     fn http(port: u16, raw: &str) -> String {
@@ -229,5 +185,14 @@ mod tests {
         );
         assert!(ok.starts_with("HTTP/1.1 200"));
         assert_eq!(waiter.join().unwrap().unwrap(), "user-token");
+    }
+
+    #[test]
+    fn cancelling_ends_the_wait() {
+        let server = SignInServer::start("dev").unwrap();
+        let stop = server.stop_flag();
+        let waiter = std::thread::spawn(move || server.wait_for_token());
+        stop.store(true, Ordering::Relaxed);
+        assert!(waiter.join().unwrap().is_err());
     }
 }

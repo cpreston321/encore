@@ -66,25 +66,19 @@ fn from_json(v: &Value) -> Option<Lyrics> {
 }
 
 fn get(url: &str) -> Result<Option<Value>> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(std::time::Duration::from_secs(10)))
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let mut resp = agent.get(url).header("User-Agent", "Encore (https://github.com/) gpui music client").call()?;
+    // LRCLIB answers 404 for "no lyrics", which shouldn't be an error.
+    static AGENT: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
+        ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(10)))
+            .http_status_as_error(false)
+            .build()
+            .into()
+    });
+    let mut resp = AGENT.get(url).header("User-Agent", USER_AGENT).call()?;
     if resp.status() == 404 {
         return Ok(None);
     }
     Ok(Some(resp.body_mut().read_json()?))
-}
-
-fn esc(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 /// Strips "(feat. …)" and " - Single"-style suffixes that LRCLIB entries usually lack.
@@ -98,13 +92,16 @@ fn clean_title(title: &str) -> &str {
     t.trim()
 }
 
+/// LRCLIB asks clients to identify themselves.
+const USER_AGENT: &str = concat!("Encore/", env!("CARGO_PKG_VERSION"), " (https://github.com/cpreston321/encore)");
+
 pub fn fetch(title: &str, artist: &str, album: &str, duration_secs: f32) -> Result<Option<Lyrics>> {
     let primary_artist = artist.split([',', '&']).next().unwrap_or(artist).trim();
     let exact = format!(
         "https://lrclib.net/api/get?track_name={}&artist_name={}&album_name={}&duration={}",
-        esc(title),
-        esc(primary_artist),
-        esc(album),
+        crate::api::query_escape(title),
+        crate::api::query_escape(primary_artist),
+        crate::api::query_escape(album),
         duration_secs.round() as u32
     );
     if let Some(v) = get(&exact)?
@@ -115,8 +112,8 @@ pub fn fetch(title: &str, artist: &str, album: &str, duration_secs: f32) -> Resu
     // Fuzzy fallback: search, prefer synced results with a close duration.
     let search = format!(
         "https://lrclib.net/api/search?track_name={}&artist_name={}",
-        esc(clean_title(title)),
-        esc(primary_artist)
+        crate::api::query_escape(clean_title(title)),
+        crate::api::query_escape(primary_artist)
     );
     let Some(Value::Array(results)) = get(&search)? else {
         return Ok(None);

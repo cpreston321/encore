@@ -8,6 +8,7 @@ mod hero;
 mod keys;
 mod audio;
 mod library;
+mod localhost;
 mod lyrics;
 mod media;
 mod mini;

@@ -111,7 +111,7 @@ impl Palette {
         // Apple's backgrounds can be very light; keep page backgrounds dark enough for the
         // app's white chrome (player, menus) while keeping the hue.
         if bg.l > 0.42 {
-            // Apple's text colors are dark for a light background, so they no longer fit.
+            // Apple's text colors are dark ones meant for its light background; use light text.
             let bg = Hsla { l: 0.24, s: bg.s.min(0.5), ..bg };
             Self { bg, text: white_ish(0.95), text2: white_ish(0.68), accent }
         } else {

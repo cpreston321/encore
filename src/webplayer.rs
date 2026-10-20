@@ -4,13 +4,17 @@
 //! playback state.
 
 use std::{
-    io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use anyhow::{Context as _, Result, anyhow};
+
+use crate::localhost::{self, Request, StopFlag};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString, NSURL, NSURLRequest};
@@ -36,6 +40,10 @@ struct Snapshot {
     id: Option<String>,
     #[serde(default)]
     error: Option<String>,
+    /// Which `load` the error belongs to, so a late report about the previous song isn't
+    /// mistaken for the new one failing.
+    #[serde(default, rename = "errorSeq")]
+    error_seq: Option<u64>,
 }
 
 #[derive(Default)]
@@ -48,6 +56,8 @@ struct Track {
 }
 
 struct Shared {
+    /// Bumped on every `load`.
+    load_seq: AtomicU64,
     snapshot: Mutex<(Snapshot, Instant)>,
     /// The position last shown and when, for a smooth, monotonic progress bar.
     shown: Mutex<Option<(f32, Instant)>>,
@@ -59,36 +69,52 @@ struct Shared {
 
 pub struct WebPlayer {
     shared: Arc<Shared>,
-    // Kept alive for the lifetime of the player; the page dies with them.
-    _window: Retained<NSWindow>,
-    _webview: Retained<WKWebView>,
+    stop: StopFlag,
+    window: Retained<NSWindow>,
+    webview: Retained<WKWebView>,
+}
+
+impl Drop for WebPlayer {
+    /// Shuts the bridge thread and the hidden page down, so the user token embedded in the
+    /// page doesn't outlive the player (e.g. after signing out).
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        unsafe {
+            if let Some(blank) = NSURL::URLWithString(&NSString::from_str("about:blank")) {
+                self.webview.loadRequest(&NSURLRequest::requestWithURL(&blank));
+            }
+        }
+        self.window.orderOut(None);
+        self.window.close();
+    }
 }
 
 impl WebPlayer {
     /// Must run on the main thread (it creates AppKit/WebKit objects).
     pub fn new(developer_token: &str, user_token: &str) -> Result<Self> {
         let shared = Arc::new(Shared {
+            load_seq: AtomicU64::new(0),
             snapshot: Mutex::new((Snapshot::default(), Instant::now())),
             shown: Mutex::new(None),
             seeked_at: Mutex::new(None),
             commands: Mutex::new(Vec::new()),
             track: Mutex::new(Track::default()),
         });
-        let key = random_key()?;
+        let key = localhost::random_hex(16)?;
         let page = PAGE
             .replace("__DEVELOPER_TOKEN__", &serde_json::to_string(developer_token)?)
             .replace("__USER_TOKEN__", &serde_json::to_string(user_token)?)
             .replace("__KEY__", &key);
         let listener = TcpListener::bind("127.0.0.1:0").context("starting player bridge")?;
         let port = listener.local_addr()?.port();
-        let server_shared = shared.clone();
-        let server_key = key.clone();
+        let (server_shared, server_key, stop) = (shared.clone(), key.clone(), localhost::stop_flag());
+        let server_stop = stop.clone();
         std::thread::Builder::new()
             .name("musickit-bridge".into())
             .spawn(move || {
-                for stream in listener.incoming().flatten() {
-                    let _ = handle(stream, &server_shared, &server_key, &page);
-                }
+                localhost::serve::<()>(&listener, &server_stop, |stream, req| {
+                    handle(stream, req, &server_shared, &server_key, &page).map(|()| None)
+                });
             })?;
 
         let mtm = MainThreadMarker::new().ok_or_else(|| anyhow!("the web player must be created on the main thread"))?;
@@ -117,7 +143,7 @@ impl WebPlayer {
             webview.loadRequest(&NSURLRequest::requestWithURL(&url));
             (window, webview)
         };
-        Ok(Self { shared, _window: window, _webview: webview })
+        Ok(Self { shared, stop, window, webview })
     }
 
     fn send(&self, command: Value) {
@@ -131,7 +157,8 @@ impl WebPlayer {
     pub fn load(&self, song_id: &str, volume: f32) {
         *self.shared.track.lock().unwrap() = Track { expected: Some(song_id.to_string()), started: false, paused: false };
         *self.shared.shown.lock().unwrap() = None;
-        self.send(json!({ "op": "load", "id": song_id, "volume": volume }));
+        let seq = self.shared.load_seq.fetch_add(1, Ordering::Relaxed) + 1;
+        self.send(json!({ "op": "load", "id": song_id, "volume": volume, "seq": seq }));
     }
 
     pub fn play(&self) {
@@ -167,7 +194,7 @@ impl WebPlayer {
 
     /// Seconds into the current song. The page reports coarse times a few times a second,
     /// so the shown position runs on its own clock and eases toward each report; it never
-    /// steps backwards (which made the bar jitter) unless the song really jumped.
+    /// steps backwards unless the song really jumped.
     pub fn position(&self) -> f32 {
         let (snap, at) = self.snapshot();
         if !self.shared.track.lock().unwrap().started {
@@ -218,7 +245,8 @@ impl WebPlayer {
     pub fn startup_error(&self) -> Option<String> {
         let snap = self.snapshot().0;
         let track = self.shared.track.lock().unwrap();
-        (!track.started && track.expected.is_some()).then_some(snap.error).flatten()
+        let current = Some(self.shared.load_seq.load(Ordering::Relaxed));
+        (!track.started && track.expected.is_some() && snap.error_seq == current).then_some(snap.error).flatten()
     }
 
     fn observe(shared: &Shared, snap: Snapshot) {
@@ -232,64 +260,28 @@ impl WebPlayer {
     }
 }
 
-fn handle(mut stream: TcpStream, shared: &Shared, key: &str, page: &str) -> Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 || line == "\r\n" {
-            break;
-        }
-        if let Some((name, value)) = line.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            content_length = value.trim().parse().unwrap_or(0);
-        }
-    }
-    let mut parts = request_line.split_whitespace();
-    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+fn handle(stream: &TcpStream, req: Request, shared: &Shared, key: &str, page: &str) -> Result<()> {
     // Only the page we served knows the key, so other local pages can't drive playback.
-    if query != format!("k={key}") {
-        return respond(&mut stream, "403 Forbidden", "text/plain", "forbidden");
+    if req.query != format!("k={key}") {
+        return localhost::respond(stream, "403 Forbidden", "text/plain", "forbidden");
     }
-    match (method, path) {
-        ("GET", "/player") => respond(&mut stream, "200 OK", "text/html; charset=utf-8", page),
+    match (req.method.as_str(), req.path.as_str()) {
+        ("GET", "/player") => localhost::respond(stream, "200 OK", "text/html; charset=utf-8", page),
         ("GET", "/cmd") => {
             let commands = std::mem::take(&mut *shared.commands.lock().unwrap());
-            respond(&mut stream, "200 OK", "application/json", &serde_json::to_string(&commands)?)
+            localhost::respond(stream, "200 OK", "application/json", &serde_json::to_string(&commands)?)
         }
-        ("POST", "/state") if content_length <= 64 * 1024 => {
-            let mut body = vec![0; content_length];
-            reader.read_exact(&mut body)?;
-            if let Ok(snap) = serde_json::from_slice::<Snapshot>(&body) {
+        ("POST", "/state") => {
+            if let Ok(snap) = serde_json::from_slice::<Snapshot>(&req.body) {
                 if let Some(err) = &snap.error {
                     eprintln!("musickit: {err}");
                 }
                 WebPlayer::observe(shared, snap);
             }
-            respond(&mut stream, "204 No Content", "text/plain", "")
+            localhost::respond(stream, "204 No Content", "text/plain", "")
         }
-        _ => respond(&mut stream, "404 Not Found", "text/plain", "not found"),
+        _ => localhost::respond(stream, "404 Not Found", "text/plain", "not found"),
     }
-}
-
-fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) -> Result<()> {
-    write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )?;
-    Ok(())
-}
-
-fn random_key() -> Result<String> {
-    let mut buf = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
-    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 const PAGE: &str = r#"<!doctype html>
@@ -300,6 +292,8 @@ const PAGE: &str = r#"<!doctype html>
 const KEY = "__KEY__";
 let music = null;
 let lastError = null;
+let loadSeq = 0, errorSeq = null;
+function fail(message) { lastError = message; errorSeq = loadSeq; }
 
 function snapshot() {
   if (!music) return { ready: false, error: lastError };
@@ -311,6 +305,7 @@ function snapshot() {
     duration: music.currentPlaybackDuration || 0,
     id: item ? String(item.id) : null,
     error: lastError,
+    errorSeq: errorSeq,
   };
 }
 
@@ -326,7 +321,9 @@ async function run(c) {
   try {
     switch (c.op) {
       case 'load':
+        loadSeq = c.seq;
         lastError = null;
+        errorSeq = null;
         if (c.volume != null) music.volume = c.volume;
         await music.setQueue({ song: c.id, startPlaying: true });
         break;
@@ -337,7 +334,7 @@ async function run(c) {
       case 'volume': music.volume = c.v; break;
     }
   } catch (e) {
-    lastError = c.op + ': ' + describe(e);
+    fail(c.op + ': ' + describe(e));
   }
   report();
 }
@@ -360,9 +357,9 @@ document.addEventListener('musickitloaded', async () => {
     });
     music.musicUserToken = __USER_TOKEN__;
     music.addEventListener('playbackStateDidChange', report);
-    music.addEventListener('mediaPlaybackError', e => { lastError = 'playback: ' + describe(e); report(); });
+    music.addEventListener('mediaPlaybackError', e => { fail('playback: ' + describe(e)); report(); });
   } catch (e) {
-    lastError = 'configure: ' + describe(e);
+    fail('configure: ' + describe(e));
   }
   report();
   setInterval(report, 250);
