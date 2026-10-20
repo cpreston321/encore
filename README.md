@@ -19,6 +19,7 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 - **Your library.** Sign in with your Apple Music account to browse your Recently Added, Artists, Albums, Songs, playlists and Favorite Songs. You can also add to your library and playlists.
 - **Full songs.** Subscribers hear complete tracks through Apple's native MusicKit player on macOS 14 and later, or through MusicKit JS in a hidden web view on macOS 13. Everyone else gets 30-second previews.
 - **Crossfade and gapless playback.** Choose a 3, 6 or 12 second crossfade, or none. Consecutive album tracks hand off without a gap. Since there's only one native player, a crossfade plays the incoming song on a web player while the outgoing one fades out, and the two swap each track.
+- **Picks up where you left off.** Quit midway through a song and Encore reopens on it, paused at the same spot with the rest of the queue intact.
 - **Synced lyrics.** Lyrics come from [LRCLIB](https://lrclib.net) and follow along with the song. Click a line to jump there.
 - **Detail pages that take on the artwork's colors.** Album, artist and playlist pages tint to match their artwork, the header moves with parallax, and a compact title bar fades in as you scroll.
 - **Quick search (⌘K).** Spotlight-style results show a top result, artists, albums, songs and playlists from both your library and the Apple Music catalog.
@@ -103,7 +104,7 @@ These limits come from Apple's APIs, not from Encore:
 | What | Where |
 | --- | --- |
 | Music User Token | Keychain, service `Encore` |
-| MusicKit key config, local library (when signed out), settings | `~/Library/Application Support/Encore/` |
+| MusicKit key config, local library (when signed out), settings, the last queue and position | `~/Library/Application Support/Encore/` |
 | Artwork, previews, cached pages and library | `~/Library/Caches/Encore/` |
 
 To sign out, click your name in the sidebar. To reset everything, delete the two folders and the Keychain item.

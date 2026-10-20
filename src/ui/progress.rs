@@ -49,6 +49,8 @@ pub struct Progress {
     colors: Cell<(gpui::Hsla, gpui::Hsla, gpui::Hsla)>,
     /// Where the user is dragging to (0–1); shown instead of the playback position.
     scrub: Cell<Option<f32>>,
+    /// Position and length shown before anything has loaded: a restored session's song.
+    resume: Cell<Option<(f32, f32)>>,
     /// "Artist — Album" line, which the times replace while hovering.
     subtitle: RefCell<SharedString>,
     hover: Cell<HoverAnim>,
@@ -70,6 +72,7 @@ impl Progress {
             audio,
             colors: Cell::new((white(0.2), white(0.9), white(0.6))),
             scrub: Cell::new(None),
+            resume: Cell::new(None),
             subtitle: RefCell::default(),
             hover: Cell::new(HoverAnim { hovered: false, from: 0., at: Instant::now() }),
             spectrum: RefCell::new(None),
@@ -124,6 +127,10 @@ impl Progress {
         let width = f32::from(self.bounds.get().size.width);
         let step = (audio.position() / duration * width * 2.) as i64;
         self.drawn_step.replace(step) != step
+    }
+
+    pub fn set_resume(&self, resume: Option<(f32, f32)>) {
+        self.resume.set(resume);
     }
 
     pub fn set_scrub(&self, fraction: Option<f32>) {
@@ -193,8 +200,11 @@ impl Render for Progress {
         if animating || (playing && self.hover.get().hovered) {
             window.request_animation_frame();
         }
-        let (position, duration) =
-            self.audio.borrow().as_ref().map_or((0., 30.), |a| (a.position(), a.duration().unwrap_or(30.)));
+        let (position, duration) = self
+            .audio
+            .borrow()
+            .as_ref()
+            .map_or(self.resume.get().unwrap_or((0., 30.)), |a| (a.position(), a.duration().unwrap_or(30.)));
         let (position, fraction) = match self.scrub.get() {
             Some(f) => (f * duration, f),
             None => {

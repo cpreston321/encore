@@ -10,6 +10,7 @@ impl MusicApp {
         if songs.is_empty() {
             return;
         }
+        self.resume_at = None;
         self.queue.set(songs, start, shuffle);
         self.start_current(cx);
     }
@@ -144,6 +145,7 @@ impl MusicApp {
                     this.playback_error = Some(format!("Couldn't play preview: {e:#}"));
                 } else {
                     this.state = PlayState::Playing;
+                    this.apply_resume();
                     this.ensure_ticker(cx);
                 }
                 cx.notify();
@@ -242,6 +244,9 @@ impl MusicApp {
                         this.tick(cx);
                         this.update_now_playing(cx);
                         this.progress.update(cx, |p, cx| p.ensure_ticker(cx));
+                        if this.state == PlayState::Playing {
+                            this.save_session_periodically();
+                        }
                         this.ticking = this.needs_tick();
                         this.ticking
                     })
@@ -279,6 +284,7 @@ impl MusicApp {
                         self.audio.borrow().as_ref().and_then(Audio::duration).unwrap_or(0.)
                     );
                     self.state = PlayState::Playing;
+                    self.apply_resume();
                     self.loading_since = None;
                     self.full_failures = 0;
                     cx.notify();
@@ -314,6 +320,7 @@ impl MusicApp {
                         if let Some(audio) = self.audio.borrow_mut().as_mut() {
                             audio.stop();
                         }
+                        self.clear_session();
                     }
                 }
                 cx.notify();
@@ -330,6 +337,7 @@ impl MusicApp {
                     audio.pause();
                 }
                 self.state = PlayState::Paused;
+                self.save_session();
             }
             PlayState::Paused if self.audio.borrow().as_ref().is_some_and(|a| !a.finished()) => {
                 if let Some(audio) = self.audio.borrow().as_ref() {
@@ -520,8 +528,9 @@ impl MusicApp {
     }
 
     pub(crate) fn position(&self) -> f32 {
+        let resume = self.resume_at.as_ref().map_or(0., |(_, t)| *t);
         match self.state {
-            PlayState::Playing | PlayState::Paused => self.audio.borrow().as_ref().map_or(0., Audio::position),
+            PlayState::Playing | PlayState::Paused => self.audio.borrow().as_ref().map_or(resume, Audio::position),
             _ => 0.,
         }
     }

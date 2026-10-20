@@ -29,6 +29,7 @@ mod data;
 mod media;
 mod navigation;
 mod playback;
+mod session;
 mod settings;
 #[cfg(any(debug_assertions, feature = "tour"))]
 mod tour;
@@ -340,6 +341,9 @@ pub struct MusicApp {
     /// The native player can't work here (macOS 13, no app bundle, access denied).
     native_unavailable: bool,
     pub(crate) native_volume_allowed: bool,
+    pub(crate) session_saved_at: Option<std::time::Instant>,
+    /// A restored session's song and position, applied when that song starts playing.
+    pub(crate) resume_at: Option<(String, f32)>,
     /// The song fading out during a crossfade.
     fade: Option<Fade>,
     /// Crossfade length in seconds (0 = off); persisted in settings.json.
@@ -465,6 +469,8 @@ impl MusicApp {
             native_player: None,
             native_unavailable: false,
             native_volume_allowed: Settings::load().native_volume,
+            session_saved_at: None,
+            resume_at: None,
             fade: None,
             crossfade_secs: Settings::load().crossfade_secs,
             collapsed_sections: Settings::load().collapsed.into_iter().collect(),
@@ -508,6 +514,12 @@ impl MusicApp {
             .detach();
         }
         this.load_browse(cx);
+        this.restore_session(cx);
+        cx.on_app_quit(|this, _| {
+            this.save_session();
+            async {}
+        })
+        .detach();
         crate::perf::milestone("charts cache read");
         #[cfg(any(debug_assertions, feature = "tour"))]
         if std::env::var_os("ENCORE_TOUR").is_some() {

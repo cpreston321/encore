@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Repeat {
     Off,
     All,
@@ -18,6 +20,16 @@ pub struct Queue<T> {
     rng: u64,
 }
 
+/// A queue as saved between launches.
+#[derive(Serialize, Deserialize)]
+pub struct Saved<T> {
+    source: Vec<T>,
+    order: Vec<usize>,
+    cursor: Option<usize>,
+    shuffle: bool,
+    repeat: Repeat,
+}
+
 /// What to do after a track ends or the user skips.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Advance {
@@ -31,6 +43,34 @@ impl<T: Clone> Queue<T> {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0x9e37_79b9, |d| d.as_nanos() as u64);
         Self { source: Vec::new(), order: Vec::new(), cursor: None, shuffle: false, repeat: Repeat::Off, rng: seed | 1 }
+    }
+
+    pub fn save(&self) -> Saved<T> {
+        Saved {
+            source: self.source.clone(),
+            order: self.order.clone(),
+            cursor: self.cursor,
+            shuffle: self.shuffle,
+            repeat: self.repeat,
+        }
+    }
+
+    /// Restores a saved queue. One that doesn't hold together (a hand-edited or truncated
+    /// file) is refused and the queue is left as it was.
+    pub fn restore(&mut self, saved: Saved<T>) -> bool {
+        let n = saved.source.len();
+        let mut seen = vec![false; n];
+        let permutation =
+            saved.order.len() == n && saved.order.iter().all(|&i| i < n && !std::mem::replace(&mut seen[i], true));
+        if n == 0 || !permutation || saved.cursor.is_some_and(|c| c >= n) {
+            return false;
+        }
+        self.source = saved.source;
+        self.order = saved.order;
+        self.cursor = saved.cursor;
+        self.shuffle = saved.shuffle;
+        self.repeat = saved.repeat;
+        true
     }
 
     pub fn current(&self) -> Option<&T> {
@@ -175,6 +215,34 @@ mod tests {
         let mut q = Queue::new();
         q.set((0..n).collect(), start, false);
         q
+    }
+
+    #[test]
+    fn save_and_restore_keep_order_and_position() {
+        let mut q = queue(5, 2);
+        q.toggle_shuffle();
+        q.cycle_repeat();
+        let (current, up_next) = (q.current().copied(), q.up_next());
+        let json = serde_json::to_string(&q.save()).unwrap();
+        let mut restored = Queue::new();
+        assert!(restored.restore(serde_json::from_str(&json).unwrap()));
+        assert_eq!(restored.current().copied(), current);
+        assert_eq!(restored.up_next(), up_next);
+        assert_eq!((restored.shuffle, restored.repeat), (q.shuffle, q.repeat));
+    }
+
+    #[test]
+    fn restore_refuses_a_broken_queue() {
+        let mut q = queue(3, 1);
+        for bad in [
+            r#"{"source":[0,1,2],"order":[0,1],"cursor":0,"shuffle":false,"repeat":"Off"}"#,
+            r#"{"source":[0,1,2],"order":[0,1,1],"cursor":0,"shuffle":false,"repeat":"Off"}"#,
+            r#"{"source":[0,1,2],"order":[0,1,2],"cursor":3,"shuffle":false,"repeat":"Off"}"#,
+            r#"{"source":[],"order":[],"cursor":null,"shuffle":false,"repeat":"Off"}"#,
+        ] {
+            assert!(!q.restore(serde_json::from_str(bad).unwrap()), "{bad}");
+        }
+        assert_eq!(q.current(), Some(&1));
     }
 
     #[test]
