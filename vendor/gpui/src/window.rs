@@ -1,5 +1,6 @@
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::Inspector;
+use crate::SpriteMotion;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
@@ -98,6 +99,9 @@ struct WindowInvalidatorInner {
     /// Resumes paused frame requests (see `PlatformWindow::pause_frame_requests`).
     waker: Option<Rc<dyn Fn()>>,
 }
+
+/// How often moving sprites advance.
+const MOTION_FPS: f32 = 20.;
 
 /// Idle frames in a row before frame requests pause.
 const IDLE_FRAMES_BEFORE_PAUSE: u32 = 4;
@@ -886,6 +890,8 @@ pub struct Window {
     hovered: Rc<Cell<bool>>,
     pub(crate) needs_present: Rc<Cell<bool>>,
     pub(crate) last_input_timestamp: Rc<Cell<Instant>>,
+    motion_clock: Cell<f32>,
+    last_motion_present: Cell<Option<Instant>>,
     pub(crate) refreshing: bool,
     pub(crate) activation_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) focus: Option<FocusId>,
@@ -1069,10 +1075,27 @@ impl Window {
                         && last_input_timestamp.get().elapsed() < Duration::from_secs(1));
 
                 let draws = invalidator.is_dirty() || request_frame_options.force_render;
+                // Moving sprites on screen keep the window presenting at MOTION_FPS, with no
+                // render, layout or paint: the shader advances them.
+                let (moving, motion_due) = handle
+                    .update(&mut cx, |_, window, _| {
+                        let moving = window.rendered_frame.scene.has_motion && active.get();
+                        let due = window
+                            .last_motion_present
+                            .get()
+                            .is_none_or(|t| t.elapsed() >= Duration::from_secs_f32(1. / MOTION_FPS));
+                        (moving, moving && due)
+                    })
+                    .unwrap_or((false, false));
+                let other_present = needs_present;
+                let needs_present = other_present || motion_due;
                 // A window with nothing to draw or present stops the platform's frame
                 // requests (a 120Hz display link wakes the main thread 120 times a second
                 // otherwise). Dirtying the window, a next-frame callback or input resumes them.
-                if draws || needs_present || had_callbacks {
+                // When moving sprites are all that's left, sleep between their frames instead of
+                // waking on every vsync only to skip it.
+                let motion_only = moving && !draws && !other_present && !had_callbacks;
+                if draws || needs_present || had_callbacks || moving {
                     idle_frames.set(0);
                 } else {
                     idle_frames.set(idle_frames.get() + 1);
@@ -1106,6 +1129,25 @@ impl Window {
                         window.complete_frame();
                     })
                     .log_err();
+
+                if motion_only {
+                    let since = handle
+                        .update(&mut cx, |_, window, _| {
+                            window.platform_window.pause_frame_requests();
+                            window.last_motion_present.get().map(|t| t.elapsed())
+                        })
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let wait = Duration::from_secs_f32(1. / MOTION_FPS).saturating_sub(since);
+                    let invalidator = invalidator.clone();
+                    let timer = cx.background_executor().timer(wait);
+                    cx.spawn(async move |_| {
+                        timer.await;
+                        invalidator.wake();
+                    })
+                    .detach();
+                }
             }
         }));
         platform_window.on_resize(Box::new({
@@ -1289,6 +1331,8 @@ impl Window {
             hovered,
             needs_present,
             last_input_timestamp,
+            motion_clock: Cell::new(0.),
+            last_motion_present: Cell::new(None),
             refreshing: false,
             activation_observers: SubscriberSet::new(),
             focus: None,
@@ -2049,7 +2093,19 @@ impl Window {
 
     #[profiling::function]
     fn present(&self) {
-        self.platform_window.draw(&self.rendered_frame.scene);
+        // Motion time only advances while moving sprites are on screen, so motion that
+        // stopped (the window lost focus, the sprites scrolled away) resumes where it was.
+        let scene = &self.rendered_frame.scene;
+        if scene.has_motion {
+            let now = Instant::now();
+            let dt = self.last_motion_present.get().map_or(0., |t| (now - t).as_secs_f32().min(0.1));
+            self.motion_clock.set(self.motion_clock.get() + dt);
+            self.last_motion_present.set(Some(now));
+        } else {
+            self.last_motion_present.set(None);
+        }
+        scene.motion_time.set(self.motion_clock.get());
+        self.platform_window.draw(scene);
         self.needs_present.set(false);
         profiling::finish_frame!();
     }
@@ -3099,6 +3155,7 @@ impl Window {
                 tile,
                 opacity,
                 texture_crop: PolychromeSprite::WHOLE_TEXTURE,
+                motion: SpriteMotion::default(),
             });
         }
         Ok(())
@@ -3179,11 +3236,13 @@ impl Window {
         frame_index: usize,
         grayscale: bool,
     ) -> Result<()> {
-        self.paint_image_cropped(bounds, corner_radii, data, frame_index, grayscale, None)
+        self.paint_image_cropped(bounds, corner_radii, data, frame_index, grayscale, None, None)
     }
 
     /// Like `paint_image`, drawing only `texture_crop` of the image (fractions of its width
-    /// and height, the whole image if `None`) stretched over `bounds`.
+    /// and height, the whole image if `None`) stretched over `bounds`, or with `motion`, a
+    /// pan and zoom the GPU animates without the window redrawing.
+    #[allow(clippy::too_many_arguments)]
     pub fn paint_image_cropped(
         &mut self,
         bounds: Bounds<Pixels>,
@@ -3192,6 +3251,7 @@ impl Window {
         frame_index: usize,
         grayscale: bool,
         texture_crop: Option<Bounds<f32>>,
+        motion: Option<SpriteMotion>,
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
@@ -3233,6 +3293,7 @@ impl Window {
                 origin: crop.origin.map(ScaledPixels),
                 size: crop.size.map(ScaledPixels),
             }),
+            motion: motion.unwrap_or_default(),
         });
         Ok(())
     }

@@ -679,7 +679,8 @@ vertex PolychromeSpriteVertexOutput polychrome_sprite_vertex(
     constant Size_DevicePixels *viewport_size
     [[buffer(SpriteInputIndex_ViewportSize)]],
     constant Size_DevicePixels *atlas_size
-    [[buffer(SpriteInputIndex_AtlasTextureSize)]]) {
+    [[buffer(SpriteInputIndex_AtlasTextureSize)]],
+    constant float *motion_time [[buffer(SpriteInputIndex_MotionTime)]]) {
 
   float2 unit_vertex = unit_vertices[unit_vertex_id];
   PolychromeSprite sprite = sprites[sprite_id];
@@ -689,6 +690,19 @@ vertex PolychromeSpriteVertexOutput polychrome_sprite_vertex(
                                                  sprite.content_mask.bounds);
   float2 crop_origin = float2(sprite.texture_crop.origin.x, sprite.texture_crop.origin.y);
   float2 crop_size = float2(sprite.texture_crop.size.width, sprite.texture_crop.size.height);
+  if (sprite.motion.strength > 0.) {
+    // A zoom that breathes over 23 s and a pan that wanders over 31 s and 41 s, so the
+    // path never visibly repeats.
+    const float tau = 6.2831853;
+    float t = *motion_time;
+    float phase = sprite.motion.phase;
+    float zoom = 1. + sprite.motion.strength * (0.75 + 0.25 * sin(t * tau / 23. + phase));
+    float side = 1. / zoom;
+    float2 pan = float2(0.5 + 0.5 * sin(t * tau / 31. + phase * 1.7),
+                        0.5 + 0.5 * cos(t * tau / 41. + phase * 2.3));
+    crop_origin = (1. - side) * pan;
+    crop_size = float2(side, side);
+  }
   float2 tile_position =
       to_tile_position(crop_origin + unit_vertex * crop_size, sprite.tile, atlas_size);
   return PolychromeSpriteVertexOutput{

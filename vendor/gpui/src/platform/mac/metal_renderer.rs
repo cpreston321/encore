@@ -513,6 +513,7 @@ impl MetalRenderer {
                     instance_buffer,
                     &mut instance_offset,
                     viewport_size,
+                    scene.motion_time.get(),
                     command_encoder,
                 ),
                 PrimitiveBatch::Surfaces(surfaces) => self.draw_surfaces(
@@ -982,6 +983,7 @@ impl MetalRenderer {
         true
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_polychrome_sprites(
         &self,
         texture_id: AtlasTextureId,
@@ -989,6 +991,7 @@ impl MetalRenderer {
         instance_buffer: &mut InstanceBuffer,
         instance_offset: &mut usize,
         viewport_size: Size<DevicePixels>,
+        motion_time: f32,
         command_encoder: &metal::RenderCommandEncoderRef,
     ) -> bool {
         if sprites.is_empty() {
@@ -1002,6 +1005,11 @@ impl MetalRenderer {
             DevicePixels(texture.height() as i32),
         );
         command_encoder.set_render_pipeline_state(&self.polychrome_sprites_pipeline_state);
+        command_encoder.set_vertex_bytes(
+            SpriteInputIndex::MotionTime as u64,
+            mem::size_of::<f32>() as u64,
+            &motion_time as *const f32 as *const _,
+        );
         command_encoder.set_vertex_buffer(
             SpriteInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1323,6 +1331,7 @@ enum SpriteInputIndex {
     ViewportSize = 2,
     AtlasTextureSize = 3,
     AtlasTexture = 4,
+    MotionTime = 5,
 }
 
 #[repr(C)]

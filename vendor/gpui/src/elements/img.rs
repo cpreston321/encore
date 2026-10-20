@@ -1,4 +1,5 @@
 use crate::{
+    SpriteMotion,
     AnyElement, AnyImageCache, App, Asset, AssetLogger, Bounds, DefiniteLength, Element, ElementId,
     Entity, GlobalElementId, Hitbox, Image, ImageCache, InspectorElementId, InteractiveElement,
     Interactivity, IntoElement, LayoutId, Length, ObjectFit, Pixels, RenderImage, Resource,
@@ -129,6 +130,7 @@ pub struct ImageStyle {
     grayscale: bool,
     object_fit: ObjectFit,
     texture_crop: Option<Bounds<f32>>,
+    motion: Option<SpriteMotion>,
     loading: Option<Box<dyn Fn() -> AnyElement>>,
     fallback: Option<Box<dyn Fn() -> AnyElement>>,
 }
@@ -139,6 +141,7 @@ impl Default for ImageStyle {
             grayscale: false,
             object_fit: ObjectFit::Contain,
             texture_crop: None,
+            motion: None,
             loading: None,
             fallback: None,
         }
@@ -167,6 +170,15 @@ pub trait StyledImage: Sized {
     /// corners. Metal only; elsewhere the whole image is drawn.
     fn texture_crop(mut self, crop: Bounds<f32>) -> Self {
         self.image_style().texture_crop = Some(crop);
+        self
+    }
+
+    /// Slowly pan and zoom within the image, animated on the GPU: the window keeps
+    /// presenting while it's on screen but doesn't redraw. `strength` is the zoom (0.1 shows
+    /// about 90% of the image); `phase` (radians) keeps neighboring images out of step.
+    /// Metal only.
+    fn motion(mut self, phase: f32, strength: f32) -> Self {
+        self.image_style().motion = Some(SpriteMotion { phase, strength });
         self
     }
 
@@ -490,6 +502,7 @@ impl Element for Img {
                             layout_state.frame_index,
                             self.style.grayscale,
                             self.style.texture_crop,
+                            self.style.motion,
                         )
                         .log_err();
                 } else if let Some(replacement) = &mut layout_state.replacement {

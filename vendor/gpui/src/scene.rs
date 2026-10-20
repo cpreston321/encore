@@ -32,6 +32,11 @@ pub(crate) struct Scene {
     pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
     pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
     pub(crate) surfaces: Vec<PaintSurface>,
+    /// A visible sprite has `motion`, so the window keeps presenting this scene.
+    pub(crate) has_motion: bool,
+    /// Seconds of motion so far, read by the shader for sprites with `motion`. Set by the
+    /// window before each present.
+    pub(crate) motion_time: std::cell::Cell<f32>,
 }
 
 impl Scene {
@@ -46,6 +51,7 @@ impl Scene {
         self.monochrome_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.has_motion = false;
     }
 
     pub fn len(&self) -> usize {
@@ -103,6 +109,11 @@ impl Scene {
             }
             Primitive::PolychromeSprite(sprite) => {
                 sprite.order = order;
+                // A sliver at the edge of a scroll view is usually under a toolbar or header,
+                // and not worth presenting for.
+                let area = |b: Bounds<ScaledPixels>| b.size.width.0 * b.size.height.0;
+                self.has_motion |=
+                    sprite.motion.strength > 0. && area(clipped_bounds) >= 0.1 * area(sprite.bounds);
                 self.polychrome_sprites.push(sprite.clone());
             }
             Primitive::Surface(surface) => {
@@ -649,6 +660,19 @@ pub(crate) struct PolychromeSprite {
     /// sub-rectangle pans or zooms an image while its bounds, and so its rounded corners,
     /// stay put.
     pub texture_crop: Bounds<ScaledPixels>,
+    /// A slow zoom and pan the shader animates over time; overrides `texture_crop`.
+    pub motion: SpriteMotion,
+}
+
+/// Parameters of a sprite's animated pan and zoom (see `StyledImage::motion`). A `strength`
+/// of 0 means no motion.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct SpriteMotion {
+    /// Offset into the motion's cycle, in radians.
+    pub phase: f32,
+    /// How far it zooms in; 0.1 shows about 90% of the image.
+    pub strength: f32,
 }
 
 impl PolychromeSprite {
