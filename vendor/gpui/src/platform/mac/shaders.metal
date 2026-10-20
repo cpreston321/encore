@@ -687,7 +687,10 @@ vertex PolychromeSpriteVertexOutput polychrome_sprite_vertex(
       to_device_position(unit_vertex, sprite.bounds, viewport_size);
   float4 clip_distance = distance_from_clip_rect(unit_vertex, sprite.bounds,
                                                  sprite.content_mask.bounds);
-  float2 tile_position = to_tile_position(unit_vertex, sprite.tile, atlas_size);
+  float2 crop_origin = float2(sprite.texture_crop.origin.x, sprite.texture_crop.origin.y);
+  float2 crop_size = float2(sprite.texture_crop.size.width, sprite.texture_crop.size.height);
+  float2 tile_position =
+      to_tile_position(crop_origin + unit_vertex * crop_size, sprite.tile, atlas_size);
   return PolychromeSpriteVertexOutput{
       device_position,
       tile_position,

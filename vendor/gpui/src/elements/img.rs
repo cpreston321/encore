@@ -128,6 +128,7 @@ where
 pub struct ImageStyle {
     grayscale: bool,
     object_fit: ObjectFit,
+    texture_crop: Option<Bounds<f32>>,
     loading: Option<Box<dyn Fn() -> AnyElement>>,
     fallback: Option<Box<dyn Fn() -> AnyElement>>,
 }
@@ -137,6 +138,7 @@ impl Default for ImageStyle {
         Self {
             grayscale: false,
             object_fit: ObjectFit::Contain,
+            texture_crop: None,
             loading: None,
             fallback: None,
         }
@@ -157,6 +159,14 @@ pub trait StyledImage: Sized {
     /// Set the object fit for the image.
     fn object_fit(mut self, object_fit: ObjectFit) -> Self {
         self.image_style().object_fit = object_fit;
+        self
+    }
+
+    /// Draw only part of the image (fractions of its width and height) stretched over the
+    /// element. Moving or shrinking it over time pans or zooms within the image's rounded
+    /// corners. Metal only; elsewhere the whole image is drawn.
+    fn texture_crop(mut self, crop: Bounds<f32>) -> Self {
+        self.image_style().texture_crop = Some(crop);
         self
     }
 
@@ -473,12 +483,13 @@ impl Element for Img {
                         .to_pixels(window.rem_size())
                         .clamp_radii_for_quad_size(new_bounds.size);
                     window
-                        .paint_image(
+                        .paint_image_cropped(
                             new_bounds,
                             corner_radii,
                             data,
                             layout_state.frame_index,
                             self.style.grayscale,
+                            self.style.texture_crop,
                         )
                         .log_err();
                 } else if let Some(replacement) = &mut layout_state.replacement {

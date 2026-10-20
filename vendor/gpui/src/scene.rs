@@ -645,6 +645,18 @@ pub(crate) struct PolychromeSprite {
     pub content_mask: ContentMask<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
     pub tile: AtlasTile,
+    /// The part of the texture to draw, as fractions of its width and height. Sampling a
+    /// sub-rectangle pans or zooms an image while its bounds, and so its rounded corners,
+    /// stay put.
+    pub texture_crop: Bounds<ScaledPixels>,
+}
+
+impl PolychromeSprite {
+    /// A `texture_crop` covering the whole texture.
+    pub const WHOLE_TEXTURE: Bounds<ScaledPixels> = Bounds {
+        origin: Point { x: ScaledPixels(0.), y: ScaledPixels(0.) },
+        size: Size { width: ScaledPixels(1.), height: ScaledPixels(1.) },
+    };
 }
 
 impl From<PolychromeSprite> for Primitive {

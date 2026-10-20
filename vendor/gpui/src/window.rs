@@ -3098,6 +3098,7 @@ impl Window {
                 content_mask,
                 tile,
                 opacity,
+                texture_crop: PolychromeSprite::WHOLE_TEXTURE,
             });
         }
         Ok(())
@@ -3178,6 +3179,20 @@ impl Window {
         frame_index: usize,
         grayscale: bool,
     ) -> Result<()> {
+        self.paint_image_cropped(bounds, corner_radii, data, frame_index, grayscale, None)
+    }
+
+    /// Like `paint_image`, drawing only `texture_crop` of the image (fractions of its width
+    /// and height, the whole image if `None`) stretched over `bounds`.
+    pub fn paint_image_cropped(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        data: Arc<RenderImage>,
+        frame_index: usize,
+        grayscale: bool,
+        texture_crop: Option<Bounds<f32>>,
+    ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
@@ -3214,6 +3229,10 @@ impl Window {
             corner_radii,
             tile,
             opacity,
+            texture_crop: texture_crop.map_or(PolychromeSprite::WHOLE_TEXTURE, |crop| Bounds {
+                origin: crop.origin.map(ScaledPixels),
+                size: crop.size.map(ScaledPixels),
+            }),
         });
         Ok(())
     }

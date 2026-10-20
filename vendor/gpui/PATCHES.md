@@ -1,6 +1,6 @@
 # Changes from gpui 0.2.2
 
-This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus two changes. `git log vendor/gpui` shows each one on its own.
+This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus three changes. `git log vendor/gpui` shows each one on its own.
 
 ## The display link sleeps when there's nothing to draw
 
@@ -16,3 +16,7 @@ Encore's idle CPU went from about 0.6% of a core to 0.02%.
 ## A deadlock when a window gets a spurious "became key"
 
 When the app isn't active, Cocoa can send `windowDidBecomeKey:` to a window that isn't actually key. That happens, for example, when Encore launches while another app is in front. GPUI works around this in `window_did_change_key_status` by calling `resignKeyWindow`, but it did so while holding the window state's lock. `resignKeyWindow` posts `windowDidResignKey:` synchronously, which re-enters the same function and waits on the lock forever. The app then hangs on launch and ignores Quit. The fix releases the lock before the call.
+
+## Images can draw part of their texture
+
+`StyledImage::texture_crop` (and `Window::paint_image_cropped`) draws a sub-rectangle of an image, given as fractions of its width and height, stretched over the element. Polychrome sprites carry the crop, which defaults to the whole texture, and the Metal vertex shader maps texture coordinates through it. Encore uses it to slowly pan and zoom artwork inside its rounded corners. GPUI can only clip to rectangles, so drawing an enlarged image would square off the corners. Only the Metal renderer reads the crop; the Blade shaders used on Linux and Windows don't.
