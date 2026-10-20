@@ -1,1 +1,6 @@
 /target
+
+# MusicKit credentials
+*.p8
+musickit.json
+.DS_Store

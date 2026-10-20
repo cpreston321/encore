@@ -1,105 +1,134 @@
+<div align="center">
+
+<img src="docs/icon.png" width="128" height="128" alt="Encore icon">
+
 # Encore
 
-An Apple Music–style client for macOS built with [GPUI](https://www.gpui.rs), modeled on the macOS Tahoe Music app.
+**An Apple Music client for macOS, written in Rust with [GPUI](https://www.gpui.rs).**
 
-```sh
-cargo run --release
-```
+Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-length playback for subscribers.
 
-To build the app itself, run `scripts/build.sh`. It produces `Encore.app` (name, icon,
-Info.plist), signs it with your Apple Development certificate so the Keychain's "Always
-Allow" carries over between builds, and installs it to `~/Applications`:
+[Features](#features) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
 
-```sh
-./scripts/build.sh && open ~/Applications/Encore.app
-```
+</div>
 
-The icon is drawn by `scripts/make_icon.swift`; regenerate `assets/AppIcon.icns` from it if
-you change the design.
-
-## Data sources
-
-Out of the box it uses Apple's public, no-key APIs:
-
-- **Charts**: `rss.marketingtools.apple.com` (top songs, albums, playlists). These feed Home, New ("Best New Songs" are chart songs from the last ~6 weeks) and Radio.
-- **Details, search, previews**: the iTunes Search/Lookup API (album tracks, artist pages, search, 30-second previews, artwork).
-
-The public APIs can't list the songs in Apple's editorial playlists, and only the 30-second previews can be played. Apple restricts full-track playback to its own players.
-
-### Using the official Apple Music API (MusicKit)
-
-With a MusicKit key from a paid Apple Developer account (Certificates, Identifiers & Profiles → Keys → enable MusicKit), the app switches to `api.music.apple.com`. That adds playlist track listings, artist artwork and Apple's own charts. Configure it with any one of:
-
-```sh
-# 1. A pre-signed developer token
-export APPLE_MUSIC_DEVELOPER_TOKEN=eyJ...
-
-# 2. The key itself (the app signs an ES256 token)
-export APPLE_MUSIC_TEAM_ID=ABCDE12345
-export APPLE_MUSIC_KEY_ID=XYZ9876543
-export APPLE_MUSIC_PRIVATE_KEY_PATH=~/keys/AuthKey_XYZ9876543.p8
-```
-
-```jsonc
-// 3. ~/Library/Application Support/GPUI Music/musickit.json
-{ "team_id": "ABCDE12345", "key_id": "XYZ9876543", "private_key_path": "/Users/you/keys/AuthKey_XYZ9876543.p8" }
-```
-
-The sidebar footer shows which source is active.
-
-## Signing in to your library
-
-With a MusicKit key configured, click **Sign In** at the bottom of the sidebar:
-
-1. The app starts a one-page sign-in site on `localhost` and opens it in your browser.
-2. **Sign In with Apple Music** runs Apple's MusicKit sign-in. Your Apple ID password only goes to Apple.
-3. The page hands the resulting Music User Token back to the app, which stores it in the macOS Keychain (service "GPUI Music").
-
-Once you're signed in, Recently Added, Artists, Albums, Songs and the Playlists section show your real Apple Music library, and **+** / **Add to Library** add items to it. Apple's API can add to a library but not remove from it. **Favorite** sets the song's Apple Music rating, and Favorite Songs lists the favorited songs in your library. Click your name in the sidebar to refresh or sign out. Playback is still limited to 30-second previews.
-
-Without signing in, things you add or favorite with **+** or **⋯** are kept locally in `~/Library/Application Support/GPUI Music/library.json`.
-
-Caches (artwork, previews, last charts) live in `~/Library/Caches/gpui-music/`.
+![Now Playing with synced lyrics](docs/screenshots/now-playing.png)
 
 ## Features
 
-- **Now Playing** (click the cover in the player, or ⌃⌘F): full-window artwork, big controls, Up Next.
-- **Lyrics** (⇧⌘L): time-synced lyrics from [LRCLIB](https://lrclib.net); click a line to jump there.
-  Apple doesn't share its own lyrics with third-party apps.
-- **Mini Player** (⇧⌘M) and Dock menu controls; media keys and Control Center's Now Playing work.
-- **Crossfade** (Playing Next panel) and gapless handoff between consecutive album tracks.
-- **Playlists**: Add to Playlist / New Playlist from any song's ⋯ or right-click menu, or drag songs
-  onto a playlist in the sidebar or into Playing Next. Apple's API can't remove or reorder songs.
-- **Library**: sort and filter Songs, Favorites and Albums; ⌘-click / ⇧-click to select several songs.
-- **Home** shows Apple's personal recommendations, Recently Played and Heavy Rotation when signed in.
-- Honors the system Reduce Motion setting. `MUSIC_APPEARANCE=light|dark` forces a theme.
+- **Your library.** Sign in with your Apple Music account to browse your Recently Added, Artists, Albums, Songs, playlists and Favorite Songs. You can also add to your library and playlists.
+- **Full songs.** Subscribers hear complete tracks, played by Apple's MusicKit JS player in a hidden web view. Everyone else gets 30-second previews.
+- **Crossfade and gapless playback.** Choose a 3, 6 or 12 second crossfade, or none. Consecutive album tracks hand off without a gap.
+- **Synced lyrics.** Lyrics come from [LRCLIB](https://lrclib.net) and follow along with the song. Click a line to jump there.
+- **Detail pages that take on the artwork's colors.** Album, artist and playlist pages tint to match their artwork, the header moves with parallax, and a compact title bar fades in as you scroll.
+- **Quick search (⌘K).** Spotlight-style results show a top result, artists, albums, songs and playlists from both your library and the Apple Music catalog.
+- **A Mac app first.** Media keys and Control Center's Now Playing work. There's a Mini Player, Dock menu controls, a menu bar item for every page, and full keyboard navigation.
+- **Visualizer.** Hovering the progress bar shows a live spectrum computed from the song's preview audio.
+- **Library tools.** Sort and filter your Songs, Favorites and Albums. ⌘-click or ⇧-click to select several songs, and drag songs onto a playlist or into Playing Next.
+- **Fast and accessible.** Long lists are virtualized and artwork is cached on disk. Encore follows the system's light or dark appearance and honors Reduce Motion.
 
-## Keys
+<table>
+  <tr>
+    <td width="58%"><img src="docs/screenshots/album.png" alt="Album page tinted from its artwork"></td>
+    <td><img src="docs/screenshots/quick-search.png" alt="Quick search"></td>
+  </tr>
+</table>
+
+## Getting started
+
+### Requirements
+
+- macOS 13 or later. The design targets macOS 26 Tahoe.
+- [Rust](https://rustup.rs) 1.88 or later.
+- Xcode Command Line Tools: `xcode-select --install`.
+
+### Run it
+
+```sh
+git clone https://github.com/cpreston321/encore.git
+cd encore
+cargo run --release
+```
+
+Encore works without any setup. It uses Apple's public charts and the iTunes Search API, and plays 30-second previews.
+
+### Build the app bundle
+
+```sh
+./scripts/build.sh
+open ~/Applications/Encore.app
+```
+
+The script builds `Encore.app` with its icon and Info.plist and installs it to `~/Applications`. If you have an Apple Development certificate, the script signs the app with it. That keeps the app's identity stable between builds, so the Keychain's **Always Allow** stays in effect. Without a certificate, the bundle is signed ad hoc.
+
+### Sign in to Apple Music
+
+Signing in needs a MusicKit key from an Apple Developer account. [docs/musickit.md](docs/musickit.md) walks through creating one and pointing Encore at it. Once the key is set up:
+
+1. Click **Sign In** at the bottom of the sidebar.
+2. Encore opens a one-page sign-in site on `localhost` in your browser. Your Apple ID password only goes to Apple.
+3. The page hands the Music User Token back to Encore, which stores it in your Keychain.
+
+## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
-| Space | Play / pause |
-| ⌘← / ⌘→ | Previous / next |
-| ⌘↑ / ⌘↓ | Volume |
-| ⌘F | Search |
-| ⌘[ | Back |
-| ⌘⌥U | Playing Next |
+| <kbd>Space</kbd> | Play / pause |
+| <kbd>⌘</kbd> <kbd>←</kbd> / <kbd>⌘</kbd> <kbd>→</kbd> | Previous / next track |
+| <kbd>⌘</kbd> <kbd>↑</kbd> / <kbd>⌘</kbd> <kbd>↓</kbd> | Volume up / down |
+| <kbd>⌘</kbd> <kbd>K</kbd> or <kbd>/</kbd> | Quick search |
+| <kbd>⌘</kbd> <kbd>F</kbd> | Search page |
+| <kbd>⌘</kbd> <kbd>[</kbd> / <kbd>⌘</kbd> <kbd>]</kbd> | Back / forward |
+| <kbd>⌘</kbd> <kbd>1</kbd> … <kbd>⌘</kbd> <kbd>9</kbd> | Home, New, Radio, Recently Added, Artists, Albums, Songs, Playlists, Favorites |
+| <kbd>⌘</kbd> <kbd>L</kbd> | Go to the current song |
+| <kbd>⌃</kbd> <kbd>⌘</kbd> <kbd>F</kbd> | Now Playing |
+| <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>L</kbd> | Lyrics |
+| <kbd>⇧</kbd> <kbd>⌘</kbd> <kbd>M</kbd> | Mini Player |
+| <kbd>⌥</kbd> <kbd>⌘</kbd> <kbd>U</kbd> | Playing Next |
+| <kbd>⌘</kbd> <kbd>R</kbd> | Refresh library |
+| <kbd>↑</kbd> <kbd>↓</kbd> <kbd>Return</kbd> | Move through a list and play |
+| <kbd>⌘</kbd> <kbd>/</kbd> | Show all shortcuts |
 
-## Performance
+## Limitations
 
-Set `MUSIC_PERF=1` to log startup milestones, every Apple request's duration, and a frame-time
-summary per page every 5 seconds (average, 95th percentile, max, frames over 16.7ms) to stderr:
+These limits come from Apple's APIs, not from Encore:
+
+- **Full-length playback needs a MusicKit key and an Apple Music subscription.** Apple only streams complete songs to its own players, so Encore drives MusicKit JS in a hidden web view.
+- **Playlists can be added to, but not edited.** The API can add songs and create playlists. It can't remove or reorder songs, and it can't delete anything from your library.
+- **Lyrics come from LRCLIB.** Apple doesn't share its own lyrics with third-party apps, so some songs have none.
+- **The visualizer analyzes the 30-second preview.** Full songs are DRM-protected and their audio can't be read.
+
+## Where things are stored
+
+| What | Where |
+| --- | --- |
+| Music User Token | Keychain, service `Encore` |
+| MusicKit key config, local library (when signed out), settings | `~/Library/Application Support/Encore/` |
+| Artwork, previews, cached pages and library | `~/Library/Caches/Encore/` |
+
+To sign out, click your name in the sidebar. To reset everything, delete the two folders and the Keychain item.
+
+## Development
 
 ```sh
-MUSIC_PERF=1 cargo run --release
+cargo test                    # unit tests
+cargo test -- --ignored       # also hits the live public endpoints
+cargo clippy --all-targets
+cargo fmt
+MUSIC_PERF=1 cargo run --release   # frame times, request durations and startup milestones on stderr
 ```
 
-`cargo build --release --features tour` adds the automated page tour (`MUSIC_TOUR=1`) to an
-optimized build, for profiling every page.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the debug tools, and [docs/architecture.md](docs/architecture.md) explains how the code is laid out.
 
-## Tests
+## Acknowledgements
 
-```sh
-cargo test                 # unit tests
-cargo test -- --ignored    # also hits the live public endpoints
-```
+- [GPUI](https://www.gpui.rs), the UI framework from [Zed](https://zed.dev).
+- [LRCLIB](https://lrclib.net) for synced lyrics.
+- [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia) for preview playback.
+- [objc2](https://github.com/madsmtm/objc2) for the AppKit, WebKit and MediaPlayer bindings.
+
+## License
+
+[MIT](LICENSE).
+
+Encore isn't affiliated with or endorsed by Apple. Apple Music, MusicKit and macOS are trademarks of Apple Inc.

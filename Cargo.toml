@@ -2,6 +2,14 @@
 name = "encore"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "An Apple Music client for macOS, built with GPUI"
+license = "MIT"
+repository = "https://github.com/cpreston321/encore"
+readme = "README.md"
+keywords = ["apple-music", "gpui", "macos", "music-player"]
+categories = ["multimedia::audio", "gui"]
+publish = false
 
 [dependencies]
 anyhow = "1.0.104"

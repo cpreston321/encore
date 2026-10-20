@@ -1,0 +1,11 @@
+name: Feature request
+description: An idea to make Encore better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe the feature and the problem it solves. Mention it if Apple Music does it a certain way.
+    validations:
+      required: true

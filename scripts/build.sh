@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds Encore.app: release binary, Info.plist, icon, signed with your Apple
-# Development certificate, and installs it to ~/Applications.
+# Development certificate (ad hoc without one), and installs it to ~/Applications.
 #
 # macOS remembers "Always Allow" for Keychain access per code signature. Unsigned builds
 # get a new identity every time they're compiled, so the prompt comes back after each
@@ -42,7 +42,8 @@ if [ -n "$identity" ]; then
   codesign --force --sign "$identity" --identifier dev.gpui.music "$app"
   codesign --verify --verbose=1 "$app"
 else
-  echo "No Apple Development certificate found; Encore.app is unsigned." >&2
+  echo "No Apple Development certificate found; signing ad hoc (Keychain will ask again after each build)." >&2
+  codesign --force --sign - --identifier dev.gpui.music "$app"
 fi
 
 mkdir -p "$HOME/Applications"
