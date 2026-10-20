@@ -2,7 +2,9 @@
 
 use std::rc::Rc;
 
-use gpui::{AnyElement, Context, FontWeight, Keystroke, MouseButton, Pixels, Point, SharedString, Window, div, prelude::*, px};
+use gpui::{
+    AnyElement, Context, FontWeight, Keystroke, MouseButton, Pixels, Point, SharedString, Window, div, prelude::*, px,
+};
 
 use crate::{
     app::{Account, ContextMenu, Load, MenuEntry, MusicApp},
@@ -41,22 +43,32 @@ impl MusicApp {
         ContextMenu { position, entries }
     }
 
-    pub(crate) fn add_songs_to_playlist(&mut self, songs: &[Song], playlist: &crate::model::Playlist, cx: &mut Context<Self>) {
+    pub(crate) fn add_songs_to_playlist(
+        &mut self,
+        songs: &[Song],
+        playlist: &crate::model::Playlist,
+        cx: &mut Context<Self>,
+    ) {
         let ids: Vec<String> = songs.iter().map(|s| s.id.clone()).collect();
-        let (pid, label, key, added) = (playlist.id.clone(), playlist.name.clone(), playlist.id.clone(), songs.to_vec());
-        self.fetch(cx, move |c| c.add_to_playlist(&pid, &ids), move |this, load, cx| match load {
-            Load::Ready(()) => {
-                let n = added.len();
-                // Show them immediately; Apple's copy refreshes on the next library load.
-                if let Some(Load::Ready(Some(tracks))) = this.playlist_tracks.get_mut(&key) {
-                    tracks.extend(added);
+        let (pid, label, key, added) =
+            (playlist.id.clone(), playlist.name.clone(), playlist.id.clone(), songs.to_vec());
+        self.fetch(
+            cx,
+            move |c| c.add_to_playlist(&pid, &ids),
+            move |this, load, cx| match load {
+                Load::Ready(()) => {
+                    let n = added.len();
+                    // Show them immediately; Apple's copy refreshes on the next library load.
+                    if let Some(Load::Ready(Some(tracks))) = this.playlist_tracks.get_mut(&key) {
+                        tracks.extend(added);
+                    }
+                    let what = if n == 1 { String::new() } else { format!("{n} songs ") };
+                    this.show_notice(format!("Added {what}to “{label}”"), cx);
                 }
-                let what = if n == 1 { String::new() } else { format!("{n} songs ") };
-                this.show_notice(format!("Added {what}to “{label}”"), cx);
-            }
-            Load::Failed(e) => this.show_notice(format!("Couldn't add to “{label}”: {e}"), cx),
-            Load::Loading => {}
-        });
+                Load::Failed(e) => this.show_notice(format!("Couldn't add to “{label}”: {e}"), cx),
+                Load::Loading => {}
+            },
+        );
     }
 
     pub(crate) fn open_new_playlist(&mut self, song: Option<Song>, window: &mut Window, cx: &mut Context<Self>) {
@@ -80,17 +92,21 @@ impl MusicApp {
             return cx.notify();
         }
         let song_id = sheet.song.map(|s| s.id);
-        self.fetch(cx, move |c| c.create_playlist(&name, song_id.as_deref()), |this, load, cx| match load {
-            Load::Ready(p) => {
-                let label = p.name.clone();
-                if let Load::Ready(lib) = &mut this.remote {
-                    lib.playlists.insert(0, p);
+        self.fetch(
+            cx,
+            move |c| c.create_playlist(&name, song_id.as_deref()),
+            |this, load, cx| match load {
+                Load::Ready(p) => {
+                    let label = p.name.clone();
+                    if let Load::Ready(lib) = &mut this.remote {
+                        lib.playlists.insert(0, p);
+                    }
+                    this.show_notice(format!("Created “{label}”"), cx);
                 }
-                this.show_notice(format!("Created “{label}”"), cx);
-            }
-            Load::Failed(e) => this.show_notice(format!("Couldn't create the playlist: {e}"), cx),
-            Load::Loading => {}
-        });
+                Load::Failed(e) => this.show_notice(format!("Couldn't create the playlist: {e}"), cx),
+                Load::Loading => {}
+            },
+        );
         cx.notify();
     }
 
@@ -145,7 +161,12 @@ impl MusicApp {
                 .flex()
                 .whitespace_nowrap()
                 .child(SharedString::from(text[..sel.start].to_string()))
-                .child(div().rounded(px(3.)).bg(t.accent.opacity(0.38)).child(SharedString::from(text[sel.clone()].to_string())))
+                .child(
+                    div()
+                        .rounded(px(3.))
+                        .bg(t.accent.opacity(0.38))
+                        .child(SharedString::from(text[sel.clone()].to_string())),
+                )
                 .child(SharedString::from(text[sel.end..].to_string()))
                 .into_any_element(),
             None => {
@@ -184,11 +205,14 @@ impl MusicApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                    this.new_playlist = None;
-                    window.focus(&this.focus);
-                    cx.notify();
-                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.new_playlist = None;
+                        window.focus(&this.focus);
+                        cx.notify();
+                    }),
+                )
                 .child(
                     div()
                         .id("new-playlist")
@@ -228,14 +252,18 @@ impl MusicApp {
                                 .flex()
                                 .justify_end()
                                 .gap_2()
-                                .child(button("np-cancel", "Cancel", false).on_click(cx.listener(|this, _, window, cx| {
-                                    this.new_playlist = None;
-                                    window.focus(&this.focus);
-                                    cx.notify();
-                                })))
-                                .child(button("np-create", "Create", true).on_click(cx.listener(|this, _, window, cx| {
-                                    this.create_new_playlist(window, cx);
-                                }))),
+                                .child(button("np-cancel", "Cancel", false).on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.new_playlist = None;
+                                        window.focus(&this.focus);
+                                        cx.notify();
+                                    },
+                                )))
+                                .child(button("np-create", "Create", true).on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.create_new_playlist(window, cx);
+                                    },
+                                ))),
                         ),
                 )
                 .into_any_element(),

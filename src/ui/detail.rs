@@ -4,20 +4,22 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, Context, Div, FontWeight, Hsla, ObjectFit, ScrollHandle, SharedString, Stateful,
-    div, img, linear_color_stop, linear_gradient, prelude::*, px, white,
+    AnyElement, Context, Div, FontWeight, Hsla, ObjectFit, ScrollHandle, SharedString, Stateful, div, img,
+    linear_color_stop, linear_gradient, prelude::*, px, white,
 };
 
 use crate::{
     app::{Account, Load, MusicApp, Route, SIDEBAR_W},
     model::{Album, ArtColors, Artwork, Playlist, Song, format_date},
     theme::{Palette, Theme},
-    views::{
+    ui::{
         GAP, PAD, explicit_badge, icon, icon_button, pill_button, scroll_row, section_header, skeleton_detail,
         skeleton_rows,
     },
 };
 
+/// A click handler stored for later (header subtitle, add button).
+type AppAction = Box<dyn Fn(&mut MusicApp, &mut Context<MusicApp>)>;
 /// How far the page has scrolled down, in pixels.
 fn scrolled(handle: &ScrollHandle) -> f32 {
     (-f32::from(handle.offset().y)).max(0.)
@@ -110,32 +112,35 @@ impl MusicApp {
 
     /// Full-bleed image with a parallax offset: it moves at `rate` of the scroll speed,
     /// so with 0.5 it drifts down half as fast as the page scrolls up.
-    fn parallax_image(&self, artwork: &Artwork, w: f32, h: f32, scroll: f32, rate: f32, cx: &mut Context<Self>) -> AnyElement {
+    fn parallax_image(
+        &self,
+        artwork: &Artwork,
+        w: f32,
+        h: f32,
+        scroll: f32,
+        rate: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let want = (w.max(h) * 2.) as u32;
         let size = [600, 1000, 1600, 2400].into_iter().find(|&s| s >= want).unwrap_or(2400);
         let ph = (size as f32 * h / w).round() as u32;
         let url = if (w - h).abs() > 1. { artwork.url_cropped(size, ph.max(1)) } else { artwork.url(size) };
-        let image = self.image(&url, cx).map(|path| {
-            img(path)
-                .min_w(px(w))
-                .max_w(px(w))
-                .min_h(px(h))
-                .max_h(px(h))
-                .object_fit(ObjectFit::Cover)
-        });
-        div()
-            .absolute()
-            .left_0()
-            .top(px(scroll * rate))
-            .w(px(w))
-            .h(px(h))
-            .children(image)
-            .into_any_element()
+        let image = self
+            .image(&url, cx)
+            .map(|path| img(path).min_w(px(w)).max_w(px(w)).min_h(px(h)).max_h(px(h)).object_fit(ObjectFit::Cover));
+        div().absolute().left_0().top(px(scroll * rate)).w(px(w)).h(px(h)).children(image).into_any_element()
     }
 
     /// A tiny copy of the artwork stretched to fill an area: gpui can't blur, but upscaling
     /// a 24px image gives the same soft wash of color.
-    fn blurred_backdrop(&self, artwork: &Artwork, w: f32, h: f32, scroll: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn blurred_backdrop(
+        &self,
+        artwork: &Artwork,
+        w: f32,
+        h: f32,
+        scroll: f32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let path = self.image(&artwork.url(24), cx)?;
         Some(
             div()
@@ -145,14 +150,7 @@ impl MusicApp {
                 .w(px(w))
                 .h(px(h))
                 .opacity(0.45)
-                .child(
-                    img(path)
-                        .min_w(px(w))
-                        .max_w(px(w))
-                        .min_h(px(h))
-                        .max_h(px(h))
-                        .object_fit(ObjectFit::Cover),
-                )
+                .child(img(path).min_w(px(w)).max_w(px(w)).min_h(px(h)).max_h(px(h)).object_fit(ObjectFit::Cover))
                 .into_any_element(),
         )
     }
@@ -168,7 +166,10 @@ impl MusicApp {
             .flex()
             .justify_between()
             .child(div().when(!self.history.is_empty(), |d| {
-                d.child(glass_button("hero-back", "chevron-left", 38.).on_click(cx.listener(|this, _, _, cx| this.back(cx))))
+                d.child(
+                    glass_button("hero-back", "chevron-left", 38.)
+                        .on_click(cx.listener(|this, _, _, cx| this.back(cx))),
+                )
             }))
             .when(!url.is_empty(), |d| {
                 d.child(
@@ -250,7 +251,7 @@ impl MusicApp {
         let scroll = scrolled(&self.scroll);
         let photo = self.artist_photo(detail);
         let palette = self.palette_for(detail.artist.colors, &photo, cx);
-        let on_accent = palette.map_or(white().into(), |p| p.on_accent());
+        let on_accent = palette.map_or(white(), |p| p.on_accent());
         let fade = (1. - scroll / (hero_h * 0.55)).clamp(0., 1.);
         let top = Arc::new(detail.top_songs.clone());
         let (play_top, shuffle_top) = (top.clone(), top.clone());
@@ -266,21 +267,17 @@ impl MusicApp {
             .bg(t.window)
             .child(self.parallax_image(&photo, full_w, hero_h, scroll, 0.5, cx))
             // Darken the top a touch so the floating buttons read on bright photos.
-            .child(
-                div().absolute().top_0().left_0().right_0().h(px(110.)).bg(linear_gradient(
-                    180.,
-                    linear_color_stop(gpui::black().opacity(0.3), 0.),
-                    linear_color_stop(gpui::black().opacity(0.), 1.),
-                )),
-            )
+            .child(div().absolute().top_0().left_0().right_0().h(px(110.)).bg(linear_gradient(
+                180.,
+                linear_color_stop(gpui::black().opacity(0.3), 0.),
+                linear_color_stop(gpui::black().opacity(0.), 1.),
+            )))
             // The photo dissolves into the page's tint, as on iOS.
-            .child(
-                div().absolute().left_0().right_0().bottom_0().h(relative(0.62)).bg(linear_gradient(
-                    180.,
-                    linear_color_stop(t.window.opacity(0.), 0.),
-                    linear_color_stop(t.window, 1.),
-                )),
-            )
+            .child(div().absolute().left_0().right_0().bottom_0().h(relative(0.62)).bg(linear_gradient(
+                180.,
+                linear_color_stop(t.window.opacity(0.), 0.),
+                linear_color_stop(t.window, 1.),
+            )))
             .child(
                 div()
                     .absolute()
@@ -308,32 +305,28 @@ impl MusicApp {
                             .flex()
                             .items_center()
                             .gap_6()
-                            .child(
-                                glass_button("artist-about", "lyrics", 46.).on_click(cx.listener({
-                                    let key = about_key.clone();
-                                    move |this, _, _, cx| {
-                                        if !this.expanded_notes.remove(&key) {
-                                            this.expanded_notes.insert(key.clone());
-                                        }
-                                        cx.notify();
+                            .child(glass_button("artist-about", "lyrics", 46.).on_click(cx.listener({
+                                let key = about_key.clone();
+                                move |this, _, _, cx| {
+                                    if !this.expanded_notes.remove(&key) {
+                                        this.expanded_notes.insert(key.clone());
                                     }
-                                })),
-                            )
+                                    cx.notify();
+                                }
+                            })))
                             .child(
-                                circle(t, "artist-hero-play", "play", 66., t.accent, on_accent)
-                                    .shadow_lg()
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                circle(t, "artist-hero-play", "play", 66., t.accent, on_accent).shadow_lg().on_click(
+                                    cx.listener(move |this, _, _, cx| {
                                         this.play(play_top.as_ref().clone(), 0, false, cx);
-                                    })),
+                                    }),
+                                ),
                             )
-                            .child(
-                                glass_button("artist-shuffle", "shuffle", 46.).on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        let start = shuffle_top.len() / 2;
-                                        this.play(shuffle_top.as_ref().clone(), start, true, cx);
-                                    },
-                                )),
-                            ),
+                            .child(glass_button("artist-shuffle", "shuffle", 46.).on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    let start = shuffle_top.len() / 2;
+                                    this.play(shuffle_top.as_ref().clone(), start, true, cx);
+                                },
+                            ))),
                     ),
             )
             .child(self.floating_controls(detail.artist.url.clone(), SIDEBAR_W, cx));
@@ -368,11 +361,17 @@ impl MusicApp {
             page = page.child(div().pt_6().child(self.latest_release(t, latest, cx)));
         }
         if !detail.top_songs.is_empty() {
-            page = page
-                .child(section_header(t, "Top Songs"))
-                .child(self.song_columns_by_album(t, "artist-top", detail.top_songs.clone(), col_w, cx));
+            page = page.child(section_header(t, "Top Songs")).child(self.song_columns_by_album(
+                t,
+                "artist-top",
+                detail.top_songs.clone(),
+                col_w,
+                cx,
+            ));
         }
-        for (title, prefix, list) in [("Albums", "artist-albums", &albums), ("Singles & EPs", "artist-singles", &singles)] {
+        for (title, prefix, list) in
+            [("Albums", "artist-albums", &albums), ("Singles & EPs", "artist-singles", &singles)]
+        {
             if list.is_empty() {
                 continue;
             }
@@ -435,7 +434,9 @@ impl MusicApp {
                     .flex()
                     .flex_col()
                     .gap_0p5()
-                    .child(div().text_size(px(13.)).text_color(t.text_secondary).child(format_date(&album.release_date)))
+                    .child(
+                        div().text_size(px(13.)).text_color(t.text_secondary).child(format_date(&album.release_date)),
+                    )
                     .child(
                         div()
                             .flex()
@@ -453,14 +454,12 @@ impl MusicApp {
                     )
                     .children(count.map(|c| div().text_color(t.text_secondary).child(c))),
             )
-            .child(
-                circle(t, "latest-add", if in_library { "check" } else { "plus" }, 40., t.button, t.text).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.add_album(&add, cx);
-                    }),
-                ),
-            )
+            .child(circle(t, "latest-add", if in_library { "check" } else { "plus" }, 40., t.button, t.text).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.add_album(&add, cx);
+                }),
+            ))
     }
 
     /// Adds an album to the library (Apple Music when signed in), fetching tracks if needed.
@@ -491,7 +490,7 @@ impl MusicApp {
         artwork: &Artwork,
         cover: impl FnOnce(f32, &mut Context<Self>) -> AnyElement,
         title: String,
-        subtitle: Option<(String, Box<dyn Fn(&mut MusicApp, &mut Context<MusicApp>)>)>,
+        subtitle: Option<(String, AppAction)>,
         meta: String,
         actions: AnyElement,
         url: String,
@@ -526,22 +525,18 @@ impl MusicApp {
             .pl(px(SIDEBAR_W))
             .overflow_hidden()
             .bg(t.window)
-            .child(
-                div().absolute().top_0().left_0().right_0().h(px(wash_h)).bg(linear_gradient(
-                    180.,
-                    linear_color_stop(glow, 0.),
-                    linear_color_stop(glow.opacity(0.), 1.),
-                )),
-            )
+            .child(div().absolute().top_0().left_0().right_0().h(px(wash_h)).bg(linear_gradient(
+                180.,
+                linear_color_stop(glow, 0.),
+                linear_color_stop(glow.opacity(0.), 1.),
+            )))
             .children(self.blurred_backdrop(artwork, full_w, wash_h, scroll, cx))
             // Fade everything above into the page color well before the header ends.
-            .child(
-                div().absolute().left_0().right_0().top(px(wash_h * 0.4)).bottom_0().bg(linear_gradient(
-                    180.,
-                    linear_color_stop(t.window.opacity(0.), 0.),
-                    linear_color_stop(t.window, 0.55),
-                )),
-            )
+            .child(div().absolute().left_0().right_0().top(px(wash_h * 0.4)).bottom_0().bg(linear_gradient(
+                180.,
+                linear_color_stop(t.window.opacity(0.), 0.),
+                linear_color_stop(t.window, 0.55),
+            )))
             .child(
                 div()
                     .relative()
@@ -585,7 +580,14 @@ impl MusicApp {
     }
 
     /// Shuffle · wide white Play · add, as on iOS.
-    fn cover_actions(&self, t: &Theme, songs: Option<Arc<Vec<Song>>>, added: bool, on_add: Box<dyn Fn(&mut MusicApp, &mut Context<MusicApp>)>, cx: &mut Context<Self>) -> AnyElement {
+    fn cover_actions(
+        &self,
+        t: &Theme,
+        songs: Option<Arc<Vec<Song>>>,
+        added: bool,
+        on_add: AppAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let enabled = songs.as_ref().is_some_and(|s| !s.is_empty());
         let (play, shuffle) = (songs.clone(), songs);
         div()
@@ -662,8 +664,7 @@ impl MusicApp {
             cx,
         );
         let (artist, artist_id) = (album.artist.clone(), album.artist_id.clone());
-        let subtitle: Box<dyn Fn(&mut MusicApp, &mut Context<MusicApp>)> =
-            Box::new(move |this, cx| this.open_artist(artist.clone(), artist_id.clone(), cx));
+        let subtitle: AppAction = Box::new(move |this, cx| this.open_artist(artist.clone(), artist_id.clone(), cx));
         let meta = [album.genre.clone(), album.year().to_string()]
             .into_iter()
             .filter(|s| !s.is_empty())
@@ -686,14 +687,12 @@ impl MusicApp {
             ))
             .children(self.notes(t, &format!("album-{}", album.id), &album.description, cx))
             .child(rows)
-            .child(
-                div()
-                    .px(px(PAD))
-                    .pt_4()
-                    .text_size(px(12.5))
-                    .text_color(t.text_secondary)
-                    .child(format!("{} · {} songs, {} minutes", format_date(&album.release_date), tracks.len(), total_min)),
-            )
+            .child(div().px(px(PAD)).pt_4().text_size(px(12.5)).text_color(t.text_secondary).child(format!(
+                "{} · {} songs, {} minutes",
+                format_date(&album.release_date),
+                tracks.len(),
+                total_min
+            )))
             .children(self.more_by_artist(t, album, cx))
             .into_any_element()
     }
@@ -729,7 +728,13 @@ impl MusicApp {
         )
     }
 
-    pub(crate) fn render_playlist(&self, t: &Theme, playlist: &Playlist, content_w: f32, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_playlist(
+        &self,
+        t: &Theme,
+        playlist: &Playlist,
+        content_w: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let tracks: Option<Arc<Vec<Song>>> = match self.playlist_tracks.get(&playlist.id) {
             Some(Load::Ready(Some(tracks))) => Some(Arc::new(tracks.clone())),
             _ => None,
@@ -760,7 +765,7 @@ impl MusicApp {
             None => "Playlist".into(),
         };
         let curator = (!playlist.curator.is_empty()).then(|| {
-            let noop: Box<dyn Fn(&mut MusicApp, &mut Context<MusicApp>)> = Box::new(|_, _| {});
+            let noop: AppAction = Box::new(|_, _| {});
             (playlist.curator.clone(), noop)
         });
 
@@ -881,7 +886,7 @@ impl MusicApp {
                 )
                 .child(div().w(px(32.)).when(!songs.is_empty(), |d| {
                     d.child(
-                        circle(t, "compact-play", "play", 30., t.accent, white().into())
+                        circle(t, "compact-play", "play", 30., t.accent, white())
                             .on_click(cx.listener(move |this, _, _, cx| this.play(songs.clone(), 0, false, cx))),
                     )
                 }))
@@ -912,23 +917,17 @@ impl MusicApp {
             .bg(t.placeholder)
             .when(!artwork.is_empty(), |d| d.child(self.parallax_image(artwork, width, h, scroll, 0.5, cx)))
             .when(artwork.is_empty(), |d| {
-                d.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(icon("mic", h * 0.3, white().opacity(0.25))),
-                )
+                d.child(div().absolute().inset_0().flex().items_center().justify_center().child(icon(
+                    "mic",
+                    h * 0.3,
+                    white().opacity(0.25),
+                )))
             })
-            .child(
-                div().absolute().left_0().right_0().bottom_0().h(relative(0.6)).bg(linear_gradient(
-                    180.,
-                    linear_color_stop(t.window.opacity(0.), 0.),
-                    linear_color_stop(t.window, 1.),
-                )),
-            )
+            .child(div().absolute().left_0().right_0().bottom_0().h(relative(0.6)).bg(linear_gradient(
+                180.,
+                linear_color_stop(t.window.opacity(0.), 0.),
+                linear_color_stop(t.window, 1.),
+            )))
             .child(
                 div()
                     .absolute()
@@ -954,15 +953,13 @@ impl MusicApp {
                             .flex()
                             .items_center()
                             .gap_3()
+                            .child(pill_button(t, "artist-page", "mic", "Artist Page", false).on_click(
+                                cx.listener(move |this, _, _, cx| this.open_artist(open.0.clone(), open.1.clone(), cx)),
+                            ))
                             .child(
-                                pill_button(t, "artist-page", "mic", "Artist Page", false).on_click(cx.listener(
-                                    move |this, _, _, cx| this.open_artist(open.0.clone(), open.1.clone(), cx),
-                                )),
-                            )
-                            .child(
-                                circle(t, "library-artist-play", "play", 50., t.accent, white().into())
-                                    .shadow_lg()
-                                    .on_click(cx.listener(move |this, _, _, cx| this.play(play.as_ref().clone(), 0, false, cx))),
+                                circle(t, "library-artist-play", "play", 50., t.accent, white()).shadow_lg().on_click(
+                                    cx.listener(move |this, _, _, cx| this.play(play.as_ref().clone(), 0, false, cx)),
+                                ),
                             ),
                     ),
             )

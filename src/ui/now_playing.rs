@@ -4,8 +4,8 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, ObjectFit, Window, div, img,
-    linear_color_stop, linear_gradient, point, prelude::*, px, relative, white,
+    AnyElement, Context, FontWeight, Hsla, MouseButton, MouseDownEvent, ObjectFit, Window, div, img, linear_color_stop,
+    linear_gradient, point, prelude::*, px, relative, white,
 };
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
     model::Song,
     queue::Repeat,
     theme::{Palette, Theme},
-    views::{capture_bounds, icon},
+    ui::{capture_bounds, icon},
 };
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -52,8 +52,13 @@ impl MusicApp {
             return;
         }
         self.lyrics.insert(song.id.clone(), Load::Loading);
-        let (id, title, artist, album, secs) =
-            (song.id.clone(), song.title.clone(), song.artist.clone(), song.album.clone(), song.duration_ms as f32 / 1000.);
+        let (id, title, artist, album, secs) = (
+            song.id.clone(),
+            song.title.clone(),
+            song.artist.clone(),
+            song.album.clone(),
+            song.duration_ms as f32 / 1000.,
+        );
         self.fetch(
             cx,
             move |_| crate::lyrics::fetch(&title, &artist, &album, secs),
@@ -63,7 +68,12 @@ impl MusicApp {
         );
     }
 
-    pub(crate) fn render_now_playing(&self, t: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_now_playing(
+        &self,
+        t: &Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let presence = self.fx.borrow().now_playing;
         if !presence.visible() {
             return None;
@@ -197,7 +207,10 @@ impl MusicApp {
                                     cx.notify();
                                 },
                             )))
-                            .child(big("np-prev", "prev", 28., white()).on_click(cx.listener(|this, _, _, cx| this.previous(cx))))
+                            .child(
+                                big("np-prev", "prev", 28., white())
+                                    .on_click(cx.listener(|this, _, _, cx| this.previous(cx))),
+                            )
                             .child(
                                 div()
                                     .id("np-play")
@@ -217,7 +230,10 @@ impl MusicApp {
                                     )))
                                     .on_click(cx.listener(|this, _, _, cx| this.toggle_play(cx))),
                             )
-                            .child(big("np-next", "next", 28., white()).on_click(cx.listener(|this, _, _, cx| this.next(cx))))
+                            .child(
+                                big("np-next", "next", 28., white())
+                                    .on_click(cx.listener(|this, _, _, cx| this.next(cx))),
+                            )
                             .child(
                                 big(
                                     "np-repeat",
@@ -263,13 +279,11 @@ impl MusicApp {
             .flex()
             .flex_col()
             .gap_4()
-            .child(
-                div()
-                    .flex()
-                    .gap_1()
-                    .child(tab("np-tab-lyrics", "Lyrics", NowPlayingTab::Lyrics))
-                    .child(tab("np-tab-queue", "Up Next", NowPlayingTab::UpNext)),
-            )
+            .child(div().flex().gap_1().child(tab("np-tab-lyrics", "Lyrics", NowPlayingTab::Lyrics)).child(tab(
+                "np-tab-queue",
+                "Up Next",
+                NowPlayingTab::UpNext,
+            )))
             .child(div().flex_1().min_h_0().child(panel_body));
 
         Some(
@@ -285,12 +299,7 @@ impl MusicApp {
                 .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                 .children(backdrop.map(|path| {
                     div().absolute().inset_0().opacity(0.55).child(
-                        img(path)
-                            .min_w(px(vw))
-                            .min_h(px(vh))
-                            .max_w(px(vw))
-                            .max_h(px(vh))
-                            .object_fit(ObjectFit::Cover),
+                        img(path).min_w(px(vw)).min_h(px(vh)).max_w(px(vw)).max_h(px(vh)).object_fit(ObjectFit::Cover),
                     )
                 }))
                 .child(div().absolute().inset_0().bg(linear_gradient(
@@ -400,15 +409,8 @@ impl MusicApp {
                     })),
             );
         }
-        list.child(
-            div()
-                .pt_6()
-                .px_2()
-                .text_size(px(11.))
-                .text_color(white().opacity(0.35))
-                .child("Lyrics from LRCLIB"),
-        )
-        .into_any_element()
+        list.child(div().pt_6().px_2().text_size(px(11.)).text_color(white().opacity(0.35)).child("Lyrics from LRCLIB"))
+            .into_any_element()
     }
 
     /// Eases the lyrics so the current line sits about a third of the way down, unless
@@ -459,8 +461,20 @@ impl MusicApp {
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().truncate().text_color(white()).font_weight(FontWeight::MEDIUM).child(song.title.clone()))
-                            .child(div().truncate().text_size(px(12.)).text_color(white().opacity(0.6)).child(song.artist.clone())),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_color(white())
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(song.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .text_color(white().opacity(0.6))
+                                    .child(song.artist.clone()),
+                            ),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.jump_ahead(n, cx))),
             );

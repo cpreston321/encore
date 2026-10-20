@@ -8,14 +8,14 @@ use std::{
 };
 
 use gpui::{
-    Bounds, Context, MouseButton, MouseDownEvent, Pixels, SharedString, Task, WeakEntity, Window, div,
-    prelude::*, px, relative,
+    Bounds, Context, MouseButton, MouseDownEvent, Pixels, SharedString, Task, WeakEntity, Window, div, prelude::*, px,
+    relative,
 };
 
 use crate::{
     app::{Drag, MusicApp},
     audio::Audio,
-    views::capture_bounds,
+    ui::capture_bounds,
 };
 
 pub type SharedAudio = Rc<RefCell<Option<Audio>>>;
@@ -62,7 +62,12 @@ pub struct Progress {
 }
 
 impl Progress {
-    pub fn new(audio: SharedAudio, bounds: Rc<Cell<Bounds<Pixels>>>, app: WeakEntity<MusicApp>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        audio: SharedAudio,
+        bounds: Rc<Cell<Bounds<Pixels>>>,
+        app: WeakEntity<MusicApp>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let ticker = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(FRAME).await;
@@ -149,11 +154,8 @@ impl Render for Progress {
         if animating {
             window.request_animation_frame();
         }
-        let (position, duration) = self
-            .audio
-            .borrow()
-            .as_ref()
-            .map_or((0., 30.), |a| (a.position(), a.duration().unwrap_or(30.)));
+        let (position, duration) =
+            self.audio.borrow().as_ref().map_or((0., 30.), |a| (a.position(), a.duration().unwrap_or(30.)));
         let (position, fraction) = match self.scrub.get() {
             Some(f) => (f * duration, f),
             None => {

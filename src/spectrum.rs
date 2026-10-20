@@ -53,7 +53,8 @@ pub fn analyze(path: &Path) -> Result<Spectrum> {
             ((hz / bin_hz) as usize).clamp(1, FFT / 2 - 1)
         })
         .collect();
-    let window: Vec<f32> = (0..FFT).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos()).collect();
+    let window: Vec<f32> =
+        (0..FFT).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos()).collect();
 
     let hop = (rate / FPS) as usize;
     let mut frames = Vec::new();

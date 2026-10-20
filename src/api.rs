@@ -12,8 +12,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::model::{
-    Album, ArtColors, Artist, ArtistDetail, Artwork, Browse, PersonalHome, Playlist, RemoteLibrary, SearchResults, Song,
-    Station, TopResult,
+    Album, ArtColors, Artist, ArtistDetail, Artwork, Browse, PersonalHome, Playlist, RemoteLibrary, SearchResults,
+    Song, Station, TopResult,
 };
 
 pub const STOREFRONT: &str = "us";
@@ -51,7 +51,6 @@ impl Catalog {
             Self::Public => None,
         }
     }
-
 
     pub fn user_token(&self) -> Option<&str> {
         match self {
@@ -178,7 +177,6 @@ impl Catalog {
             _ => Err(anyhow!("not signed in to Apple Music")),
         }
     }
-
 }
 
 /// One shared agent, so requests reuse connections instead of a new TLS handshake each.
@@ -204,7 +202,10 @@ fn request(method: &str, url: &str, auth: Option<&Auth>, body: Option<&Value>) -
     let result = request_inner(method, url, auth, body);
     if crate::perf::enabled() {
         let path = url.split('?').next().unwrap_or(url).trim_start_matches("https://");
-        crate::perf::request(&format!("{method} {path}{}", if result.is_err() { " (failed)" } else { "" }), started.elapsed());
+        crate::perf::request(
+            &format!("{method} {path}{}", if result.is_err() { " (failed)" } else { "" }),
+            started.elapsed(),
+        );
     }
     result
 }
@@ -221,9 +222,7 @@ fn request_inner(method: &str, url: &str, auth: Option<&Auth>, body: Option<&Val
     if matches!(resp.status().as_u16(), 202 | 204) {
         return Ok(Value::Null);
     }
-    resp.body_mut()
-        .read_json::<Value>()
-        .with_context(|| format!("decoding {url}"))
+    resp.body_mut().read_json::<Value>().with_context(|| format!("decoding {url}"))
 }
 
 /// GET with retries: Apple's feeds intermittently answer 5xx, and the Apple Music API
@@ -288,15 +287,23 @@ pub fn download_cached(url: &str, kind: &str, ext: &str) -> Result<PathBuf> {
 }
 
 pub fn cache_dir() -> PathBuf {
-    dirs::cache_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("gpui-music")
+    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("Encore")
 }
 
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("GPUI Music")
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("Encore")
+}
+
+/// Moves data from the app's pre-release folder names ("GPUI Music", "gpui-music") so an
+/// existing library, settings and MusicKit key config carry over. Call once at launch.
+pub fn migrate_legacy_dirs() {
+    for (base, old) in [(dirs::data_dir(), "GPUI Music"), (dirs::cache_dir(), "gpui-music")] {
+        let Some(base) = base else { continue };
+        let (old, new) = (base.join(old), base.join("Encore"));
+        if old.exists() && !new.exists() {
+            let _ = std::fs::rename(&old, &new);
+        }
+    }
 }
 
 fn s(v: &Value, key: &str) -> String {
@@ -459,26 +466,17 @@ mod public {
             .find(|v| v["wrapperType"] == "collection")
             .map(album_from_lookup)
             .ok_or_else(|| anyhow!("album {id} not found"))?;
-        let mut songs: Vec<Song> = results
-            .iter()
-            .filter(|v| v["wrapperType"] == "track")
-            .map(song)
-            .collect();
+        let mut songs: Vec<Song> = results.iter().filter(|v| v["wrapperType"] == "track").map(song).collect();
         songs.sort_by_key(|s| s.track_number);
         Ok((album, songs))
     }
 
     pub fn artist(id: &str) -> Result<ArtistDetail> {
         let albums = lookup(&format!("id={id}&entity=album&limit=60"))?;
-        let artist_v = albums
-            .iter()
-            .find(|v| v["wrapperType"] == "artist")
-            .ok_or_else(|| anyhow!("artist {id} not found"))?;
-        let mut album_list: Vec<Album> = albums
-            .iter()
-            .filter(|v| v["wrapperType"] == "collection")
-            .map(album_from_lookup)
-            .collect();
+        let artist_v =
+            albums.iter().find(|v| v["wrapperType"] == "artist").ok_or_else(|| anyhow!("artist {id} not found"))?;
+        let mut album_list: Vec<Album> =
+            albums.iter().filter(|v| v["wrapperType"] == "collection").map(album_from_lookup).collect();
         album_list.sort_by(|a, b| b.release_date.cmp(&a.release_date));
         let top_songs = lookup(&format!("id={id}&entity=song&limit=10"))?
             .iter()
@@ -663,7 +661,6 @@ mod musickit {
                 .unwrap_or("")
                 .to_string(),
             track_count: a["trackCount"].as_u64().map(|n| n as u32),
-            ..Default::default()
         }
     }
 
@@ -859,11 +856,7 @@ mod musickit {
         let name = s(&v["attributes"], "name");
         match catalog_of(v) {
             Some(c) => Artist { name, ..parse_artist(c) },
-            None => Artist {
-                id: s(v, "id"),
-                name,
-                ..Default::default()
-            },
+            None => Artist { id: s(v, "id"), name, ..Default::default() },
         }
     }
 
@@ -893,11 +886,7 @@ mod musickit {
     fn favorites(auth: &Auth, songs: &[Song]) -> Result<Vec<Song>> {
         let mut liked = std::collections::HashSet::new();
         for kind in ["songs", "library-songs"] {
-            let ids: Vec<&str> = songs
-                .iter()
-                .map(|s| s.id.as_str())
-                .filter(|id| rating_kind(id) == kind)
-                .collect();
+            let ids: Vec<&str> = songs.iter().map(|s| s.id.as_str()).filter(|id| rating_kind(id) == kind).collect();
             let chunks: Vec<String> = ids.chunks(100).map(|c| c.join(",")).collect();
             for batch in chunks.chunks(4) {
                 let pages = std::thread::scope(|scope| {
@@ -970,7 +959,8 @@ mod musickit {
 
     pub fn add_to_playlist(auth: &Auth, playlist_id: &str, song_ids: &[String]) -> Result<()> {
         let body = serde_json::json!({ "data": song_ids.iter().map(|id| song_ref(id)).collect::<Vec<_>>() });
-        request("POST_JSON", &format!("{ME}/library/playlists/{playlist_id}/tracks"), Some(auth), Some(&body)).map(|_| ())
+        request("POST_JSON", &format!("{ME}/library/playlists/{playlist_id}/tracks"), Some(auth), Some(&body))
+            .map(|_| ())
     }
 
     pub fn create_playlist(auth: &Auth, name: &str, song_id: Option<&str>) -> Result<Playlist> {
@@ -987,7 +977,6 @@ mod musickit {
     pub fn add_to_library(auth: &Auth, kind: &str, id: &str) -> Result<()> {
         request("POST", &format!("{ME}/library?ids%5B{kind}%5D={}", query_escape(id)), Some(auth), None).map(|_| ())
     }
-
 
     pub fn search(auth: &Auth, term: &str) -> Result<SearchResults> {
         let json = get(
@@ -1049,18 +1038,13 @@ fn musickit_token() -> Result<Option<String>> {
         std::env::var("APPLE_MUSIC_KEY_ID"),
         std::env::var("APPLE_MUSIC_PRIVATE_KEY_PATH"),
     ) {
-        (Ok(team_id), Ok(key_id), Ok(path)) => MusicKitConfig {
-            team_id,
-            key_id,
-            private_key_path: path.into(),
-        },
+        (Ok(team_id), Ok(key_id), Ok(path)) => MusicKitConfig { team_id, key_id, private_key_path: path.into() },
         _ => {
             let path = data_dir().join("musickit.json");
             if !path.exists() {
                 return Ok(None);
             }
-            serde_json::from_slice(&std::fs::read(&path)?)
-                .with_context(|| format!("reading {}", path.display()))?
+            serde_json::from_slice(&std::fs::read(&path)?).with_context(|| format!("reading {}", path.display()))?
         }
     };
     let pem = std::fs::read(&config.private_key_path)
@@ -1077,16 +1061,10 @@ pub fn sign_developer_token(team_id: &str, key_id: &str, p8_pem: &[u8]) -> Resul
         iat: u64,
         exp: u64,
     }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
     let mut header = Header::new(Algorithm::ES256);
     header.kid = Some(key_id.to_string());
-    let claims = Claims {
-        iss: team_id,
-        iat: now,
-        exp: now + 60 * 60 * 24 * 30,
-    };
+    let claims = Claims { iss: team_id, iat: now, exp: now + 60 * 60 * 24 * 30 };
     let key = EncodingKey::from_ec_pem(p8_pem).context("invalid MusicKit .p8 key")?;
     Ok(encode(&header, &claims, &key)?)
 }
@@ -1179,5 +1157,3 @@ mod tests {
         assert!(!results.songs.is_empty() && !results.albums.is_empty() && !results.artists.is_empty());
     }
 }
-
-

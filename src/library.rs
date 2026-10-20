@@ -21,10 +21,8 @@ pub struct Library {
 
 impl Library {
     pub fn load(path: PathBuf) -> Self {
-        let mut lib: Self = std::fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut lib: Self =
+            std::fs::read(&path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
         lib.path = path;
         lib
     }

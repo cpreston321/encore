@@ -8,22 +8,30 @@ use anyhow::{Context as _, Result, anyhow};
 
 use crate::localhost::{self, StopFlag, random_hex};
 
-const KEYCHAIN_SERVICE: &str = "GPUI Music";
+const KEYCHAIN_SERVICE: &str = "Encore";
+/// Service name used before the app was renamed; read once and migrated.
+const LEGACY_KEYCHAIN_SERVICE: &str = "GPUI Music";
 const KEYCHAIN_ACCOUNT: &str = "music-user-token";
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub fn stored_user_token() -> Option<String> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        .ok()?
-        .get_password()
-        .ok()
-        .filter(|t| !t.is_empty())
+    let read = |service| {
+        keyring::Entry::new(service, KEYCHAIN_ACCOUNT).ok()?.get_password().ok().filter(|t: &String| !t.is_empty())
+    };
+    if let Some(token) = read(KEYCHAIN_SERVICE) {
+        return Some(token);
+    }
+    let legacy = read(LEGACY_KEYCHAIN_SERVICE)?;
+    if store_user_token(&legacy).is_ok()
+        && let Ok(old) = keyring::Entry::new(LEGACY_KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+    {
+        let _ = old.delete_credential();
+    }
+    Some(legacy)
 }
 
 pub fn store_user_token(token: &str) -> Result<()> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?
-        .set_password(token)
-        .context("saving to Keychain")
+    keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?.set_password(token).context("saving to Keychain")
 }
 
 pub fn clear_user_token() {
@@ -45,16 +53,9 @@ impl SignInServer {
         let listener = TcpListener::bind("127.0.0.1:0").context("starting sign-in server")?;
         let port = listener.local_addr()?.port();
         let state = random_hex(16)?;
-        let page = PAGE
-            .replace("__DEVELOPER_TOKEN__", &serde_json::to_string(developer_token)?)
-            .replace("__STATE__", &state);
-        Ok(Self {
-            listener,
-            page,
-            state,
-            stop: localhost::stop_flag(),
-            url: format!("http://localhost:{port}/"),
-        })
+        let page =
+            PAGE.replace("__DEVELOPER_TOKEN__", &serde_json::to_string(developer_token)?).replace("__STATE__", &state);
+        Ok(Self { listener, page, state, stop: localhost::stop_flag(), url: format!("http://localhost:{port}/") })
     }
 
     /// Setting this flag ends `wait_for_token` (used when the user cancels sign-in).
@@ -179,10 +180,7 @@ mod tests {
         let forged = http(port, "POST /token?state=wrong HTTP/1.1\r\nContent-Length: 4\r\n\r\nevil");
         assert!(forged.starts_with("HTTP/1.1 404"));
 
-        let ok = http(
-            port,
-            &format!("POST /token?state={state} HTTP/1.1\r\nContent-Length: 10\r\n\r\nuser-token"),
-        );
+        let ok = http(port, &format!("POST /token?state={state} HTTP/1.1\r\nContent-Length: 10\r\n\r\nuser-token"));
         assert!(ok.starts_with("HTTP/1.1 200"));
         assert_eq!(waiter.join().unwrap().unwrap(), "user-token");
     }

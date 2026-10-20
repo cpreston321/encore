@@ -51,7 +51,8 @@ impl Presence {
 
     fn linear(&self) -> f32 {
         // With Reduce Motion, things appear and disappear without animating.
-        let t = if reduce_motion() { 1. } else { (self.at.elapsed().as_secs_f32() / self.duration.as_secs_f32()).min(1.) };
+        let t =
+            if reduce_motion() { 1. } else { (self.at.elapsed().as_secs_f32() / self.duration.as_secs_f32()).min(1.) };
         if self.open { t } else { 1. - t }
     }
 

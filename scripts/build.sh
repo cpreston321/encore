@@ -13,7 +13,7 @@ cargo build --release "$@"
 app=target/Encore.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/apple_music_gpui "$app/Contents/MacOS/Encore"
+cp target/release/encore "$app/Contents/MacOS/Encore"
 cp assets/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 cat > "$app/Contents/Info.plist" <<PLIST

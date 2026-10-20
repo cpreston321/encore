@@ -1,34 +1,28 @@
 mod anim;
 mod api;
-mod browse;
 mod app;
+mod audio;
 mod auth;
 mod chrome;
-mod hero;
 mod keys;
-mod audio;
 mod library;
 mod localhost;
 mod lyrics;
 mod media;
-mod mini;
-mod nowplaying;
-mod playlists;
 mod model;
 mod perf;
-mod progress;
 mod queue;
 mod spectrum;
 mod textfield;
 mod theme;
-mod views;
+mod ui;
 mod webplayer;
 
 use std::borrow::Cow;
 
 use gpui::{
-    App, Application, AssetSource, Bounds, Menu, MenuItem, SharedString, TitlebarOptions,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, point, prelude::*, px, size,
+    App, Application, AssetSource, Bounds, Menu, MenuItem, SharedString, TitlebarOptions, WindowBackgroundAppearance,
+    WindowBounds, WindowOptions, point, prelude::*, px, size,
 };
 
 use app::{MusicApp, NextTrack, PlayPause, PreviousTrack, Quit, ToggleQueue, VolumeDown, VolumeUp};
@@ -40,42 +34,63 @@ macro_rules! icons {
 }
 
 const ICONS: &[(&str, &[u8])] = icons![
-    "airplay", "album", "check", "chevron-down", "chevron-left", "chevron-right", "clock", "ellipsis", "heart",
-    "heart-fill", "home", "lyrics", "mic", "new", "next", "note", "open",
-    "pause", "person", "play", "play-next", "playlist", "playlists", "plus", "prev",
-    "queue", "radio", "repeat", "repeat-one", "search", "shuffle", "speaker", "speaker-loud",
-    "star-square", "xmark",
+    "airplay",
+    "album",
+    "check",
+    "chevron-down",
+    "chevron-left",
+    "chevron-right",
+    "clock",
+    "ellipsis",
+    "heart",
+    "heart-fill",
+    "home",
+    "lyrics",
+    "mic",
+    "new",
+    "next",
+    "note",
+    "open",
+    "pause",
+    "person",
+    "play",
+    "play-next",
+    "playlist",
+    "playlists",
+    "plus",
+    "prev",
+    "queue",
+    "radio",
+    "repeat",
+    "repeat-one",
+    "search",
+    "shuffle",
+    "speaker",
+    "speaker-loud",
+    "star-square",
+    "xmark",
 ];
 
 struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        Ok(ICONS
-            .iter()
-            .find(|(p, _)| *p == path)
-            .map(|(_, bytes)| Cow::Borrowed(*bytes)))
+        Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, bytes)| Cow::Borrowed(*bytes)))
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        Ok(ICONS
-            .iter()
-            .filter(|(p, _)| p.starts_with(path))
-            .map(|(p, _)| SharedString::from(*p))
-            .collect())
+        Ok(ICONS.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| SharedString::from(*p)).collect())
     }
 }
 
 fn main() {
     perf::init();
+    api::migrate_legacy_dirs();
     Application::new().with_assets(Assets).run(|cx: &mut App| {
         keys::bind(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.set_menus(vec![
-            Menu {
-                name: "Encore".into(),
-                items: vec![MenuItem::action("Quit Encore", Quit)],
-            },
+            Menu { name: "Encore".into(), items: vec![MenuItem::action("Quit Encore", Quit)] },
             Menu {
                 name: "Controls".into(),
                 items: vec![
@@ -146,7 +161,7 @@ fn main() {
                 chrome::use_tahoe_corners(window);
                 let view = cx.new(|cx| MusicApp::new(window, cx));
                 let mini_app = view.clone();
-                cx.on_action(move |_: &keys::ToggleMiniPlayer, cx| mini::toggle(mini_app.clone(), cx));
+                cx.on_action(move |_: &keys::ToggleMiniPlayer, cx| ui::mini::toggle(mini_app.clone(), cx));
                 window.focus(&view.read(cx).focus);
                 view
             },

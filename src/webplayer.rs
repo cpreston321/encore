@@ -109,15 +109,14 @@ impl WebPlayer {
         let port = listener.local_addr()?.port();
         let (server_shared, server_key, stop) = (shared.clone(), key.clone(), localhost::stop_flag());
         let server_stop = stop.clone();
-        std::thread::Builder::new()
-            .name("musickit-bridge".into())
-            .spawn(move || {
-                localhost::serve::<()>(&listener, &server_stop, |stream, req| {
-                    handle(stream, req, &server_shared, &server_key, &page).map(|()| None)
-                });
-            })?;
+        std::thread::Builder::new().name("musickit-bridge".into()).spawn(move || {
+            localhost::serve::<()>(&listener, &server_stop, |stream, req| {
+                handle(stream, req, &server_shared, &server_key, &page).map(|()| None)
+            });
+        })?;
 
-        let mtm = MainThreadMarker::new().ok_or_else(|| anyhow!("the web player must be created on the main thread"))?;
+        let mtm =
+            MainThreadMarker::new().ok_or_else(|| anyhow!("the web player must be created on the main thread"))?;
         let frame = NSRect::new(NSPoint::new(0., 0.), NSSize::new(64., 64.));
         let (window, webview) = unsafe {
             let config = WKWebViewConfiguration::new(mtm);
@@ -155,7 +154,8 @@ impl WebPlayer {
     }
 
     pub fn load(&self, song_id: &str, volume: f32) {
-        *self.shared.track.lock().unwrap() = Track { expected: Some(song_id.to_string()), started: false, paused: false };
+        *self.shared.track.lock().unwrap() =
+            Track { expected: Some(song_id.to_string()), started: false, paused: false };
         *self.shared.shown.lock().unwrap() = None;
         let seq = self.shared.load_seq.fetch_add(1, Ordering::Relaxed) + 1;
         self.send(json!({ "op": "load", "id": song_id, "volume": volume, "seq": seq }));

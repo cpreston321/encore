@@ -35,10 +35,7 @@ impl Artwork {
         if !self.0.contains("{w}x{h}bb") {
             return self.url(w.max(h));
         }
-        self.0
-            .replace("{w}x{h}bb", "{w}x{h}sr")
-            .replace("{w}", &w.to_string())
-            .replace("{h}", &h.to_string())
+        self.0.replace("{w}x{h}bb", "{w}x{h}sr").replace("{w}", &w.to_string()).replace("{h}", &h.to_string())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -132,11 +129,7 @@ impl Browse {
     /// Chart songs released in the last ~6 weeks, in chart order.
     pub fn best_new_songs(&self) -> Vec<Song> {
         let cutoff = recent_cutoff(&self.top_songs.iter().map(|s| s.release_date.as_str()).collect::<Vec<_>>());
-        self.top_songs
-            .iter()
-            .filter(|s| s.release_date.as_str() >= cutoff.as_str())
-            .cloned()
-            .collect()
+        self.top_songs.iter().filter(|s| s.release_date.as_str() >= cutoff.as_str()).cloned().collect()
     }
 
     /// Chart albums sorted newest first.
@@ -150,17 +143,22 @@ impl Browse {
 /// Six weeks before the newest date in the list, as `YYYY-MM-DD`.
 fn recent_cutoff(dates: &[&str]) -> String {
     let newest = dates.iter().max().copied().unwrap_or("");
-    let (Some(y), Some(m)) = (
-        newest.get(..4).and_then(|s| s.parse::<i32>().ok()),
-        newest.get(5..7).and_then(|s| s.parse::<i32>().ok()),
-    ) else {
+    let (Some(y), Some(m)) =
+        (newest.get(..4).and_then(|s| s.parse::<i32>().ok()), newest.get(5..7).and_then(|s| s.parse::<i32>().ok()))
+    else {
         return String::new();
     };
     let day = newest.get(8..10).unwrap_or("01");
     let (y, m) = if m > 1 { (y, m - 1) } else { (y - 1, 12) };
     // A calendar month back, then two more weeks: close enough for "new".
     let d: i32 = day.parse().unwrap_or(1);
-    let (y, m, d) = if d > 14 { (y, m, d - 14) } else if m > 1 { (y, m - 1, d + 14) } else { (y - 1, 12, d + 14) };
+    let (y, m, d) = if d > 14 {
+        (y, m, d - 14)
+    } else if m > 1 {
+        (y, m - 1, d + 14)
+    } else {
+        (y - 1, 12, d + 14)
+    };
     format!("{y:04}-{m:02}-{:02}", d.min(28))
 }
 
@@ -247,10 +245,7 @@ impl ArtistDetail {
 
     /// Splits releases the way the Music app does: full albums vs. singles and EPs.
     pub fn split_releases(&self) -> (Vec<Album>, Vec<Album>) {
-        self.albums
-            .iter()
-            .cloned()
-            .partition(|a| !(a.title.ends_with(" - Single") || a.title.ends_with(" - EP")))
+        self.albums.iter().cloned().partition(|a| !(a.title.ends_with(" - Single") || a.title.ends_with(" - EP")))
     }
 }
 

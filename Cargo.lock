@@ -89,29 +89,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "apple_music_gpui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "block2",
- "dirs 7.0.0",
- "gpui",
- "image",
- "jsonwebtoken",
- "keyring",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-media-player",
- "objc2-web-kit",
- "raw-window-handle",
- "rodio",
- "serde",
- "serde_json",
- "ureq",
-]
-
-[[package]]
 name = "ar_archive_writer"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1757,6 +1734,29 @@ dependencies = [
  "rustversion",
  "scopeguard",
  "simdutf8",
+]
+
+[[package]]
+name = "encore"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "block2",
+ "dirs 7.0.0",
+ "gpui",
+ "image",
+ "jsonwebtoken",
+ "keyring",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-media-player",
+ "objc2-web-kit",
+ "raw-window-handle",
+ "rodio",
+ "serde",
+ "serde_json",
+ "ureq",
 ]
 
 [[package]]

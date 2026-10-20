@@ -1,0 +1,792 @@
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    path::PathBuf,
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
+
+use anyhow::Result;
+use gpui::{
+    Bounds, Context, FocusHandle, KeyDownEvent, MouseButton, MouseMoveEvent, Pixels, Point, ScrollHandle, SharedString,
+    Task, Window, actions, div, point, prelude::*, px,
+};
+
+use crate::{
+    api::{self, Catalog},
+    audio::{Audio, Preview},
+    auth,
+    library::Library,
+    model::{Album, ArtistDetail, Browse, Playlist, RemoteLibrary, SearchResults, Song, Station},
+    queue::{Advance, Queue},
+    theme::Theme,
+    webplayer::WebPlayer,
+};
+
+mod account;
+mod data;
+mod media;
+mod navigation;
+mod playback;
+mod settings;
+#[cfg(any(debug_assertions, feature = "tour"))]
+mod tour;
+
+actions!(music, [PlayPause, NextTrack, PreviousTrack, VolumeUp, VolumeDown, FocusSearch, GoBack, ToggleQueue, Quit]);
+
+pub const SIDEBAR_W: f32 = 212.;
+pub const QUEUE_W: f32 = 320.;
+
+pub enum Load<T> {
+    Loading,
+    Ready(T),
+    Failed(String),
+}
+
+impl<T> Load<T> {
+    pub fn ready(&self) -> Option<&T> {
+        match self {
+            Load::Ready(t) => Some(t),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum Route {
+    Home,
+    New,
+    Radio,
+    Search,
+    RecentlyAdded,
+    Artists,
+    Albums,
+    Songs,
+    AllPlaylists,
+    Favorites,
+    Album(String),
+    Artist(String),
+    Playlist(Playlist),
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PlayState {
+    Idle,
+    Loading,
+    Playing,
+    Paused,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Account {
+    SignedOut,
+    SigningIn,
+    SignedIn,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Drag {
+    Progress,
+    Volume,
+    /// The Now Playing view's large scrub bar.
+    BigProgress,
+}
+
+pub type MenuAction = Rc<dyn Fn(&mut MusicApp, &mut Window, &mut Context<MusicApp>)>;
+
+pub struct MenuEntry {
+    pub label: SharedString,
+    pub icon: &'static str,
+    pub action: MenuAction,
+}
+
+pub struct ContextMenu {
+    pub position: Point<Pixels>,
+    pub entries: Vec<Option<MenuEntry>>,
+}
+
+pub enum ImageState {
+    Loading,
+    /// The file, and when it finished downloading (fresh images fade in).
+    Ready(Arc<std::path::Path>, std::time::Instant),
+    Failed,
+}
+
+/// An in-progress crossfade.
+struct Fade {
+    outgoing: Audio,
+    length: Duration,
+    created: std::time::Instant,
+    /// When the incoming song actually started (streams take a moment to begin).
+    started: Option<std::time::Instant>,
+    _task: Task<()>,
+}
+
+/// How early the next consecutive album track starts, to cover stream start-up time.
+const GAPLESS_LEAD: f32 = 1.2;
+
+/// Crossfade lengths offered in the Playing Next panel.
+pub const CROSSFADE_OPTIONS: [u32; 4] = [0, 3, 6, 12];
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Settings {
+    #[serde(default = "default_crossfade")]
+    crossfade_secs: u32,
+    /// Sidebar sections the user folded away.
+    #[serde(default)]
+    collapsed: Vec<String>,
+    #[serde(default)]
+    recent_searches: Vec<String>,
+}
+
+fn default_crossfade() -> u32 {
+    6
+}
+
+impl Settings {
+    fn path() -> PathBuf {
+        api::data_dir().join("settings.json")
+    }
+
+    fn load() -> Self {
+        std::fs::read(Self::path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Self {
+            crossfade_secs: default_crossfade(),
+            collapsed: Vec::new(),
+            recent_searches: Vec::new(),
+        })
+    }
+
+    fn save(&self) {
+        let _ = std::fs::create_dir_all(api::data_dir());
+        if let Ok(json) = serde_json::to_vec_pretty(self) {
+            let _ = std::fs::write(Self::path(), json);
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum NavDirection {
+    /// Sidebar jump: fade up in place.
+    Root,
+    /// Into a detail page: slide in from the right.
+    Forward,
+    /// Back: slide in from the left.
+    Back,
+}
+
+/// Transition state that outlives a single render.
+pub struct Fx {
+    pub queue: crate::anim::Presence,
+    pub account: crate::anim::Presence,
+    pub volume: crate::anim::Presence,
+    pub notice: crate::anim::Presence,
+    pub key_help: crate::anim::Presence,
+    pub now_playing: crate::anim::Presence,
+    pub palette: crate::anim::Presence,
+    pub shortcuts: crate::anim::Presence,
+    /// The last notice text, kept so the toast can fade out after it's cleared.
+    pub last_notice: String,
+    pub page_bg: crate::anim::ColorBlend,
+    pub sidebar_bg: crate::anim::ColorBlend,
+    pub pill_bg: crate::anim::ColorBlend,
+    pub hovers: HashMap<SharedString, crate::anim::Presence>,
+    pub sections: HashMap<&'static str, crate::anim::Presence>,
+}
+
+impl Fx {
+    fn new(t: &Theme) -> Self {
+        use crate::anim::{ColorBlend, Presence};
+        let quick = Duration::from_millis(180);
+        let colors = Duration::from_millis(420);
+        Self {
+            queue: Presence::new(Duration::from_millis(240)),
+            account: Presence::new(quick),
+            volume: Presence::new(quick),
+            notice: Presence::new(Duration::from_millis(220)),
+            key_help: Presence::new(quick),
+            now_playing: Presence::new(Duration::from_millis(320)),
+            palette: Presence::new(Duration::from_millis(160)),
+            shortcuts: Presence::new(quick),
+            last_notice: String::new(),
+            page_bg: ColorBlend::new(t.window, colors),
+            sidebar_bg: ColorBlend::new(t.panel, colors),
+            pill_bg: ColorBlend::new(t.pill, Duration::from_millis(600)),
+            hovers: HashMap::new(),
+            sections: HashMap::new(),
+        }
+    }
+
+    fn animating(&self) -> bool {
+        self.queue.animating()
+            || self.account.animating()
+            || self.volume.animating()
+            || self.notice.animating()
+            || self.key_help.animating()
+            || self.now_playing.animating()
+            || self.palette.animating()
+            || self.shortcuts.animating()
+            || self.page_bg.animating()
+            || self.sidebar_bg.animating()
+            || self.pill_bg.animating()
+            || self.hovers.values().any(|h| h.animating())
+            || self.sections.values().any(|s| s.animating())
+    }
+}
+
+pub struct MusicApp {
+    pub(crate) catalog: Catalog,
+    pub(crate) catalog_note: Option<String>,
+    pub(crate) browse: Load<Browse>,
+    pub(crate) albums: HashMap<String, Load<(Album, Vec<Song>)>>,
+    pub(crate) artists: HashMap<String, Load<ArtistDetail>>,
+    pub(crate) playlist_tracks: HashMap<String, Load<Option<Vec<Song>>>>,
+    /// Playlists whose tracks were requested only to build a cover mosaic.
+    requested_playlists: RefCell<std::collections::HashSet<String>>,
+    /// Artists fetched in the background (e.g. for "More by" under an album).
+    requested_artists: RefCell<std::collections::HashSet<String>>,
+    pub(crate) stations: Option<Load<Vec<Station>>>,
+    /// Name of the artist selected in the library's Artists page.
+    pub(crate) selected_library_artist: Option<String>,
+    /// Keys of descriptions expanded with MORE.
+    pub(crate) expanded_notes: std::collections::HashSet<String>,
+    pub(crate) search: crate::textfield::TextField,
+    pub(crate) palette_open: bool,
+    pub(crate) palette_index: usize,
+    pub(crate) show_shortcuts: bool,
+    pub(crate) recent_searches: Vec<String>,
+    /// Lets ↑/↓ keep the selection in view in the virtualized song lists.
+    pub(crate) song_list_scroll: gpui::UniformListScrollHandle,
+    #[allow(clippy::type_complexity)]
+    pub(crate) local_matches_cache:
+        RefCell<Option<((String, (usize, usize, usize, usize, usize)), Arc<crate::keys::LocalMatches>)>>,
+    pub(crate) forward_history: Vec<Route>,
+    pub(crate) search_results: Option<(String, Load<SearchResults>)>,
+    search_task: Option<Task<()>>,
+    pub(crate) library: Library,
+    pub(crate) account: Account,
+    pub(crate) remote: Load<RemoteLibrary>,
+    pub(crate) notice: Option<String>,
+    notice_task: Option<Task<()>>,
+    sign_in_task: Option<Task<()>>,
+    sign_in_stop: Option<crate::localhost::StopFlag>,
+    pub(crate) show_key_help: bool,
+    pub(crate) route: Route,
+    pub(crate) history: Vec<Route>,
+    /// Scroll offset of each page in `history`, restored on back.
+    scroll_history: Vec<Point<Pixels>>,
+    /// Bumped on every navigation so the page transition replays.
+    pub(crate) route_generation: usize,
+    pub(crate) nav_direction: NavDirection,
+    pub(crate) fx: RefCell<Fx>,
+    pub(crate) show_now_playing: bool,
+    artist_ids: RefCell<HashMap<String, Option<String>>>,
+    spectra: HashMap<String, Arc<crate::spectrum::Spectrum>>,
+    pub(crate) list_views: RefCell<HashMap<&'static str, crate::ui::list_tools::ListView>>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) shaped_cache:
+        RefCell<Option<((&'static str, crate::ui::list_tools::SortKey, String, usize, usize), Arc<Vec<Song>>)>>,
+    /// Songs selected with ⌘/⇧-click (empty: just `selected_song`).
+    pub(crate) multi: Vec<String>,
+    pub(crate) select_anchor: Option<usize>,
+    pub(crate) filter_focus: FocusHandle,
+    pub(crate) filter_target: &'static str,
+    pub(crate) filter_focused: bool,
+    pub(crate) personal: Option<Load<Option<crate::model::PersonalHome>>>,
+    pub(crate) new_playlist: Option<crate::ui::playlists::NewPlaylist>,
+    pub(crate) new_playlist_focus: FocusHandle,
+    pub(crate) now_playing_tab: crate::ui::now_playing::NowPlayingTab,
+    pub(crate) lyrics: HashMap<String, Load<Option<crate::lyrics::Lyrics>>>,
+    pub(crate) lyrics_scroll: ScrollHandle,
+    pub(crate) lyrics_follow: RefCell<crate::ui::now_playing::LyricsScroll>,
+    pub(crate) np_progress_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) np_scrub: Option<f32>,
+    media: RefCell<crate::media::MediaControls>,
+    #[allow(clippy::type_complexity)]
+    sorted_albums_cache: RefCell<Option<((usize, usize, usize, usize, usize), Arc<Vec<Album>>)>>,
+    #[allow(clippy::type_complexity)]
+    artist_rows_cache: RefCell<
+        Option<((usize, usize, usize, usize, usize), Arc<Vec<(String, Option<String>, crate::model::Artwork)>>)>,
+    >,
+    first_frame_logged: Cell<bool>,
+    pub(crate) queue: Queue<Song>,
+    pub(crate) state: PlayState,
+    pub(crate) playback_error: Option<String>,
+    /// Shared with the progress view, which redraws itself while playing.
+    audio: crate::ui::progress::SharedAudio,
+    pub(crate) progress: gpui::Entity<crate::ui::progress::Progress>,
+    /// Full-song players (Apple's web player), created on demand. A crossfade needs two:
+    /// one finishing the old song while the other starts the next.
+    web_players: Vec<Rc<WebPlayer>>,
+    /// The song fading out during a crossfade.
+    fade: Option<Fade>,
+    /// Crossfade length in seconds (0 = off); persisted in settings.json.
+    pub(crate) crossfade_secs: u32,
+    pub(crate) collapsed_sections: std::collections::HashSet<String>,
+    /// Set when full playback failed repeatedly; previews are used for the session.
+    full_unavailable: bool,
+    full_failures: u32,
+    /// When a full song was requested and hasn't started yet.
+    loading_since: Option<std::time::Instant>,
+    load_generation: u64,
+    pub(crate) volume: f32,
+    pub(crate) images: RefCell<HashMap<String, ImageState>>,
+    /// Average color per artwork URL, for tinting page headers. `None` while computing.
+    art_colors: RefCell<HashMap<String, Option<gpui::Hsla>>>,
+    pub(crate) menu: Option<ContextMenu>,
+    pub(crate) show_queue: bool,
+    pub(crate) show_account: bool,
+    /// Where the sidebar's account row is, so its popover can sit just above it.
+    pub(crate) account_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// When the Apple Music library last finished loading.
+    pub(crate) library_updated: Option<std::time::Instant>,
+    pub(crate) selected_song: Option<String>,
+    pub(crate) drag: Option<Drag>,
+    pub(crate) progress_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) volume_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) show_volume: bool,
+    /// The player's speaker button, which the volume popover opens above.
+    pub(crate) volume_button_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub focus: FocusHandle,
+    pub(crate) search_focus: FocusHandle,
+    pub(crate) scroll: ScrollHandle,
+    pub(crate) artist_pane_scroll: ScrollHandle,
+    pub(crate) user_name: String,
+    /// Profile photo the user chose (Apple doesn't share Apple Music profile photos).
+    pub(crate) avatar: Option<Arc<std::path::Path>>,
+    _ticker: Task<()>,
+}
+
+impl MusicApp {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.observe_window_appearance(window, |_, _, cx| cx.notify()).detach();
+
+        let ticker = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+                if this
+                    .update(cx, |this, cx| {
+                        this.tick(cx);
+                        this.media_tick(cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        let audio: crate::ui::progress::SharedAudio = Rc::default();
+        let progress_bounds: Rc<Cell<Bounds<Pixels>>> = Rc::default();
+        let app = cx.weak_entity();
+        let progress = cx.new(|cx| crate::ui::progress::Progress::new(audio.clone(), progress_bounds.clone(), app, cx));
+        crate::perf::milestone("app init start");
+        let (catalog, catalog_note) = Catalog::from_env();
+        crate::perf::milestone("catalog configured");
+        if let Some(note) = &catalog_note {
+            eprintln!("{note}");
+        }
+        let mut this = Self {
+            catalog,
+            catalog_note,
+            browse: Load::Loading,
+            albums: HashMap::new(),
+            artists: HashMap::new(),
+            playlist_tracks: HashMap::new(),
+            requested_playlists: RefCell::default(),
+            requested_artists: RefCell::default(),
+            stations: None,
+            selected_library_artist: None,
+            expanded_notes: Default::default(),
+            search: Default::default(),
+            palette_open: false,
+            palette_index: 0,
+            show_shortcuts: false,
+            recent_searches: Settings::load().recent_searches,
+            song_list_scroll: gpui::UniformListScrollHandle::new(),
+            local_matches_cache: RefCell::default(),
+            forward_history: Vec::new(),
+            search_results: None,
+            search_task: None,
+            library: Library::load(api::data_dir().join("library.json")),
+            account: Account::SignedOut,
+            remote: Load::Loading,
+            notice: None,
+            notice_task: None,
+            sign_in_task: None,
+            sign_in_stop: None,
+            show_key_help: false,
+            route: Route::New,
+            history: Vec::new(),
+            scroll_history: Vec::new(),
+            route_generation: 0,
+            nav_direction: NavDirection::Root,
+            fx: RefCell::new(Fx::new(&Theme::for_appearance(window.appearance()))),
+            first_frame_logged: Cell::new(false),
+            show_now_playing: false,
+            artist_ids: RefCell::default(),
+            spectra: HashMap::new(),
+            list_views: RefCell::default(),
+            shaped_cache: RefCell::default(),
+            multi: Vec::new(),
+            select_anchor: None,
+            filter_focus: cx.focus_handle(),
+            filter_target: "songs",
+            filter_focused: false,
+            personal: None,
+            new_playlist: None,
+            new_playlist_focus: cx.focus_handle(),
+            now_playing_tab: crate::ui::now_playing::NowPlayingTab::Lyrics,
+            lyrics: HashMap::new(),
+            lyrics_scroll: ScrollHandle::new(),
+            lyrics_follow: RefCell::default(),
+            np_progress_bounds: Rc::default(),
+            np_scrub: None,
+            media: RefCell::new(crate::media::MediaControls::new()),
+            sorted_albums_cache: RefCell::default(),
+            artist_rows_cache: RefCell::default(),
+            queue: Queue::new(),
+            state: PlayState::Idle,
+            playback_error: None,
+            audio,
+            progress,
+            web_players: Vec::new(),
+            fade: None,
+            crossfade_secs: Settings::load().crossfade_secs,
+            collapsed_sections: Settings::load().collapsed.into_iter().collect(),
+            full_unavailable: false,
+            full_failures: 0,
+            loading_since: None,
+            load_generation: 0,
+            volume: 0.8,
+            images: RefCell::default(),
+            art_colors: RefCell::default(),
+            menu: None,
+            show_queue: false,
+            show_account: false,
+            account_bounds: Rc::default(),
+            library_updated: None,
+            selected_song: None,
+            drag: None,
+            progress_bounds,
+            volume_bounds: Rc::default(),
+            show_volume: false,
+            volume_button_bounds: Rc::default(),
+            focus: cx.focus_handle(),
+            search_focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
+            artist_pane_scroll: ScrollHandle::new(),
+            user_name: user_full_name(),
+            avatar: saved_photo().map(|p| Arc::from(p.as_path())),
+            _ticker: ticker,
+        };
+        crate::perf::milestone("state built");
+        this.load_browse(cx);
+        crate::perf::milestone("charts cache read");
+        #[cfg(any(debug_assertions, feature = "tour"))]
+        if std::env::var_os("MUSIC_TOUR").is_some() {
+            this.start_tour(cx);
+        }
+        if this.catalog.is_musickit() {
+            this.restore_sign_in(cx);
+        }
+        this
+    }
+
+    pub(crate) fn show_notice(&mut self, message: String, cx: &mut Context<Self>) {
+        self.notice = Some(message);
+        self.notice_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            this.update(cx, |this, cx| {
+                this.notice = None;
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    pub(crate) fn open_url(&self, url: &str, cx: &mut Context<Self>) {
+        if !url.is_empty() {
+            cx.open_url(url);
+        }
+    }
+
+    pub(crate) fn song_menu(&self, song: &Song, position: Point<Pixels>) -> ContextMenu {
+        let entry = |label: &str, icon: &'static str, action: MenuAction| {
+            Some(MenuEntry { label: SharedString::from(label.to_string()), icon, action })
+        };
+        let s = song.clone();
+        let mut entries =
+            vec![entry("Play Next", "play-next", Rc::new(move |this, _, cx| this.play_next(s.clone(), cx)))];
+        if self.account == Account::SignedIn {
+            let (s, at) = (song.clone(), position);
+            entries.push(entry(
+                "Add to Playlist…",
+                "playlist",
+                // The picker replaces this menu at the same spot (the menu is cleared just
+                // before an entry's action runs).
+                Rc::new(move |this, _, _| this.menu = Some(this.playlist_picker(std::slice::from_ref(&s), at))),
+            ));
+        }
+        let s = song.clone();
+        let in_library = self.song_in_library(song);
+        if self.account == Account::SignedIn {
+            entries.push(if in_library {
+                entry(
+                    "In Your Library",
+                    "check",
+                    Rc::new(|this, _, cx| {
+                        this.show_notice("Apple's API can't remove songs. Remove it in the Music app.".into(), cx)
+                    }),
+                )
+            } else {
+                entry(
+                    "Add to Library",
+                    "plus",
+                    Rc::new(move |this, _, cx| {
+                        this.add_to_library("songs", s.id.clone(), format!("“{}”", s.title), cx)
+                    }),
+                )
+            });
+        } else {
+            entries.push(entry(
+                if in_library { "Remove from Library" } else { "Add to Library" },
+                if in_library { "check" } else { "plus" },
+                Rc::new(move |this, _, _| this.library.toggle_song(&s)),
+            ));
+        }
+        let s = song.clone();
+        let favorite = self.is_favorite(song);
+        entries.push(entry(
+            if favorite { "Undo Favorite" } else { "Favorite" },
+            if favorite { "heart-fill" } else { "heart" },
+            Rc::new(move |this, _, cx| this.toggle_favorite(&s, cx)),
+        ));
+        entries.push(None);
+        if let Some(album_id) = song.album_id.clone() {
+            entries.push(entry(
+                "Go to Album",
+                "album",
+                Rc::new(move |this, _, cx| this.push(Route::Album(album_id.clone()), cx)),
+            ));
+        }
+        let (artist, artist_id) = (song.artist.clone(), song.artist_id.clone());
+        entries.push(entry(
+            "Go to Artist",
+            "mic",
+            Rc::new(move |this, _, cx| this.open_artist(artist.clone(), artist_id.clone(), cx)),
+        ));
+        let url = song.url.clone();
+        entries.push(None);
+        entries.push(entry("Open in Apple Music", "open", Rc::new(move |this, _, cx| this.open_url(&url, cx))));
+        ContextMenu { position, entries }
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let k = &event.keystroke;
+        if self.filter_focus.is_focused(window) {
+            if self.filter_key(k, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if self.new_playlist_focus.is_focused(window) {
+            if self.new_playlist_key(k, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
+        if self.search_focus.is_focused(window) {
+            if self.search_key(k, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
+        let plain = !k.modifiers.modified();
+        match k.key.as_str() {
+            "escape" => {
+                self.dismiss_top(window, cx);
+            }
+            "space" if plain => self.toggle_play(cx),
+            "up" if plain => self.move_selection(-1, cx),
+            "down" if plain => self.move_selection(1, cx),
+            "enter" if plain => {
+                self.play_selection(cx);
+            }
+            // Typing "/" anywhere jumps to search, like many web apps.
+            "/" if plain => self.open_palette(window, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+}
+
+impl Render for MusicApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::perf::frame_start(self.route_name());
+        if !self.first_frame_logged.replace(true) {
+            crate::perf::milestone("first frame");
+        }
+        let t = Theme::for_appearance(window.appearance());
+        let viewport_w = f32::from(window.viewport_size().width);
+        // Pages span the whole window (art and tints run under the floating sidebar);
+        // this is the visible width beside it.
+        let content_w = viewport_w - SIDEBAR_W;
+        let search_focused = self.search_focus.is_focused(window);
+        self.filter_focused = self.filter_focus.is_focused(window);
+        {
+            let mut fx = self.fx.borrow_mut();
+            fx.queue.set(self.show_queue);
+            fx.account.set(self.show_account && self.account == Account::SignedIn);
+            fx.volume.set(self.show_volume);
+            fx.key_help.set(self.show_key_help);
+            fx.now_playing.set(self.show_now_playing && self.queue.current().is_some());
+            fx.palette.set(self.palette_open);
+            fx.shortcuts.set(self.show_shortcuts);
+            let message = self.notice.clone().or_else(|| self.playback_error.clone());
+            if let Some(m) = &message {
+                fx.last_notice = m.clone();
+            }
+            fx.notice.set(message.is_some());
+            // Forget finished hover animations so the map doesn't grow without bound.
+            fx.hovers.retain(|_, h| h.visible() || h.animating());
+        }
+        // The sidebar floats over the page, so on artwork-tinted pages it takes the page's
+        // colors (keeping the app's red for selection).
+        let sidebar_t = self.page_palette(cx).map(|p| Theme { accent: t.accent, ..t.tinted(p) }).unwrap_or(t);
+
+        div()
+            .id("root")
+            .track_focus(&self.focus)
+            .key_context("MusicApp")
+            .on_action(cx.listener(|this, _: &PlayPause, _, cx| this.toggle_play(cx)))
+            .on_action(cx.listener(|this, _: &NextTrack, _, cx| this.next(cx)))
+            .on_action(cx.listener(|this, _: &PreviousTrack, _, cx| this.previous(cx)))
+            .on_action(cx.listener(|this, _: &VolumeUp, _, cx| this.set_volume(this.volume + 0.1, cx)))
+            .on_action(cx.listener(|this, _: &VolumeDown, _, cx| this.set_volume(this.volume - 0.1, cx)))
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                this.go_root(Route::Search, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &GoBack, _, cx| this.back(cx)))
+            .on_action(cx.listener(|this, _: &ToggleQueue, _, cx| {
+                this.show_queue = !this.show_queue;
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(Self::on_key_down))
+            .map(|el| self.register_key_actions(el, cx))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    let had_overlay = this.menu.take().is_some()
+                        || std::mem::take(&mut this.show_account)
+                        || std::mem::take(&mut this.show_volume);
+                    if this.search_focus.is_focused(window) {
+                        window.focus(&this.focus);
+                    }
+                    if had_overlay {
+                        cx.notify();
+                    }
+                }),
+            )
+            .child(drag_tracker(cx.weak_entity()))
+            .size_full()
+            .flex()
+            .bg(t.window)
+            .font_family(".SystemUIFont")
+            .text_size(px(13.))
+            .text_color(t.text)
+            .child(self.render_main(&t, content_w, search_focused, cx))
+            .child(self.render_sidebar(&sidebar_t, cx))
+            .children(self.render_menu(&t, cx))
+            .children(self.render_account_popover(&t, cx))
+            .children(self.render_volume_popover(&t, cx))
+            .children(self.render_now_playing(&t, window, cx))
+            .children(self.render_palette(&t, cx))
+            .children(self.render_new_playlist(&t, cx))
+            .children(self.render_shortcuts(&t, cx))
+            // Last, so it sees transitions started anywhere above.
+            .child(gpui::canvas(|_, _, _| {}, {
+                // Keep drawing frames only while something is mid-transition.
+                let animating = self.fx.borrow().animating();
+                move |_, _, window, _| {
+                    crate::perf::frame_end();
+                    if animating {
+                        window.request_animation_frame();
+                    }
+                }
+            }))
+    }
+}
+
+/// Follows slider drags anywhere in the window. Element mouse handlers only fire while
+/// the pointer is over that element, and the player and popovers occlude the rest of the
+/// app, so a drag that strays off the slider would otherwise stop tracking.
+fn drag_tracker(app: gpui::WeakEntity<MusicApp>) -> impl IntoElement {
+    gpui::canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            let on_move = app.clone();
+            window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                if phase != gpui::DispatchPhase::Bubble {
+                    return;
+                }
+                on_move
+                    .update(cx, |this, cx| {
+                        if let Some(drag) = this.drag {
+                            if e.pressed_button == Some(MouseButton::Left) {
+                                this.drag_to(drag, e.position, cx);
+                            } else {
+                                this.end_drag(cx);
+                            }
+                        }
+                    })
+                    .ok();
+            });
+            let on_up = app.clone();
+            window.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble && e.button == MouseButton::Left {
+                    on_up.update(cx, |this, cx| this.end_drag(cx)).ok();
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_0()
+}
+
+fn remote_cache_path() -> PathBuf {
+    api::cache_dir().join("library-remote.json")
+}
+
+fn saved_photo() -> Option<PathBuf> {
+    std::fs::read_dir(api::data_dir())
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("profile-photo-")))
+        .max()
+}
+
+fn remove_old_photos(keep: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(api::data_dir()) {
+        for path in entries.flatten().map(|e| e.path()) {
+            let is_photo = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("profile-photo-"));
+            if is_photo && path != keep {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
+fn user_full_name() -> String {
+    std::process::Command::new("id")
+        .arg("-F")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("USER").ok())
+        .unwrap_or_else(|| "Listener".into())
+}

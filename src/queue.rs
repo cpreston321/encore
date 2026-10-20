@@ -30,14 +30,7 @@ impl<T: Clone> Queue<T> {
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0x9e37_79b9, |d| d.as_nanos() as u64);
-        Self {
-            source: Vec::new(),
-            order: Vec::new(),
-            cursor: None,
-            shuffle: false,
-            repeat: Repeat::Off,
-            rng: seed | 1,
-        }
+        Self { source: Vec::new(), order: Vec::new(), cursor: None, shuffle: false, repeat: Repeat::Off, rng: seed | 1 }
     }
 
     pub fn current(&self) -> Option<&T> {
@@ -86,10 +79,7 @@ impl<T: Clone> Queue<T> {
 
     pub fn up_next(&self) -> Vec<T> {
         let start = self.cursor.map_or(0, |c| c + 1);
-        self.order[start.min(self.order.len())..]
-            .iter()
-            .map(|&i| self.source[i].clone())
-            .collect()
+        self.order[start.min(self.order.len())..].iter().map(|&i| self.source[i].clone()).collect()
     }
 
     pub fn jump_ahead(&mut self, n: usize) -> bool {
@@ -141,11 +131,7 @@ impl<T: Clone> Queue<T> {
             Advance::Play
         } else {
             self.cursor = Some(0);
-            if self.repeat == Repeat::All {
-                Advance::Play
-            } else {
-                Advance::Stop
-            }
+            if self.repeat == Repeat::All { Advance::Play } else { Advance::Stop }
         }
     }
 

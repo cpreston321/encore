@@ -8,11 +8,10 @@ use objc2::{AnyThread, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::NSImage;
 use objc2_foundation::{NSDictionary, NSNumber, NSSize, NSString};
 use objc2_media_player::{
-    MPChangePlaybackPositionCommandEvent, MPMediaItemArtwork, MPMediaItemPropertyAlbumTitle,
-    MPMediaItemPropertyArtist, MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration,
-    MPMediaItemPropertyTitle, MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyElapsedPlaybackTime,
-    MPNowPlayingInfoPropertyPlaybackRate, MPNowPlayingPlaybackState, MPRemoteCommandCenter,
-    MPRemoteCommandEvent, MPRemoteCommandHandlerStatus,
+    MPChangePlaybackPositionCommandEvent, MPMediaItemArtwork, MPMediaItemPropertyAlbumTitle, MPMediaItemPropertyArtist,
+    MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle, MPNowPlayingInfoCenter,
+    MPNowPlayingInfoPropertyElapsedPlaybackTime, MPNowPlayingInfoPropertyPlaybackRate, MPNowPlayingPlaybackState,
+    MPRemoteCommandCenter, MPRemoteCommandEvent, MPRemoteCommandHandlerStatus,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -100,16 +99,17 @@ impl MediaControls {
                 MPNowPlayingInfoPropertyElapsedPlaybackTime,
                 MPNowPlayingInfoPropertyPlaybackRate,
             ];
-            let mut values: Vec<Retained<AnyObject>> = vec![
-                Retained::into_super(Retained::into_super(NSString::from_str(&now.title))),
-                Retained::into_super(Retained::into_super(NSString::from_str(&now.artist))),
-                Retained::into_super(Retained::into_super(NSString::from_str(&now.album))),
-                Retained::into_super(Retained::into_super(Retained::into_super(NSNumber::new_f64(now.duration)))),
-                Retained::into_super(Retained::into_super(Retained::into_super(NSNumber::new_f64(now.position)))),
-                Retained::into_super(Retained::into_super(Retained::into_super(NSNumber::new_f64(
-                    if now.playing { 1. } else { 0. },
-                )))),
-            ];
+            let mut values: Vec<Retained<AnyObject>> =
+                vec![
+                    Retained::into_super(Retained::into_super(NSString::from_str(&now.title))),
+                    Retained::into_super(Retained::into_super(NSString::from_str(&now.artist))),
+                    Retained::into_super(Retained::into_super(NSString::from_str(&now.album))),
+                    Retained::into_super(Retained::into_super(Retained::into_super(NSNumber::new_f64(now.duration)))),
+                    Retained::into_super(Retained::into_super(Retained::into_super(NSNumber::new_f64(now.position)))),
+                    Retained::into_super(Retained::into_super(Retained::into_super(NSNumber::new_f64(
+                        if now.playing { 1. } else { 0. },
+                    )))),
+                ];
             if let Some(path) = &now.artwork_path
                 && let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path))
             {

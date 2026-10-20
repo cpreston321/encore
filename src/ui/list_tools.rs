@@ -3,7 +3,10 @@
 
 use std::{rc::Rc, sync::Arc};
 
-use gpui::{Context, FontWeight, Keystroke, MouseButton, MouseDownEvent, Pixels, Point, SharedString, Window, div, prelude::*, px};
+use gpui::{
+    Context, FontWeight, Keystroke, MouseButton, MouseDownEvent, Pixels, Point, SharedString, Window, div, prelude::*,
+    px,
+};
 
 use crate::{
     app::{Account, ContextMenu, MenuEntry, MusicApp},
@@ -11,7 +14,7 @@ use crate::{
     model::{Album, Song},
     textfield::TextField,
     theme::Theme,
-    views::{PAD, icon},
+    ui::{PAD, icon},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -161,7 +164,7 @@ impl MusicApp {
 
     /// Songs a menu opened on `song` should act on: the whole selection if it's in it.
     pub(crate) fn menu_targets(&self, song: &Song, list: &[Song]) -> Vec<Song> {
-        if self.multi.len() > 1 && self.multi.iter().any(|m| *m == song.id) {
+        if self.multi.len() > 1 && self.multi.contains(&song.id) {
             list.iter().filter(|s| self.multi.contains(&s.id)).cloned().collect()
         } else {
             vec![song.clone()]
@@ -218,7 +221,13 @@ impl MusicApp {
     // Toolbar
 
     /// Filter field + sort menu shown above library lists.
-    pub(crate) fn list_toolbar(&self, t: &Theme, key: &'static str, options: &[SortKey], cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(crate) fn list_toolbar(
+        &self,
+        t: &Theme,
+        key: &'static str,
+        options: &[SortKey],
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let (sort, focused) = (self.list_view(key).sort, self.filter_focused && self.filter_target == key);
         let filter_text = {
             let v = self.list_view(key);
@@ -292,10 +301,12 @@ impl MusicApp {
                                     Some(MenuEntry {
                                         label: o.label().into(),
                                         icon: if o == sort { "check" } else { "note" },
-                                        action: Rc::new(move |this: &mut MusicApp, _: &mut Window, cx: &mut Context<MusicApp>| {
-                                            this.list_view(key).sort = o;
-                                            cx.notify();
-                                        }),
+                                        action: Rc::new(
+                                            move |this: &mut MusicApp, _: &mut Window, cx: &mut Context<MusicApp>| {
+                                                this.list_view(key).sort = o;
+                                                cx.notify();
+                                            },
+                                        ),
                                     })
                                 })
                                 .collect();
@@ -364,27 +375,40 @@ impl MusicApp {
         }
         entries.push(None);
         let (name, id) = (album.artist.clone(), album.artist_id.clone());
-        entries.push(entry("Go to Artist", "mic", Rc::new(move |this, _, cx| this.open_artist(name.clone(), id.clone(), cx))));
+        entries.push(entry(
+            "Go to Artist",
+            "mic",
+            Rc::new(move |this, _, cx| this.open_artist(name.clone(), id.clone(), cx)),
+        ));
         let url = album.url.clone();
         entries.push(entry("Open in Apple Music", "open", Rc::new(move |this, _, cx| this.open_url(&url, cx))));
         ContextMenu { position, entries }
     }
 
     /// Fetches an album's tracks (if needed), then runs `then` with them.
-    fn with_album_tracks(&mut self, id: String, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, Vec<Song>, &mut Context<Self>) + 'static) {
+    fn with_album_tracks(
+        &mut self,
+        id: String,
+        cx: &mut Context<Self>,
+        then: impl FnOnce(&mut Self, Vec<Song>, &mut Context<Self>) + 'static,
+    ) {
         if let Some(crate::app::Load::Ready((_, tracks))) = self.albums.get(&id) {
             let tracks = tracks.clone();
             return then(self, tracks, cx);
         }
         let key = id.clone();
-        self.fetch(cx, move |c| c.album(&id), move |this, load, cx| match load {
-            crate::app::Load::Ready((album, tracks)) => {
-                this.albums.insert(key, crate::app::Load::Ready((album, tracks.clone())));
-                then(this, tracks, cx);
-            }
-            crate::app::Load::Failed(e) => this.show_notice(format!("Couldn't load the album: {e}"), cx),
-            crate::app::Load::Loading => {}
-        });
+        self.fetch(
+            cx,
+            move |c| c.album(&id),
+            move |this, load, cx| match load {
+                crate::app::Load::Ready((album, tracks)) => {
+                    this.albums.insert(key, crate::app::Load::Ready((album, tracks.clone())));
+                    then(this, tracks, cx);
+                }
+                crate::app::Load::Failed(e) => this.show_notice(format!("Couldn't load the album: {e}"), cx),
+                crate::app::Load::Loading => {}
+            },
+        );
     }
 
     pub(crate) fn play_album_by_id(&mut self, id: String, shuffle: bool, cx: &mut Context<Self>) {
@@ -406,7 +430,8 @@ impl MusicApp {
     /// Song menu for one song, or the bulk menu when it's part of a multi-selection.
     pub(crate) fn open_song_menu(&mut self, song: &Song, list: &[Song], position: Point<Pixels>) {
         let targets = self.menu_targets(song, list);
-        self.menu = Some(if targets.len() > 1 { self.bulk_menu(targets, position) } else { self.song_menu(song, position) });
+        self.menu =
+            Some(if targets.len() > 1 { self.bulk_menu(targets, position) } else { self.song_menu(song, position) });
     }
 }
 

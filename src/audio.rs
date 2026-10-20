@@ -91,11 +91,7 @@ impl Preview {
         let mut sink = open_output()?;
         sink.log_on_drop(false);
         let player = Player::connect_new(sink.mixer());
-        Ok(Self {
-            _sink: sink,
-            player,
-            duration: None,
-        })
+        Ok(Self { _sink: sink, player, duration: None })
     }
 
     pub fn load(&mut self, path: &Path, volume: f32) -> Result<()> {
@@ -159,9 +155,7 @@ fn open_output() -> Result<MixerDeviceSink> {
             Err(e) => last_err = Some(e),
         }
     }
-    DeviceSinkBuilder::open_default_sink()
-        .or_else(|e| Err(last_err.unwrap_or(e)))
-        .context("opening audio output")
+    DeviceSinkBuilder::open_default_sink().map_err(|e| last_err.unwrap_or(e)).context("opening audio output")
 }
 
 #[cfg(test)]

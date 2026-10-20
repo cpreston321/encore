@@ -1,15 +1,15 @@
 //! Mini Player: a small floating window with the cover, and controls on hover.
 
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, Entity, FontWeight, ObjectFit, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point,
-    prelude::*, px, size, white,
+    AnyWindowHandle, App, Bounds, Context, Entity, FontWeight, ObjectFit, Subscription, TitlebarOptions, Window,
+    WindowBounds, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, size,
+    white,
 };
 
 use crate::{
     app::{MusicApp, PlayState},
     theme::Theme,
-    views::icon,
+    ui::icon,
 };
 
 pub struct MiniPlayer {
@@ -31,7 +31,11 @@ pub fn toggle(app: Entity<MusicApp>, cx: &mut App) {
     let handle = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitlebarOptions { title: Some("Encore Mini Player".into()), appears_transparent: true, traffic_light_position: Some(point(px(10.), px(10.))) }),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Encore Mini Player".into()),
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(10.), px(10.))),
+            }),
             kind: WindowKind::Floating,
             is_resizable: false,
             window_min_size: Some(size(px(300.), px(300.))),
@@ -107,13 +111,16 @@ impl Render for MiniPlayer {
                     .p_4()
                     .gap_2()
                     .when_some(song, |d, s| {
-                        d.child(div().truncate().font_weight(FontWeight::SEMIBOLD).child(s.title))
-                            .child(div().truncate().text_size(px(12.)).text_color(white().opacity(0.75)).child(s.artist))
+                        d.child(div().truncate().font_weight(FontWeight::SEMIBOLD).child(s.title)).child(
+                            div().truncate().text_size(px(12.)).text_color(white().opacity(0.75)).child(s.artist),
+                        )
                     })
                     .child(
-                        div().h(px(3.)).rounded_full().bg(white().opacity(0.25)).child(
-                            div().h_full().rounded_full().w(gpui::relative(fraction)).bg(white()),
-                        ),
+                        div()
+                            .h(px(3.))
+                            .rounded_full()
+                            .bg(white().opacity(0.25))
+                            .child(div().h_full().rounded_full().w(gpui::relative(fraction)).bg(white())),
                     )
                     .child(
                         div()
