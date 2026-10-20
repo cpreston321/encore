@@ -112,6 +112,8 @@ Apple only issues Music User Tokens through MusicKit JS's `authorize()` in a bro
 
 ## Native glue
 
+Encore builds against a vendored GPUI 0.2.2 with one patch: the display link sleeps while the window has nothing to draw ([vendor/gpui/PATCHES.md](../vendor/gpui/PATCHES.md)).
+
 GPUI doesn't cover everything a Mac app needs, so `objc2` bindings fill the gaps:
 
 - `chrome.rs` adds an empty `NSToolbar`, which gives the window Tahoe's larger corner radius.

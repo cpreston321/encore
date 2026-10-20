@@ -7,7 +7,7 @@ use std::{
 };
 
 use gpui::{
-    Bounds, Context, MouseButton, MouseDownEvent, Pixels, SharedString, Task, WeakEntity, Window, div, prelude::*, px,
+    Bounds, Context, MouseButton, MouseDownEvent, Pixels, SharedString, WeakEntity, Window, div, prelude::*, px,
     relative,
 };
 
@@ -42,7 +42,6 @@ impl HoverAnim {
 
 /// How often to check whether the bar has visibly moved.
 const FRAME: Duration = Duration::from_millis(33);
-const IDLE_CHECK: Duration = Duration::from_millis(250);
 
 pub struct Progress {
     audio: SharedAudio,
@@ -60,32 +59,11 @@ pub struct Progress {
     /// Fill length last drawn, in half points.
     drawn_step: Cell<i64>,
     app: WeakEntity<MusicApp>,
-    _ticker: Task<()>,
+    ticking: bool,
 }
 
 impl Progress {
-    pub fn new(
-        audio: SharedAudio,
-        bounds: Rc<Cell<Bounds<Pixels>>>,
-        app: WeakEntity<MusicApp>,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let ticker = cx.spawn(async move |this, cx| {
-            let mut wait = FRAME;
-            loop {
-                cx.background_executor().timer(wait).await;
-                let Ok(playing) = this.update(cx, |this, cx| {
-                    if this.needs_redraw() {
-                        cx.notify();
-                    }
-                    this.audio.borrow().as_ref().is_some_and(Audio::is_playing)
-                }) else {
-                    break;
-                };
-                // Paused or stopped, check rarely so an idle app stays asleep.
-                wait = if playing { FRAME } else { IDLE_CHECK };
-            }
-        });
+    pub fn new(audio: SharedAudio, bounds: Rc<Cell<Bounds<Pixels>>>, app: WeakEntity<MusicApp>) -> Self {
         let white = |a: f32| gpui::Hsla { h: 0., s: 0., l: 1., a };
         Self {
             audio,
@@ -98,8 +76,39 @@ impl Progress {
             bounds,
             drawn_step: Cell::new(-1),
             app,
-            _ticker: ticker,
+            ticking: false,
         }
+    }
+
+    /// Watches the bar while a song plays; stops by itself when playback does, so a paused
+    /// app has no timer waking it. The app's playback tick restarts it.
+    pub fn ensure_ticker(&mut self, cx: &mut Context<Self>) {
+        if self.ticking || !self.playing() {
+            return;
+        }
+        self.ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(FRAME).await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        if this.needs_redraw() {
+                            cx.notify();
+                        }
+                        this.ticking = this.playing();
+                        this.ticking
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn playing(&self) -> bool {
+        self.audio.borrow().as_ref().is_some_and(Audio::is_playing)
     }
 
     /// A notify here re-renders the whole window (GPUI marks every ancestor view dirty), so

@@ -17,7 +17,7 @@ Apple M4 Max, 64 GB, macOS 26.5.2 · Encore 0.1.0 · Music 1.6.5 · 2026-10-20
 How each number is measured:
 - **Memory and CPU** cover the app plus every helper process macOS holds it responsible for, the same grouping Activity Monitor uses. For Encore, that includes WebKit's content, network and GPU processes, which run MusicKit JS. For Music, it includes its XPC services.
 - **CPU** is the share of one core, so 100% means one core fully busy.
-- **Idle** means 20 seconds after launch, on the page the app opened to. At that point Encore may still be loading the library and artwork; measured alone after it settles, Encore idles at about 0.6%. The rest of that idle time is GPUI's display link, which wakes on every vsync.
+- **Idle** means 20 seconds after launch, on the page the app opened to. At that point Encore may still be loading the library and artwork.
 - **Size on disk** is just the app bundle. Music also relies on system frameworks that aren't counted.
 
 ## Frame rate
@@ -34,6 +34,10 @@ The built-in Liquid Retina XDR display refreshes at up to 120 Hz, which leaves 8
 | Playlist | 120 fps | 4.3 ms | 7.6 ms |
 
 A few frames on the artist and playlist pages go over budget, about 3% of them. Those are most likely moments when newly downloaded artwork arrives mid-scroll and redraws the whole window. Apple's Music app doesn't expose frame timings, so it has no column here.
+
+## Idle
+
+GPUI keeps the macOS display link running for as long as a window is visible, which wakes the app 120 times a second even when nothing changes. Encore carries a small patch to GPUI ([vendor/gpui/PATCHES.md](../vendor/gpui/PATCHES.md)) that lets the link sleep until something needs drawing. Encore's own timers also run only while a song is playing. Measured on its own after settling, Encore's idle CPU went from **0.64%** to **0.02%**, against Music's 0.2%. The table above was recorded before this change.
 
 ## What made the difference
 

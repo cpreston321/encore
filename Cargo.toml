@@ -15,6 +15,7 @@ publish = false
 anyhow = "1.0.104"
 block2 = "0.6"
 dirs = "7.0.0"
+futures = "0.3"
 gpui = "0.2.2"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }
@@ -33,3 +34,8 @@ ureq = { version = "3", features = ["json"] }
 [features]
 # Debug-only page tour (ENCORE_TOUR=1), also available in optimized builds for profiling.
 tour = []
+
+# GPUI 0.2.2 with one change: the macOS display link sleeps while the window has nothing to
+# draw (see vendor/gpui/PATCHES.md).
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }

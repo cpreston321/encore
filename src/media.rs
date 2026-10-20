@@ -1,9 +1,8 @@
 //! macOS media integration: the keyboard's media keys, headphone buttons and Control
 //! Center's Now Playing widget, via MediaPlayer's remote command and now-playing APIs.
 
-use std::sync::mpsc::{Receiver, Sender, channel};
-
 use block2::RcBlock;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use objc2::{AnyThread, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::NSImage;
 use objc2_foundation::{NSDictionary, NSNumber, NSSize, NSString};
@@ -25,7 +24,8 @@ pub enum Command {
 }
 
 pub struct MediaControls {
-    rx: Receiver<Command>,
+    /// Taken by the app, which awaits commands instead of polling for them.
+    commands: Option<UnboundedReceiver<Command>>,
     // The command center keeps targets alive as long as these tokens exist.
     _targets: Vec<Retained<AnyObject>>,
     last_key: Option<(String, bool, i64)>,
@@ -33,14 +33,14 @@ pub struct MediaControls {
 
 impl MediaControls {
     pub fn new() -> Self {
-        let (tx, rx) = channel();
+        let (tx, rx) = unbounded();
         let mut targets = Vec::new();
         unsafe {
             let center = MPRemoteCommandCenter::sharedCommandCenter();
-            let simple = |tx: &Sender<Command>, cmd: Command| {
+            let simple = |tx: &UnboundedSender<Command>, cmd: Command| {
                 let tx = tx.clone();
                 RcBlock::new(move |_: std::ptr::NonNull<MPRemoteCommandEvent>| {
-                    let _ = tx.send(cmd);
+                    let _ = tx.unbounded_send(cmd);
                     MPRemoteCommandHandlerStatus::Success
                 })
             };
@@ -60,16 +60,16 @@ impl MediaControls {
             targets.push(seek.addTargetWithHandler(&RcBlock::new(
                 move |event: std::ptr::NonNull<MPRemoteCommandEvent>| {
                     let event = event.cast::<MPChangePlaybackPositionCommandEvent>();
-                    let _ = seek_tx.send(Command::Seek(event.as_ref().positionTime()));
+                    let _ = seek_tx.unbounded_send(Command::Seek(event.as_ref().positionTime()));
                     MPRemoteCommandHandlerStatus::Success
                 },
             )));
         }
-        Self { rx, _targets: targets, last_key: None }
+        Self { commands: Some(rx), _targets: targets, last_key: None }
     }
 
-    pub fn poll(&self) -> Vec<Command> {
-        self.rx.try_iter().collect()
+    pub fn take_commands(&mut self) -> Option<UnboundedReceiver<Command>> {
+        self.commands.take()
     }
 
     /// Publishes what's playing. Cheap to call every tick: it only touches the system when

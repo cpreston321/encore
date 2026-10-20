@@ -367,32 +367,18 @@ pub struct MusicApp {
     /// Profile photo the user chose (Apple doesn't share Apple Music profile photos).
     pub(crate) avatar: Option<Arc<std::path::Path>>,
     pub(crate) regions: Option<crate::ui::regions::Regions>,
-    _ticker: Task<()>,
+    /// The playback tick is running (see `ensure_ticker`).
+    pub(crate) ticking: bool,
 }
 
 impl MusicApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe_window_appearance(window, |_, _, cx| cx.notify()).detach();
 
-        let ticker = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(Duration::from_millis(200)).await;
-                if this
-                    .update(cx, |this, cx| {
-                        this.tick(cx);
-                        this.media_tick(cx);
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-
         let audio: crate::ui::progress::SharedAudio = Rc::default();
         let progress_bounds: Rc<Cell<Bounds<Pixels>>> = Rc::default();
         let app = cx.weak_entity();
-        let progress = cx.new(|cx| crate::ui::progress::Progress::new(audio.clone(), progress_bounds.clone(), app, cx));
+        let progress = cx.new(|_| crate::ui::progress::Progress::new(audio.clone(), progress_bounds.clone(), app));
         crate::perf::milestone("app init start");
         let (catalog, catalog_note) = Catalog::from_env();
         crate::perf::milestone("catalog configured");
@@ -494,9 +480,20 @@ impl MusicApp {
             user_name: user_full_name(),
             avatar: saved_photo().map(|p| Arc::from(p.as_path())),
             regions: None,
-            _ticker: ticker,
+            ticking: false,
         };
         crate::perf::milestone("state built");
+        if let Some(mut commands) = this.media.borrow_mut().take_commands() {
+            cx.spawn(async move |this, cx| {
+                use futures::StreamExt as _;
+                while let Some(command) = commands.next().await {
+                    if this.update(cx, |this, cx| this.handle_media_command(command, cx)).is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
         this.load_browse(cx);
         crate::perf::milestone("charts cache read");
         #[cfg(any(debug_assertions, feature = "tour"))]

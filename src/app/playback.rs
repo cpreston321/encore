@@ -49,6 +49,7 @@ impl MusicApp {
             player.load(&song.id, self.start_volume());
             self.state = PlayState::Loading;
             self.loading_since = Some(std::time::Instant::now());
+            self.ensure_ticker(cx);
             cx.notify();
             return;
         }
@@ -106,6 +107,7 @@ impl MusicApp {
                     this.playback_error = Some(format!("Couldn't play preview: {e:#}"));
                 } else {
                     this.state = PlayState::Playing;
+                    this.ensure_ticker(cx);
                 }
                 cx.notify();
             })
@@ -125,25 +127,27 @@ impl MusicApp {
         }
     }
 
-    /// Handles media keys / Control Center commands and keeps Now Playing current.
-    pub(crate) fn media_tick(&mut self, cx: &mut Context<Self>) {
-        let commands = self.media.borrow().poll();
-        for command in commands {
-            use crate::media::Command;
-            match command {
-                Command::Toggle => self.toggle_play(cx),
-                Command::Play if self.state != PlayState::Playing => self.toggle_play(cx),
-                Command::Pause if self.state == PlayState::Playing => self.toggle_play(cx),
-                Command::Next => self.next(cx),
-                Command::Previous => self.previous(cx),
-                Command::Seek(t) => {
-                    if let Some(audio) = self.audio.borrow().as_ref() {
-                        audio.seek(t as f32);
-                    }
+    /// Media keys, headphone buttons and Control Center.
+    pub(crate) fn handle_media_command(&mut self, command: crate::media::Command, cx: &mut Context<Self>) {
+        use crate::media::Command;
+        match command {
+            Command::Toggle => self.toggle_play(cx),
+            Command::Play if self.state != PlayState::Playing => self.toggle_play(cx),
+            Command::Pause if self.state == PlayState::Playing => self.toggle_play(cx),
+            Command::Next => self.next(cx),
+            Command::Previous => self.previous(cx),
+            Command::Seek(t) => {
+                if let Some(audio) = self.audio.borrow().as_ref() {
+                    audio.seek(t as f32);
                 }
-                _ => {}
             }
+            _ => {}
         }
+        self.update_now_playing(cx);
+    }
+
+    /// Keeps Control Center's Now Playing current.
+    pub(crate) fn update_now_playing(&mut self, cx: &mut Context<Self>) {
         let now = self.queue.current().filter(|_| self.state != PlayState::Idle).map(|song| {
             let artwork_path = self.image(&song.artwork.url(600), cx).map(|p| p.to_string_lossy().into_owned());
             crate::media::NowPlaying {
@@ -184,6 +188,37 @@ impl MusicApp {
             .ok();
         })
         .detach();
+    }
+
+    /// Starts the playback tick if something is playing or loading. It stops by itself once
+    /// nothing is, so a paused app has no timers waking it.
+    pub(crate) fn ensure_ticker(&mut self, cx: &mut Context<Self>) {
+        if self.ticking || !self.needs_tick() {
+            return;
+        }
+        self.ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+                let keep_going = this
+                    .update(cx, |this, cx| {
+                        this.tick(cx);
+                        this.update_now_playing(cx);
+                        this.progress.update(cx, |p, cx| p.ensure_ticker(cx));
+                        this.ticking = this.needs_tick();
+                        this.ticking
+                    })
+                    .unwrap_or(false);
+                if !keep_going {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn needs_tick(&self) -> bool {
+        matches!(self.state, PlayState::Playing | PlayState::Loading) || self.fade.is_some()
     }
 
     pub(crate) fn tick(&mut self, cx: &mut Context<Self>) {
@@ -262,6 +297,7 @@ impl MusicApp {
                     audio.play();
                 }
                 self.state = PlayState::Playing;
+                self.ensure_ticker(cx);
             }
             PlayState::Paused | PlayState::Idle => {
                 if self.queue.current().is_some() {
