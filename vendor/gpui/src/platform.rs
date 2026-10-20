@@ -499,6 +499,12 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn draw(&self, scene: &Scene);
     fn completed_frame(&self) {}
+    /// Stops frame requests while the window has nothing to draw, until the callback from
+    /// `frame_request_waker` runs. Platforms without this keep requesting every frame.
+    fn pause_frame_requests(&self) {}
+    fn frame_request_waker(&self) -> Option<Rc<dyn Fn()>> {
+        None
+    }
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
 
     // macOS specific methods

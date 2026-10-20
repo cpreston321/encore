@@ -392,6 +392,7 @@ struct MacWindowState {
     native_view: NonNull<Object>,
     blurred_view: Option<id>,
     display_link: Option<DisplayLink>,
+    frames_paused: bool,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> crate::DispatchEventResult>>,
@@ -494,7 +495,32 @@ impl MacWindowState {
     }
 
     fn stop_display_link(&mut self) {
-        self.display_link = None;
+        if let Some(mut display_link) = self.display_link.take() {
+            // Dropping stops the link again; a paused one is resumed first so its dispatch
+            // source isn't suspended twice.
+            if self.frames_paused {
+                display_link.start().log_err();
+            }
+        }
+        self.frames_paused = false;
+    }
+
+    fn pause_frame_requests(&mut self) {
+        if !self.frames_paused
+            && let Some(display_link) = self.display_link.as_mut()
+        {
+            display_link.stop().log_err();
+            self.frames_paused = true;
+        }
+    }
+
+    fn resume_frame_requests(&mut self) {
+        if self.frames_paused
+            && let Some(display_link) = self.display_link.as_mut()
+        {
+            display_link.start().log_err();
+        }
+        self.frames_paused = false;
     }
 
     fn is_maximized(&self) -> bool {
@@ -689,6 +715,7 @@ impl MacWindow {
                 native_view: NonNull::new_unchecked(native_view),
                 blurred_view: None,
                 display_link: None,
+                frames_paused: false,
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
@@ -1480,6 +1507,37 @@ impl PlatformWindow for MacWindow {
 
     fn gpu_specs(&self) -> Option<crate::GpuSpecs> {
         None
+    }
+
+    fn pause_frame_requests(&self) {
+        self.0.lock().pause_frame_requests();
+    }
+
+    fn frame_request_waker(&self) -> Option<std::rc::Rc<dyn Fn()>> {
+        fn resume(state: &std::sync::Weak<Mutex<MacWindowState>>) -> bool {
+            let Some(state) = state.upgrade() else {
+                return true;
+            };
+            let Some(mut lock) = state.try_lock() else {
+                return false;
+            };
+            lock.resume_frame_requests();
+            true
+        }
+        let state = Arc::downgrade(&self.0);
+        let executor = self.0.lock().executor.clone();
+        Some(std::rc::Rc::new(move || {
+            // GPUI never runs with this lock held, but if AppKit is mid-callback, retry on
+            // the main thread rather than risk a frame that never comes.
+            if !resume(&state) {
+                let state = state.clone();
+                executor
+                    .spawn(async move {
+                        resume(&state);
+                    })
+                    .detach();
+            }
+        }))
     }
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {
