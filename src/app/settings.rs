@@ -9,6 +9,7 @@ impl MusicApp {
             collapsed: self.collapsed_sections.iter().cloned().collect(),
             recent_searches: self.recent_searches.clone(),
             native_volume: self.native_volume_allowed,
+            animate_artwork: self.animate_artwork,
         }
         .save();
     }
@@ -31,6 +32,21 @@ impl MusicApp {
         });
         p.set(open);
         p.value()
+    }
+
+    pub(crate) fn toggle_animate_artwork(&mut self, cx: &mut Context<Self>) {
+        self.animate_artwork = !self.animate_artwork;
+        self.save_settings();
+        let message = if self.animate_artwork {
+            if crate::anim::reduce_motion() {
+                "Artwork will animate when Reduce Motion is off"
+            } else {
+                "Artwork animates"
+            }
+        } else {
+            "Artwork stays still"
+        };
+        self.show_notice(message.into(), cx);
     }
 
     pub(crate) fn set_crossfade(&mut self, secs: u32, cx: &mut Context<Self>) {

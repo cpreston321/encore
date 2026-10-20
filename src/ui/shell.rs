@@ -364,6 +364,16 @@ impl MusicApp {
             )))
             .child(
                 action(
+                    "account-animate",
+                    if self.animate_artwork { "check" } else { "album" },
+                    "Animate Artwork",
+                    Some(if self.animate_artwork { "On: covers slowly drift" } else { "Off" }.into()),
+                    t.text,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_animate_artwork(cx))),
+            )
+            .child(
+                action(
                     "account-settings",
                     "open",
                     "Apple Music Account",

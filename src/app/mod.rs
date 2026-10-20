@@ -143,6 +143,9 @@ struct Settings {
     /// System Audio Recording permission).
     #[serde(default)]
     native_volume: bool,
+    /// View > Animate Artwork: covers and headers slowly drift and zoom.
+    #[serde(default)]
+    animate_artwork: bool,
 }
 
 fn default_crossfade() -> u32 {
@@ -160,6 +163,7 @@ impl Settings {
             collapsed: Vec::new(),
             recent_searches: Vec::new(),
             native_volume: false,
+            animate_artwork: false,
         })
     }
 
@@ -198,6 +202,10 @@ pub struct Fx {
     pub pill_bg: crate::anim::ColorBlend,
     pub hovers: HashMap<SharedString, crate::anim::Presence>,
     pub sections: HashMap<&'static str, crate::anim::Presence>,
+    /// Animated artwork was drawn this frame, by the page region or by the root view (Now
+    /// Playing); each schedules its own next frame.
+    pub motion_page: bool,
+    pub motion_root: bool,
 }
 
 impl Fx {
@@ -220,6 +228,8 @@ impl Fx {
             pill_bg: ColorBlend::new(t.pill, Duration::from_millis(600)),
             hovers: HashMap::new(),
             sections: HashMap::new(),
+            motion_page: false,
+            motion_root: false,
         }
     }
 
@@ -341,6 +351,11 @@ pub struct MusicApp {
     /// The native player can't work here (macOS 13, no app bundle, access denied).
     native_unavailable: bool,
     pub(crate) native_volume_allowed: bool,
+    pub(crate) animate_artwork: bool,
+    /// The window is focused; artwork only animates then.
+    pub(crate) window_active: Cell<bool>,
+    pub(crate) motion_epoch: std::time::Instant,
+    motion_task: Option<Task<()>>,
     pub(crate) session_saved_at: Option<std::time::Instant>,
     /// A restored session's song and position, applied when that song starts playing.
     pub(crate) resume_at: Option<(String, f32)>,
@@ -469,6 +484,10 @@ impl MusicApp {
             native_player: None,
             native_unavailable: false,
             native_volume_allowed: Settings::load().native_volume,
+            animate_artwork: Settings::load().animate_artwork,
+            window_active: Cell::new(true),
+            motion_epoch: std::time::Instant::now(),
+            motion_task: None,
             session_saved_at: None,
             resume_at: None,
             fade: None,
@@ -687,8 +706,13 @@ impl Render for MusicApp {
         }
         let regions = self.regions.get_or_insert_with(|| crate::ui::regions::Regions::new(cx)).views();
         let key_help = self.fx.borrow().key_help;
+        self.window_active.set(window.is_window_active());
+        self.fx.borrow_mut().motion_root = false;
+        // Under a fully open Now Playing nothing else shows, so the rest isn't drawn at all.
+        let now_playing = self.fx.borrow().now_playing;
+        let covered = now_playing.value() >= 1. && !now_playing.animating();
 
-        div()
+        let root = div()
             .id("root")
             .track_focus(&self.focus)
             .key_context("MusicApp")
@@ -701,6 +725,9 @@ impl Render for MusicApp {
                 this.go_root(Route::Search, window, cx);
             }))
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.back(cx)))
+            .on_action(
+                cx.listener(|this, _: &crate::keys::ToggleAnimatedArtwork, _, cx| this.toggle_animate_artwork(cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleQueue, _, cx| {
                 this.show_queue = !this.show_queue;
                 cx.notify();
@@ -728,7 +755,7 @@ impl Render for MusicApp {
             .font_family(".SystemUIFont")
             .text_size(px(13.))
             .text_color(t.text)
-            .children(regions)
+            .when(!covered, |d| d.children(regions))
             .when(key_help.visible(), |d| d.child(self.render_key_help(&t, cx).opacity(key_help.value())))
             .children(self.render_menu(&t, cx))
             .children(self.render_account_popover(&t, cx))
@@ -747,9 +774,24 @@ impl Render for MusicApp {
                         window.request_animation_frame();
                     }
                 }
-            }))
+            }));
+        if self.fx.borrow().motion_root && self.motion_task.is_none() {
+            self.motion_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(MOTION_FRAME).await;
+                this.update(cx, |this, cx| {
+                    this.motion_task = None;
+                    cx.notify();
+                })
+                .ok();
+            }));
+        }
+        root
     }
 }
+
+/// Animated artwork moves a fraction of a point per frame, so it redraws at 10 fps rather
+/// than the display's rate.
+pub(crate) const MOTION_FRAME: Duration = Duration::from_millis(100);
 
 /// Follows slider drags anywhere in the window. Element mouse handlers only fire while
 /// the pointer is over that element, and the player and popovers occlude the rest of the

@@ -115,7 +115,8 @@ impl MusicApp {
         let toggle = |on: bool| if on { accent } else { white_a(0.7) };
 
         let backdrop = self.cached_image(&song.artwork.url(24)).or_else(|| self.image(&song.artwork.url(24), cx));
-        let artwork = self.art(&song.artwork, art_size, 14., t, cx);
+        let crop = self.artwork_motion(&song.artwork.url(1), 0.06, true);
+        let artwork = self.art_box_cropped(&song.artwork, art_size, art_size, 14., t, crop, cx);
         let (artist, artist_id) = (song.artist.clone(), song.artist_id.clone());
 
         let left = div()
@@ -295,8 +296,15 @@ impl MusicApp {
                 .font_family(".SystemUIFont")
                 .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                 .children(backdrop.map(|path| {
+                    let crop = self.artwork_motion(&song.artwork.url(24), 0.35, true);
                     div().absolute().inset_0().opacity(0.55).child(
-                        img(path).min_w(px(vw)).min_h(px(vh)).max_w(px(vw)).max_h(px(vh)).object_fit(ObjectFit::Cover),
+                        img(path)
+                            .min_w(px(vw))
+                            .min_h(px(vh))
+                            .max_w(px(vw))
+                            .max_h(px(vh))
+                            .object_fit(ObjectFit::Cover)
+                            .when_some(crop, |img, crop| img.texture_crop(crop)),
                     )
                 }))
                 .child(div().absolute().inset_0().bg(linear_gradient(

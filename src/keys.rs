@@ -15,6 +15,7 @@ actions!(
     music_keys,
     [
         GoForward,
+        ToggleAnimatedArtwork,
         ShowNowPlaying,
         RefreshLibrary,
         ShowShortcuts,

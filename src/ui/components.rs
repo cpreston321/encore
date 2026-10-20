@@ -166,7 +166,48 @@ impl MusicApp {
         t: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let want = (w.max(h) * 2.) as u32;
+        self.art_box_cropped(artwork, w, h, radius, t, None, cx)
+    }
+
+    /// Artwork that slowly drifts while Animate Artwork is on, for hero cards and headers.
+    pub(crate) fn living_art_box(
+        &self,
+        artwork: &Artwork,
+        w: f32,
+        h: f32,
+        radius: f32,
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let crop = self.artwork_motion(&artwork.url(1), 0.1, false);
+        self.art_box_cropped(artwork, w, h, radius, t, crop, cx)
+    }
+
+    pub(crate) fn living_art(
+        &self,
+        artwork: &Artwork,
+        size: f32,
+        radius: f32,
+        t: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.living_art_box(artwork, size, size, radius, t, cx)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn art_box_cropped(
+        &self,
+        artwork: &Artwork,
+        w: f32,
+        h: f32,
+        radius: f32,
+        t: &Theme,
+        crop: Option<gpui::Bounds<f32>>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Zoomed-in artwork needs more pixels to stay sharp.
+        let zoom = crop.map_or(1., |c| 1. / c.size.width.min(c.size.height));
+        let want = (w.max(h) * 2. * zoom) as u32;
         let px_size = [120, 240, 400, 600, 1000, 1600, 2400].into_iter().find(|&s| s >= want).unwrap_or(2400);
         // Non-square frames get a server-side crop: "cover" scaling would draw past the
         // frame, and the image's rounded corners would land outside the visible area.
@@ -196,7 +237,8 @@ impl MusicApp {
                             .min_h(px(h))
                             .max_h(px(h))
                             .rounded(px(radius))
-                            .object_fit(ObjectFit::Cover),
+                            .object_fit(ObjectFit::Cover)
+                            .when_some(crop, |img, crop| img.texture_crop(crop)),
                     );
                 if self.image_is_fresh(&url) {
                     frame
@@ -261,7 +303,7 @@ impl MusicApp {
             .cursor_pointer()
             .shadow_md()
             .on_click(cx.listener(move |this, _, _, cx| this.push(Route::Album(id.clone()), cx)))
-            .child(self.art_box(&album.artwork, w, h, 12., t, cx))
+            .child(self.living_art_box(&album.artwork, w, h, 12., t, cx))
             .child(div().absolute().left_0().right_0().bottom_0().h(relative(0.65)).rounded_b(px(12.)).bg(
                 linear_gradient(
                     180.,

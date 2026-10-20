@@ -120,6 +120,8 @@ fn main() {
                     MenuItem::separator(),
                     MenuItem::action("Quick Search", keys::QuickSearch),
                     MenuItem::action("Refresh Library", keys::RefreshLibrary),
+                    MenuItem::separator(),
+                    MenuItem::action("Animate Artwork", keys::ToggleAnimatedArtwork),
                 ],
             },
             Menu {

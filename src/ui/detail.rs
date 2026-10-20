@@ -125,9 +125,16 @@ impl MusicApp {
         let size = [600, 1000, 1600, 2400].into_iter().find(|&s| s >= want).unwrap_or(2400);
         let ph = (size as f32 * h / w).round() as u32;
         let url = if (w - h).abs() > 1. { artwork.url_cropped(size, ph.max(1)) } else { artwork.url(size) };
-        let image = self
-            .image(&url, cx)
-            .map(|path| img(path).min_w(px(w)).max_w(px(w)).min_h(px(h)).max_h(px(h)).object_fit(ObjectFit::Cover));
+        let crop = self.artwork_motion(&artwork.url(1), 0.08, false);
+        let image = self.image(&url, cx).map(|path| {
+            img(path)
+                .min_w(px(w))
+                .max_w(px(w))
+                .min_h(px(h))
+                .max_h(px(h))
+                .object_fit(ObjectFit::Cover)
+                .when_some(crop, |img, crop| img.texture_crop(crop))
+        });
         div().absolute().left_0().top(px(scroll * rate)).w(px(w)).h(px(h)).children(image).into_any_element()
     }
 
@@ -142,6 +149,8 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let path = self.image(&artwork.url(24), cx)?;
+        // The wash is blurry, so it can move further than a cover without looking busy.
+        let crop = self.artwork_motion(&artwork.url(24), 0.35, false);
         Some(
             div()
                 .absolute()
@@ -150,7 +159,15 @@ impl MusicApp {
                 .w(px(w))
                 .h(px(h))
                 .opacity(0.45)
-                .child(img(path).min_w(px(w)).max_w(px(w)).min_h(px(h)).max_h(px(h)).object_fit(ObjectFit::Cover))
+                .child(
+                    img(path)
+                        .min_w(px(w))
+                        .max_w(px(w))
+                        .min_h(px(h))
+                        .max_h(px(h))
+                        .object_fit(ObjectFit::Cover)
+                        .when_some(crop, |img, crop| img.texture_crop(crop)),
+                )
                 .into_any_element(),
         )
     }
@@ -676,7 +693,7 @@ impl MusicApp {
             .child(self.cover_header(
                 t,
                 &album.artwork,
-                move |size, cx| self.art(&artwork, size, 10., t, cx),
+                move |size, cx| self.living_art(&artwork, size, 10., t, cx),
                 album.title.clone(),
                 Some((album.artist.clone(), subtitle)),
                 meta,
@@ -813,7 +830,13 @@ impl MusicApp {
             .child(self.cover_header(
                 t,
                 &tint_art,
-                move |size, cx| self.playlist_art(&for_cover, size, 10., t, cx),
+                move |size, cx| {
+                    if for_cover.artwork.is_empty() {
+                        self.playlist_art(&for_cover, size, 10., t, cx)
+                    } else {
+                        self.living_art(&for_cover.artwork, size, 10., t, cx)
+                    }
+                },
                 playlist.name.clone(),
                 curator,
                 meta,
