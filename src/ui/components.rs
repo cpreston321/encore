@@ -166,7 +166,7 @@ impl MusicApp {
         t: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.art_box_cropped(artwork, w, h, radius, t, None, cx)
+        self.art_box_moving(artwork, w, h, radius, t, None, cx)
     }
 
     /// Artwork that slowly drifts while Animate Artwork is on, for hero cards and headers.
@@ -179,8 +179,8 @@ impl MusicApp {
         t: &Theme,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let crop = self.artwork_motion(&artwork.url(1), 0.1, false);
-        self.art_box_cropped(artwork, w, h, radius, t, crop, cx)
+        let motion = self.artwork_motion(&artwork.url(1), 0.1);
+        self.art_box_moving(artwork, w, h, radius, t, motion, cx)
     }
 
     pub(crate) fn living_art(
@@ -195,18 +195,18 @@ impl MusicApp {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn art_box_cropped(
+    pub(crate) fn art_box_moving(
         &self,
         artwork: &Artwork,
         w: f32,
         h: f32,
         radius: f32,
         t: &Theme,
-        crop: Option<gpui::Bounds<f32>>,
+        motion: Option<(f32, f32)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Zoomed-in artwork needs more pixels to stay sharp.
-        let zoom = crop.map_or(1., |c| 1. / c.size.width.min(c.size.height));
+        let zoom = motion.map_or(1., |(_, strength)| 1. + strength);
         let want = (w.max(h) * 2. * zoom) as u32;
         let px_size = [120, 240, 400, 600, 1000, 1600, 2400].into_iter().find(|&s| s >= want).unwrap_or(2400);
         // Non-square frames get a server-side crop: "cover" scaling would draw past the
@@ -238,7 +238,7 @@ impl MusicApp {
                             .max_h(px(h))
                             .rounded(px(radius))
                             .object_fit(ObjectFit::Cover)
-                            .when_some(crop, |img, crop| img.texture_crop(crop)),
+                            .when_some(motion, |img, (phase, strength)| img.motion(phase, strength)),
                     );
                 if self.image_is_fresh(&url) {
                     frame

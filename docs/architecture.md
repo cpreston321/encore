@@ -117,6 +117,7 @@ Apple only issues Music User Tokens through MusicKit JS's `authorize()` in a bro
 - **Virtualized lists.** Libraries with thousands of songs use `uniform_list`. Grids switch to virtual rows above `VIRTUAL_GRID_MIN` items.
 - **Artwork.** Images are downloaded once to `~/Library/Caches/Encore/art` on the background executor. Each artwork's tint color is averaged from a small thumbnail, also in the background, and kept in memory.
 - **Animation.** Transitions use GPUI's `with_animation` or the reversible `anim::Presence`. Everything checks `anim::reduce_motion()`.
+- **Animate Artwork** (opt-in) gives covers and headers a slow pan and zoom that the GPU computes (`StyledImage::motion` in the vendored GPUI). While the artwork is on screen and the window is focused, the window re-presents its last frame at 20 fps without rendering again, which costs about 2% of a core. Under a fully open Now Playing, the regions beneath aren't drawn at all.
 - **Measuring.** `ENCORE_PERF=1` logs startup milestones, each request's duration, and per-page frame statistics (average, p95, max, and frames over the 8.3 ms a 120 Hz display allows, and the frame rate reached while animating) every 5 seconds.
 
 ## Native glue

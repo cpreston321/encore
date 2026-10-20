@@ -125,7 +125,7 @@ impl MusicApp {
         let size = [600, 1000, 1600, 2400].into_iter().find(|&s| s >= want).unwrap_or(2400);
         let ph = (size as f32 * h / w).round() as u32;
         let url = if (w - h).abs() > 1. { artwork.url_cropped(size, ph.max(1)) } else { artwork.url(size) };
-        let crop = self.artwork_motion(&artwork.url(1), 0.08, false);
+        let motion = self.artwork_motion(&artwork.url(1), 0.08);
         let image = self.image(&url, cx).map(|path| {
             img(path)
                 .min_w(px(w))
@@ -133,7 +133,7 @@ impl MusicApp {
                 .min_h(px(h))
                 .max_h(px(h))
                 .object_fit(ObjectFit::Cover)
-                .when_some(crop, |img, crop| img.texture_crop(crop))
+                .when_some(motion, |img, (phase, strength)| img.motion(phase, strength))
         });
         div().absolute().left_0().top(px(scroll * rate)).w(px(w)).h(px(h)).children(image).into_any_element()
     }
@@ -150,7 +150,7 @@ impl MusicApp {
     ) -> Option<AnyElement> {
         let path = self.image(&artwork.url(24), cx)?;
         // The wash is blurry, so it can move further than a cover without looking busy.
-        let crop = self.artwork_motion(&artwork.url(24), 0.35, false);
+        let motion = self.artwork_motion(&artwork.url(24), 0.35);
         Some(
             div()
                 .absolute()
@@ -166,7 +166,7 @@ impl MusicApp {
                         .min_h(px(h))
                         .max_h(px(h))
                         .object_fit(ObjectFit::Cover)
-                        .when_some(crop, |img, crop| img.texture_crop(crop)),
+                        .when_some(motion, |img, (phase, strength)| img.motion(phase, strength)),
                 )
                 .into_any_element(),
         )

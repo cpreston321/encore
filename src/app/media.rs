@@ -81,32 +81,18 @@ impl MusicApp {
         hovered || before > 0.
     }
 
-    /// The part of an artwork image to show while Animate Artwork is on: a slow zoom that
-    /// breathes and a pan that wanders, out of phase for each image so neighbors don't move
-    /// together. `strength` is the zoom (0.1 shows ~90% of the image). None when it's off,
-    /// Reduce Motion is on, or the window isn't focused. `root` says which view is drawing,
-    /// so it's the one that asks for the next frame.
-    pub(crate) fn artwork_motion(&self, key: &str, strength: f32, root: bool) -> Option<gpui::Bounds<f32>> {
-        if !self.animate_artwork || !self.window_active.get() || crate::anim::reduce_motion() {
+    /// The pan-and-zoom motion for an artwork image while Animate Artwork is on: a phase that
+    /// keeps it out of step with its neighbors, and how far it zooms (`strength`, 0.1 shows
+    /// about 90% of the image). The GPU animates it (`StyledImage::motion`), only while the
+    /// image is on screen and the window is focused. None when it's off or Reduce Motion is on.
+    pub(crate) fn artwork_motion(&self, key: &str, strength: f32) -> Option<(f32, f32)> {
+        if !self.animate_artwork || crate::anim::reduce_motion() {
             return None;
         }
-        {
-            let mut fx = self.fx.borrow_mut();
-            if root { fx.motion_root = true } else { fx.motion_page = true }
-        }
-        use std::{
-            f32::consts::TAU,
-            hash::{Hash, Hasher},
-        };
+        use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         key.hash(&mut hasher);
-        let phase = (hasher.finish() % 10_000) as f32 / 10_000. * TAU;
-        let t = self.motion_epoch.elapsed().as_secs_f32();
-        let zoom = 1. + strength * (0.75 + 0.25 * (t * TAU / 23. + phase).sin());
-        let side = 1. / zoom;
-        let x = 0.5 + 0.5 * (t * TAU / 31. + phase * 1.7).sin();
-        let y = 0.5 + 0.5 * (t * TAU / 41. + phase * 2.3).cos();
-        Some(gpui::Bounds { origin: gpui::point((1. - side) * x, (1. - side) * y), size: gpui::size(side, side) })
+        Some(((hasher.finish() % 10_000) as f32 / 10_000. * std::f32::consts::TAU, strength))
     }
 
     /// True for images that arrived in the last moment, so they fade in rather than pop;

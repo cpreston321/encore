@@ -17,7 +17,6 @@ pub(crate) struct RegionView {
     app: Entity<MusicApp>,
     region: Region,
     _observe: Subscription,
-    motion: Option<gpui::Task<()>>,
 }
 
 impl RegionView {
@@ -25,30 +24,14 @@ impl RegionView {
         // App state changes redraw every region; only region-local changes (scrolling,
         // hover fades, the progress bar) skip the others.
         let _observe = cx.observe(&app, |_, _, cx| cx.notify());
-        Self { app, region, _observe, motion: None }
+        Self { app, region, _observe }
     }
 }
 
 impl Render for RegionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let region = self.region;
-        let (element, moving) = self.app.update(cx, |app, cx| {
-            app.fx.borrow_mut().motion_page = false;
-            let element = app.render_region(region, window, cx);
-            (element, app.fx.borrow().motion_page)
-        });
-        // Animated artwork on the page asks for its next frame here, so only the page redraws.
-        if moving && self.motion.is_none() {
-            self.motion = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(crate::app::MOTION_FRAME).await;
-                this.update(cx, |this, cx| {
-                    this.motion = None;
-                    cx.notify();
-                })
-                .ok();
-            }));
-        }
-        element
+        self.app.update(cx, |app, cx| app.render_region(region, window, cx))
     }
 }
 
