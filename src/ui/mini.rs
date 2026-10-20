@@ -1,7 +1,7 @@
 //! Mini Player: a small floating window with the cover, and controls on hover.
 
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, Entity, FontWeight, ObjectFit, Subscription, TitlebarOptions, Window,
+    AnyWindowHandle, App, Bounds, Context, Entity, FontWeight, ObjectFit, Subscription, Task, TitlebarOptions, Window,
     WindowBounds, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, size,
     white,
 };
@@ -15,6 +15,7 @@ use crate::{
 pub struct MiniPlayer {
     app: Entity<MusicApp>,
     _observe: Subscription,
+    _ticker: Task<()>,
 }
 
 thread_local! {
@@ -46,7 +47,23 @@ pub fn toggle(app: Entity<MusicApp>, cx: &mut App) {
                 OPEN.with(|o| o.set(None));
                 true
             });
-            cx.new(|cx| MiniPlayer { _observe: cx.observe(&app, |_, _, cx| cx.notify()), app })
+            cx.new(|cx| {
+                // The progress line is short; four updates a second keep it moving.
+                let ticker = cx.spawn(async move |this, cx| {
+                    loop {
+                        cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+                        let alive = this.update(cx, |this: &mut MiniPlayer, cx| {
+                            if this.app.read(cx).state == PlayState::Playing {
+                                cx.notify();
+                            }
+                        });
+                        if alive.is_err() {
+                            break;
+                        }
+                    }
+                });
+                MiniPlayer { _observe: cx.observe(&app, |_, _, cx| cx.notify()), app, _ticker: ticker }
+            })
         },
     );
     if let Ok(handle) = handle {
@@ -62,11 +79,6 @@ impl Render for MiniPlayer {
         let playing = matches!(app.state, PlayState::Playing | PlayState::Loading);
         let (position, duration) = (app.position(), app.duration());
         let art = song.as_ref().and_then(|s| app.cached_image(&s.artwork.url(600)));
-        // Keep the progress line moving while playing.
-        if playing {
-            window.request_animation_frame();
-        }
-
         let control = |id: &'static str, name: &'static str, size: f32| {
             div()
                 .id(id)

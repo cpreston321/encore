@@ -1,6 +1,6 @@
 # Architecture
 
-Encore is a single GPUI application. One root view, `MusicApp`, owns all the app state and draws the whole window. Its behavior is split into **`app/`**, which holds state and logic, and **`ui/`**, which does the drawing. Both add `impl MusicApp` blocks for one area each. Everything that talks to the outside world, such as Apple's APIs, audio, WebKit and the system, lives in its own flat module at the top of `src/`.
+Encore is a single GPUI application. One root view, `MusicApp`, owns all the app state. The window is drawn as three cached regions (page, player and sidebar) plus the root's overlays. Its behavior is split into **`app/`**, which holds state and logic, and **`ui/`**, which does the drawing. Both add `impl MusicApp` blocks for one area each. Everything that talks to the outside world, such as Apple's APIs, audio, WebKit and the system, lives in its own flat module at the top of `src/`.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,8 @@ src/
 │   ├── mod.rs       Shared imports and layout constants
 │   ├── shell.rs     Window frame: sidebar, account popover, main area, context menus
 │   ├── player.rs    Floating player bar, volume popover, Playing Next panel
-│   ├── progress.rs  Progress bar as its own view, so playback ticks don't redraw the app
+│   ├── progress.rs  Progress bar view, which decides when playback needs a redraw
+│   ├── regions.rs   Page, player and sidebar as cached views
 │   ├── pages.rs     Routing plus Home, New, Radio and Search
 │   ├── library.rs   Recently Added, Albums, Artists, Songs, playlists
 │   ├── detail.rs    Album / artist / playlist pages tinted from the artwork, with parallax
@@ -88,7 +89,7 @@ Every API call blocks, so `app/data.rs` runs them on GPUI's background executor 
 
 `MusicApp.audio` holds an `Audio` value. It's either `Preview`, played by rodio from a downloaded file, or `Full`, played by `webplayer::WebPlayer`. Both expose the same small interface: play, pause, seek, volume, position and duration. That lets the queue, crossfade and player UI ignore which engine is active.
 
-- **Full songs.** Apple only streams complete tracks to its own players. `WebPlayer` loads MusicKit JS into an offscreen `WKWebView` from a page served on `127.0.0.1`. The page polls `/cmd` for commands and posts its state to `/state`. Both are keyed with a random token. A load sequence number makes sure a late error from an earlier song is ignored.
+- **Full songs.** Apple only streams complete tracks to its own players. `WebPlayer` loads MusicKit JS into an offscreen `WKWebView` from a page served on `127.0.0.1`. The page long-polls `/cmd` for commands, so the request waits until there's something to do. It posts its state to `/state`. Both are keyed with a random token. A load sequence number makes sure a late error from an earlier song is ignored.
 - **Crossfade.** Near the end of a track, the playing engine moves to a fade-out slot. The next song starts silently in a fresh one, and `step_fade` trades their volumes every 30 ms.
 - **Gapless playback.** For consecutive tracks on the same album, the next track starts `GAPLESS_LEAD` (1.2 s) before the current one ends, and the two swap in a 120 ms handoff instead of an audible fade.
 - **System integration.** `media.rs` registers for media key and Control Center commands and publishes the Now Playing info.
@@ -99,11 +100,15 @@ Apple only issues Music User Tokens through MusicKit JS's `authorize()` in a bro
 
 ## Rendering and performance
 
-- **One root view, with small child views where it matters.** The progress bar (`ui/progress.rs`) and the Mini Player are their own entities. Playback ticks redraw only those views, not the whole app.
+- **Cached regions for 120 Hz.** `ui/regions.rs` renders the page, player and sidebar as cached GPUI views. GPUI replays a cached view's previous frame until that view is notified. Scrolling or a hover fade redraws only the page, and a playback tick only the player.
+  - App state changes still redraw every region, because each region observes `MusicApp`.
+  - A notify on any view also dirties its ancestors, so the player lives beside the page rather than inside it.
+  - Transitions that belong to one region request that region's frames (`Fx::region_animating`). Overlays drawn by the root request the root's frames.
+- **Playback redraws when something moves.** The progress bar redraws only when its fill advances half a point, a few times a second. When it's hovered, the times and visualizer update at the display's refresh rate. Now Playing and the Mini Player move with a 200 to 250 ms tick.
 - **Virtualized lists.** Libraries with thousands of songs use `uniform_list`. Grids switch to virtual rows above `VIRTUAL_GRID_MIN` items.
 - **Artwork.** Images are downloaded once to `~/Library/Caches/Encore/art` on the background executor. Each artwork's tint color is averaged from a small thumbnail, also in the background, and kept in memory.
 - **Animation.** Transitions use GPUI's `with_animation` or the reversible `anim::Presence`. Everything checks `anim::reduce_motion()`.
-- **Measuring.** `MUSIC_PERF=1` logs startup milestones, each request's duration, and per-page frame statistics (average, p95, max, and frames over 16.7 ms) every 5 seconds.
+- **Measuring.** `ENCORE_PERF=1` logs startup milestones, each request's duration, and per-page frame statistics (average, p95, max, and frames over the 8.3 ms a 120 Hz display allows, and the frame rate reached while animating) every 5 seconds.
 
 ## Native glue
 

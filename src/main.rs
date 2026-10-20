@@ -154,7 +154,7 @@ fn main() {
                 }),
                 window_background: WindowBackgroundAppearance::Opaque,
                 window_min_size: Some(size(px(960.), px(600.))),
-                app_id: Some("dev.gpui.music".into()),
+                app_id: Some("io.github.cpreston321.encore".into()),
                 ..Default::default()
             },
             |window, cx| {

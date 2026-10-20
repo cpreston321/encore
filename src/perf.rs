@@ -1,4 +1,4 @@
-//! Opt-in performance logging (`MUSIC_PERF=1`): frame timings, slow frames, request
+//! Opt-in performance logging (`ENCORE_PERF=1`): frame timings, slow frames, request
 //! durations and startup milestones, printed to stderr.
 
 use std::{
@@ -7,13 +7,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// A frame slower than this misses a 60Hz refresh.
-const SLOW_FRAME: Duration = Duration::from_micros(16_700);
+/// A frame slower than this misses a 120Hz (ProMotion) refresh.
+const SLOW_FRAME: Duration = Duration::from_micros(8_333);
+/// Frames closer together than this are part of one animation or scroll; their spacing is
+/// the frame rate actually achieved.
+const CONTINUOUS: Duration = Duration::from_millis(40);
 const REPORT_EVERY: Duration = Duration::from_secs(5);
 
 pub fn enabled() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("MUSIC_PERF").is_some())
+    *ON.get_or_init(|| std::env::var_os("ENCORE_PERF").is_some())
 }
 
 fn process_start() -> Instant {
@@ -44,6 +47,8 @@ struct Frames {
     route: String,
     samples: Vec<Duration>,
     window_start: Option<Instant>,
+    last_start: Option<Instant>,
+    intervals: Vec<Duration>,
 }
 
 thread_local! {
@@ -57,9 +62,18 @@ pub fn frame_start(route: &str) {
     }
     FRAMES.with(|f| {
         let mut f = f.borrow_mut();
-        f.started = Some(Instant::now());
+        let now = Instant::now();
+        if let Some(gap) = f.last_start.map(|t| now - t).filter(|gap| *gap < CONTINUOUS) {
+            f.intervals.push(gap);
+        }
+        f.last_start = Some(now);
+        f.started = Some(now);
         if f.route != route {
+            // Each report covers one page.
             f.route = route.to_string();
+            f.samples.clear();
+            f.intervals.clear();
+            f.window_start = None;
         }
     });
 }
@@ -89,8 +103,14 @@ pub fn frame_end() {
             let max = samples[n - 1];
             let slow = samples.iter().filter(|d| **d > SLOW_FRAME).count();
             let ms = |d: Duration| d.as_secs_f64() * 1000.;
+            let mut intervals = std::mem::take(&mut f.intervals);
+            intervals.sort();
+            let fps = intervals
+                .get(intervals.len() / 2)
+                .map(|d| format!(", animating at {:.0}fps", 1. / d.as_secs_f64()))
+                .unwrap_or_default();
             eprintln!(
-                "[perf] {}: {n} frames in {:.0}s, avg {:.1}ms, p95 {:.1}ms, max {:.1}ms, {slow} over 16.7ms",
+                "[perf] {}: {n} frames in {:.0}s, avg {:.1}ms, p95 {:.1}ms, max {:.1}ms, {slow} over 8.3ms{fps}",
                 f.route,
                 window_start.elapsed().as_secs_f64(),
                 ms(avg),

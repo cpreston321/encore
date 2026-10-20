@@ -24,7 +24,7 @@ pub fn use_tahoe_corners(window: &gpui::Window) {
         return;
     };
     let toolbar: Retained<NSToolbar> =
-        NSToolbar::initWithIdentifier(mtm.alloc(), &NSString::from_str("dev.gpui.music.main"));
+        NSToolbar::initWithIdentifier(mtm.alloc(), &NSString::from_str("io.github.cpreston321.encore.main"));
     #[allow(deprecated)]
     toolbar.setShowsBaselineSeparator(false);
     ns_window.setToolbar(Some(&toolbar));

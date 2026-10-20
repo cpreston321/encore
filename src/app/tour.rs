@@ -1,4 +1,4 @@
-//! Debug-only automated page tour (`MUSIC_TOUR=1`) used to screenshot every page.
+//! Debug-only automated page tour (`ENCORE_TOUR=1`) used to screenshot every page.
 
 use super::*;
 
@@ -24,11 +24,11 @@ impl MusicApp {
             let Ok(steps) = this.update(cx, |this, _| this.tour_steps()) else {
                 return;
             };
-            // MUSIC_TOUR_PLAY=1: play silently so the player and progress bar show up.
-            if std::env::var_os("MUSIC_TOUR_PLAY").is_some() {
+            // ENCORE_TOUR_PLAY=1: play silently so the player and progress bar show up.
+            if std::env::var_os("ENCORE_TOUR_PLAY").is_some() {
                 this.update(cx, |this, cx| {
-                    this.show_queue = std::env::var_os("MUSIC_TOUR_QUEUE").is_some();
-                    this.show_account = std::env::var_os("MUSIC_TOUR_ACCOUNT").is_some();
+                    this.show_queue = std::env::var_os("ENCORE_TOUR_QUEUE").is_some();
+                    this.show_account = std::env::var_os("ENCORE_TOUR_ACCOUNT").is_some();
                     this.set_volume(0., cx);
                     if let Some(browse) = this.browse.ready() {
                         let songs = browse.top_songs.clone();
@@ -36,8 +36,8 @@ impl MusicApp {
                     }
                 })
                 .ok();
-                // MUSIC_TOUR_SEEK_END=1: jump near the end once playing, to exercise crossfade.
-                if std::env::var_os("MUSIC_TOUR_SEEK_END").is_some() {
+                // ENCORE_TOUR_SEEK_END=1: jump near the end once playing, to exercise crossfade.
+                if std::env::var_os("ENCORE_TOUR_SEEK_END").is_some() {
                     for _ in 0..100 {
                         pause(1).await;
                         let seeked = this
@@ -62,12 +62,12 @@ impl MusicApp {
                     }
                 }
             }
-            // MUSIC_TOUR_OVERLAY=palette|shortcuts: show that overlay on top of the tour.
-            match std::env::var("MUSIC_TOUR_OVERLAY").as_deref() {
+            // ENCORE_TOUR_OVERLAY=palette|shortcuts: show that overlay on top of the tour.
+            match std::env::var("ENCORE_TOUR_OVERLAY").as_deref() {
                 Ok(overlay @ ("palette" | "palette-selected")) => {
                     let select = overlay == "palette-selected";
                     this.update(cx, |this, cx| {
-                        this.search.set(std::env::var("MUSIC_TOUR_QUERY").unwrap_or_else(|_| "zach bryan".into()));
+                        this.search.set(std::env::var("ENCORE_TOUR_QUERY").unwrap_or_else(|_| "zach bryan".into()));
                         if select {
                             this.search.select_all();
                         }
@@ -124,6 +124,15 @@ impl MusicApp {
                     this.set_route(route, cx);
                 })
                 .ok();
+                // ENCORE_TOUR_SCROLL=1: once the page loads, scroll it smoothly down and back.
+                if std::env::var_os("ENCORE_TOUR_SCROLL").is_some() {
+                    pause(2).await;
+                    this.update(cx, |this, cx| {
+                        this.tour_scroll.set(Some(std::time::Instant::now()));
+                        cx.notify();
+                    })
+                    .ok();
+                }
                 if let Some(y) = scroll {
                     // Let the page load and lay out before scrolling it.
                     pause(3).await;
@@ -150,14 +159,32 @@ impl MusicApp {
         .detach();
     }
 
+    /// Advances the scripted scroll by one frame. Called from the page region's render, so
+    /// like a real scroll it redraws only the page, at the display's refresh rate.
+    pub(crate) fn step_tour_scroll(&self, window: &mut Window) {
+        const LENGTH: f32 = 4.;
+        let Some(start) = self.tour_scroll.get() else {
+            return;
+        };
+        let t = start.elapsed().as_secs_f32() / LENGTH;
+        if t >= 1. {
+            self.tour_scroll.set(None);
+            return;
+        }
+        let max = f32::from(self.scroll.max_offset().height).min(2400.);
+        let y = max * (1. - (t * std::f32::consts::TAU).cos()) / 2.;
+        self.scroll.set_offset(point(px(0.), px(-y)));
+        window.request_animation_frame();
+    }
+
     pub(crate) fn tour_steps(&self) -> Vec<(String, Route, Option<String>)> {
         let mut all = self.all_tour_steps();
-        // MUSIC_TOUR_ONLY=songs,artists limits the tour to those steps.
-        if let Ok(only) = std::env::var("MUSIC_TOUR_ONLY") {
+        // ENCORE_TOUR_ONLY=songs,artists limits the tour to those steps.
+        if let Ok(only) = std::env::var("ENCORE_TOUR_ONLY") {
             let names: Vec<&str> = only.split(',').map(str::trim).collect();
             all.retain(|(name, _, _)| names.contains(&name.as_str()));
         }
-        if std::env::var("MUSIC_TOUR").as_deref() != Ok("hero") {
+        if std::env::var("ENCORE_TOUR").as_deref() != Ok("hero") {
             return all;
         }
         // Detail pages only, each at the top, mid-scroll and past the header.
@@ -194,10 +221,10 @@ impl MusicApp {
         steps.push((
             "search".into(),
             Route::Search,
-            Some(std::env::var("MUSIC_TOUR_QUERY").unwrap_or_else(|_| "taylor swift".into())),
+            Some(std::env::var("ENCORE_TOUR_QUERY").unwrap_or_else(|_| "taylor swift".into())),
         ));
-        // MUSIC_TOUR_ARTIST=Name focuses the artist/album steps on one library artist.
-        let focus = std::env::var("MUSIC_TOUR_ARTIST").ok().map(|n| n.to_lowercase());
+        // ENCORE_TOUR_ARTIST=Name focuses the artist/album steps on one library artist.
+        let focus = std::env::var("ENCORE_TOUR_ARTIST").ok().map(|n| n.to_lowercase());
         let focus_album =
             focus.as_ref().and_then(|n| self.lib_albums().iter().find(|a| a.artist.to_lowercase() == *n).cloned());
         if let Some(album) = focus_album.or_else(|| self.lib_albums().first().cloned()) {
@@ -227,4 +254,53 @@ impl MusicApp {
         }
         steps
     }
+}
+
+/// Stand-in artwork (`ENCORE_TOUR_PLACEHOLDER_ART=1`) so published screenshots don't carry
+/// album covers or artist photos. Seeded by the URL without its size segment, so every size
+/// of one cover gets the same picture.
+pub(crate) fn placeholder_art(url: &str) -> Result<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    url.rsplit_once('/').map_or(url, |(base, _)| base).hash(&mut hasher);
+    let seed = hasher.finish();
+    let dir = api::cache_dir().join("art-placeholder");
+    let path = dir.join(format!("{seed:016x}.png"));
+    if path.exists() {
+        return Ok(path);
+    }
+    std::fs::create_dir_all(&dir)?;
+    let hue = (seed % 360) as f32;
+    let from = hsl(hue, 0.55, 0.52);
+    let to = hsl((hue + 40. + (seed >> 16) as f32 % 80.) % 360., 0.6, 0.32);
+    let (gx, gy) = (0.25 + ((seed >> 24) % 50) as f32 / 100., 0.2 + ((seed >> 32) % 40) as f32 / 100.);
+    const SIZE: u32 = 600;
+    let img = image::RgbImage::from_fn(SIZE, SIZE, |x, y| {
+        let (u, v) = (x as f32 / SIZE as f32, y as f32 / SIZE as f32);
+        let t = (u + v) / 2.;
+        let glow = (1. - ((u - gx).powi(2) + (v - gy).powi(2)).sqrt() / 0.55).max(0.) * 0.35;
+        image::Rgb(std::array::from_fn(|i| {
+            let c = from[i] + (to[i] - from[i]) * t;
+            ((c + (1. - c) * glow) * 255.) as u8
+        }))
+    });
+    let tmp = path.with_extension(format!("png.part{}", std::process::id()));
+    img.save_with_format(&tmp, image::ImageFormat::Png)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(path)
+}
+
+fn hsl(h: f32, s: f32, l: f32) -> [f32; 3] {
+    let c = (1. - (2. * l - 1.).abs()) * s;
+    let x = c * (1. - ((h / 60.) % 2. - 1.).abs());
+    let m = l - c / 2.;
+    let (r, g, b) = match (h / 60.) as u32 {
+        0 => (c, x, 0.),
+        1 => (x, c, 0.),
+        2 => (0., c, x),
+        3 => (0., x, c),
+        4 => (x, 0., c),
+        _ => (c, 0., x),
+    };
+    [r + m, g + m, b + m]
 }

@@ -1,5 +1,4 @@
-//! The player's progress bar as its own view, so it can refresh smoothly while a song
-//! plays without redrawing the rest of the app.
+//! The player's progress bar as its own view, which decides when playback needs a redraw.
 
 use std::{
     cell::{Cell, RefCell},
@@ -41,8 +40,9 @@ impl HoverAnim {
     }
 }
 
-/// ~30fps keeps the bar visibly smooth; the 30s previews make each pixel ~50ms.
+/// How often to check whether the bar has visibly moved.
 const FRAME: Duration = Duration::from_millis(33);
+const IDLE_CHECK: Duration = Duration::from_millis(250);
 
 pub struct Progress {
     audio: SharedAudio,
@@ -57,6 +57,8 @@ pub struct Progress {
     pub spectrum: RefCell<Option<std::sync::Arc<crate::spectrum::Spectrum>>>,
     shown_levels: RefCell<[f32; crate::spectrum::BANDS]>,
     bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// Fill length last drawn, in half points.
+    drawn_step: Cell<i64>,
     app: WeakEntity<MusicApp>,
     _ticker: Task<()>,
 }
@@ -69,16 +71,19 @@ impl Progress {
         cx: &mut Context<Self>,
     ) -> Self {
         let ticker = cx.spawn(async move |this, cx| {
+            let mut wait = FRAME;
             loop {
-                cx.background_executor().timer(FRAME).await;
-                let alive = this.update(cx, |this, cx| {
-                    if this.audio.borrow().as_ref().is_some_and(Audio::is_playing) {
+                cx.background_executor().timer(wait).await;
+                let Ok(playing) = this.update(cx, |this, cx| {
+                    if this.needs_redraw() {
                         cx.notify();
                     }
-                });
-                if alive.is_err() {
+                    this.audio.borrow().as_ref().is_some_and(Audio::is_playing)
+                }) else {
                     break;
-                }
+                };
+                // Paused or stopped, check rarely so an idle app stays asleep.
+                wait = if playing { FRAME } else { IDLE_CHECK };
             }
         });
         let white = |a: f32| gpui::Hsla { h: 0., s: 0., l: 1., a };
@@ -91,9 +96,23 @@ impl Progress {
             spectrum: RefCell::new(None),
             shown_levels: RefCell::new([0.; crate::spectrum::BANDS]),
             bounds,
+            drawn_step: Cell::new(-1),
             app,
             _ticker: ticker,
         }
+    }
+
+    /// A notify here re-renders the whole window (GPUI marks every ancestor view dirty), so
+    /// playback only redraws when the fill moves by half a point: a few times a second.
+    fn needs_redraw(&self) -> bool {
+        let audio = self.audio.borrow();
+        let Some(audio) = audio.as_ref().filter(|a| a.is_playing()) else {
+            return false;
+        };
+        let duration = audio.duration().unwrap_or(30.).max(1.);
+        let width = f32::from(self.bounds.get().size.width);
+        let step = (audio.position() / duration * width * 2.) as i64;
+        self.drawn_step.replace(step) != step
     }
 
     pub fn set_scrub(&self, fraction: Option<f32>) {
@@ -151,7 +170,9 @@ impl Progress {
 impl Render for Progress {
     fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let (hover, animating) = self.hover.get().amount();
-        if animating {
+        let playing = self.audio.borrow().as_ref().is_some_and(Audio::is_playing);
+        // Hovered, the times and visualizer show and update at the display's refresh rate.
+        if animating || (playing && self.hover.get().hovered) {
             window.request_animation_frame();
         }
         let (position, duration) =
@@ -164,7 +185,6 @@ impl Render for Progress {
             }
         };
         let (track, fill, label) = self.colors.get();
-        let playing = self.audio.borrow().as_ref().is_some_and(Audio::is_playing);
         let app = self.app.clone();
         let time = |s: String| div().text_size(px(10.5)).text_color(label).child(s);
         let thickness = 2.5 + 3. * hover;

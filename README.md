@@ -8,7 +8,7 @@
 
 Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-length playback for subscribers.
 
-[Features](#features) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
+[Features](#features) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Benchmarks](docs/benchmarks.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -25,7 +25,7 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 - **A Mac app first.** Media keys and Control Center's Now Playing work. There's a Mini Player, Dock menu controls, a menu bar item for every page, and full keyboard navigation.
 - **Visualizer.** Hovering the progress bar shows a live spectrum computed from the song's preview audio.
 - **Library tools.** Sort and filter your Songs, Favorites and Albums. ⌘-click or ⇧-click to select several songs, and drag songs onto a playlist or into Playing Next.
-- **Fast and accessible.** Long lists are virtualized and artwork is cached on disk. Encore follows the system's light or dark appearance and honors Reduce Motion.
+- **Fast and accessible.** Encore scrolls and animates at 120 fps on ProMotion displays. It launches in about a quarter of a second and uses less CPU than Music.app while playing ([benchmarks](docs/benchmarks.md)). It follows the system's light or dark appearance and honors Reduce Motion.
 
 <table>
   <tr>
@@ -115,7 +115,7 @@ cargo test                    # unit tests
 cargo test -- --ignored       # also hits the live public endpoints
 cargo clippy --all-targets
 cargo fmt
-MUSIC_PERF=1 cargo run --release   # frame times, request durations and startup milestones on stderr
+ENCORE_PERF=1 cargo run --release   # frame times, request durations and startup milestones on stderr
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the debug tools, and [docs/architecture.md](docs/architecture.md) explains how the code is laid out.

@@ -9,7 +9,7 @@ use gpui::{Hsla, Rgba};
 pub fn reduce_motion() -> bool {
     static REDUCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *REDUCE.get_or_init(|| {
-        std::env::var_os("MUSIC_REDUCE_MOTION").is_some()
+        std::env::var_os("ENCORE_REDUCE_MOTION").is_some()
             || objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
     })
 }
@@ -124,6 +124,13 @@ mod tests {
         let mut p = Presence::new(Duration::from_millis(200));
         assert!(!p.visible());
         p.set(true);
+        // CI's macOS runners have Reduce Motion on, where presences snap instead.
+        if reduce_motion() {
+            assert_eq!(p.value(), 1.);
+            p.set(false);
+            assert!(!p.visible());
+            return;
+        }
         std::thread::sleep(Duration::from_millis(100));
         let mid = p.linear();
         p.set(false);

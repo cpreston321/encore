@@ -24,7 +24,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Encore</string>
   <key>CFBundleDisplayName</key><string>Encore</string>
   <key>CFBundleExecutable</key><string>Encore</string>
-  <key>CFBundleIdentifier</key><string>dev.gpui.music</string>
+  <key>CFBundleIdentifier</key><string>io.github.cpreston321.encore</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
@@ -39,11 +39,11 @@ PLIST
 
 identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)
 if [ -n "$identity" ]; then
-  codesign --force --sign "$identity" --identifier dev.gpui.music "$app"
+  codesign --force --sign "$identity" --identifier io.github.cpreston321.encore "$app"
   codesign --verify --verbose=1 "$app"
 else
   echo "No Apple Development certificate found; signing ad hoc (Keychain will ask again after each build)." >&2
-  codesign --force --sign - --identifier dev.gpui.music "$app"
+  codesign --force --sign - --identifier io.github.cpreston321.encore "$app"
 fi
 
 mkdir -p "$HOME/Applications"

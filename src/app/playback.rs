@@ -187,6 +187,10 @@ impl MusicApp {
     }
 
     pub(crate) fn tick(&mut self, cx: &mut Context<Self>) {
+        // Now Playing's progress bar and times move with this tick rather than every frame.
+        if self.show_now_playing && self.state == PlayState::Playing {
+            cx.notify();
+        }
         match self.state {
             // A full song has started streaming, or failed to.
             PlayState::Loading if self.loading_since.is_some() => {

@@ -217,6 +217,7 @@ impl Fx {
         }
     }
 
+    /// Transitions drawn by the root view: overlays and panels.
     fn animating(&self) -> bool {
         self.queue.animating()
             || self.account.animating()
@@ -226,11 +227,20 @@ impl Fx {
             || self.now_playing.animating()
             || self.palette.animating()
             || self.shortcuts.animating()
-            || self.page_bg.animating()
-            || self.sidebar_bg.animating()
-            || self.pill_bg.animating()
-            || self.hovers.values().any(|h| h.animating())
-            || self.sections.values().any(|s| s.animating())
+    }
+
+    /// Transitions inside one cached region, which requests its own frames so the other
+    /// regions stay cached while it animates.
+    pub(crate) fn region_animating(&self, region: crate::ui::regions::Region) -> bool {
+        use crate::ui::regions::Region;
+        let hovers = |sidebar: bool| self.hovers.iter().any(|(k, h)| k.starts_with("nav-") == sidebar && h.animating());
+        match region {
+            Region::Page => self.page_bg.animating() || hovers(false),
+            Region::Sidebar => {
+                self.sidebar_bg.animating() || self.sections.values().any(|s| s.animating()) || hovers(true)
+            }
+            Region::Player => self.pill_bg.animating(),
+        }
     }
 }
 
@@ -309,6 +319,8 @@ pub struct MusicApp {
         Option<((usize, usize, usize, usize, usize), Arc<Vec<(String, Option<String>, crate::model::Artwork)>>)>,
     >,
     first_frame_logged: Cell<bool>,
+    #[cfg(any(debug_assertions, feature = "tour"))]
+    pub(crate) tour_scroll: Cell<Option<std::time::Instant>>,
     pub(crate) queue: Queue<Song>,
     pub(crate) state: PlayState,
     pub(crate) playback_error: Option<String>,
@@ -354,6 +366,7 @@ pub struct MusicApp {
     pub(crate) user_name: String,
     /// Profile photo the user chose (Apple doesn't share Apple Music profile photos).
     pub(crate) avatar: Option<Arc<std::path::Path>>,
+    pub(crate) regions: Option<crate::ui::regions::Regions>,
     _ticker: Task<()>,
 }
 
@@ -423,6 +436,8 @@ impl MusicApp {
             nav_direction: NavDirection::Root,
             fx: RefCell::new(Fx::new(&Theme::for_appearance(window.appearance()))),
             first_frame_logged: Cell::new(false),
+            #[cfg(any(debug_assertions, feature = "tour"))]
+            tour_scroll: Cell::new(None),
             show_now_playing: false,
             artist_ids: RefCell::default(),
             spectra: HashMap::new(),
@@ -478,13 +493,14 @@ impl MusicApp {
             artist_pane_scroll: ScrollHandle::new(),
             user_name: user_full_name(),
             avatar: saved_photo().map(|p| Arc::from(p.as_path())),
+            regions: None,
             _ticker: ticker,
         };
         crate::perf::milestone("state built");
         this.load_browse(cx);
         crate::perf::milestone("charts cache read");
         #[cfg(any(debug_assertions, feature = "tour"))]
-        if std::env::var_os("MUSIC_TOUR").is_some() {
+        if std::env::var_os("ENCORE_TOUR").is_some() {
             this.start_tour(cx);
         }
         if this.catalog.is_musickit() {
@@ -629,11 +645,6 @@ impl Render for MusicApp {
             crate::perf::milestone("first frame");
         }
         let t = Theme::for_appearance(window.appearance());
-        let viewport_w = f32::from(window.viewport_size().width);
-        // Pages span the whole window (art and tints run under the floating sidebar);
-        // this is the visible width beside it.
-        let content_w = viewport_w - SIDEBAR_W;
-        let search_focused = self.search_focus.is_focused(window);
         self.filter_focused = self.filter_focus.is_focused(window);
         {
             let mut fx = self.fx.borrow_mut();
@@ -652,9 +663,8 @@ impl Render for MusicApp {
             // Forget finished hover animations so the map doesn't grow without bound.
             fx.hovers.retain(|_, h| h.visible() || h.animating());
         }
-        // The sidebar floats over the page, so on artwork-tinted pages it takes the page's
-        // colors (keeping the app's red for selection).
-        let sidebar_t = self.page_palette(cx).map(|p| Theme { accent: t.accent, ..t.tinted(p) }).unwrap_or(t);
+        let regions = self.regions.get_or_insert_with(|| crate::ui::regions::Regions::new(cx)).views();
+        let key_help = self.fx.borrow().key_help;
 
         div()
             .id("root")
@@ -696,8 +706,8 @@ impl Render for MusicApp {
             .font_family(".SystemUIFont")
             .text_size(px(13.))
             .text_color(t.text)
-            .child(self.render_main(&t, content_w, search_focused, cx))
-            .child(self.render_sidebar(&sidebar_t, cx))
+            .children(regions)
+            .when(key_help.visible(), |d| d.child(self.render_key_help(&t, cx).opacity(key_help.value())))
             .children(self.render_menu(&t, cx))
             .children(self.render_account_popover(&t, cx))
             .children(self.render_volume_popover(&t, cx))

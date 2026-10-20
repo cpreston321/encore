@@ -30,21 +30,23 @@ For UI changes, include a screenshot or a short recording. If the change looks d
 
 | Variable | Effect |
 | --- | --- |
-| `MUSIC_PERF=1` | Logs startup milestones, each request's duration, and per-page frame times to stderr |
-| `MUSIC_APPEARANCE=light` / `dark` | Forces a theme without changing the system setting |
-| `MUSIC_REDUCE_MOTION=1` | Behaves as if Reduce Motion is on |
-| `MUSIC_TOUR=1` | Steps through every page every few seconds, for screenshots and profiling (debug builds, or `--features tour`) |
-| `MUSIC_TOUR_ONLY=albums,artist` | Limits the tour to those steps |
-| `MUSIC_TOUR_PLAY=1` | Starts silent playback during the tour |
-| `MUSIC_TOUR_OVERLAY=palette` / `shortcuts` / `nowplaying` | Opens that overlay for the tour (`nowplaying` also needs `MUSIC_TOUR_PLAY=1`) |
+| `ENCORE_PERF=1` | Logs startup milestones, each request's duration, and per-page frame times to stderr |
+| `ENCORE_APPEARANCE=light` / `dark` | Forces a theme without changing the system setting |
+| `ENCORE_REDUCE_MOTION=1` | Behaves as if Reduce Motion is on |
+| `ENCORE_TOUR=1` | Steps through every page every few seconds, for screenshots and profiling (debug builds, or `--features tour`) |
+| `ENCORE_TOUR_ONLY=albums,artist` | Limits the tour to those steps |
+| `ENCORE_TOUR_PLAY=1` | Starts silent playback during the tour |
+| `ENCORE_TOUR_OVERLAY=palette` / `shortcuts` / `nowplaying` | Opens that overlay for the tour (`nowplaying` also needs `ENCORE_TOUR_PLAY=1`) |
+| `ENCORE_TOUR_SCROLL=1` | On each tour page, scrolls smoothly down and back, redrawing only the page, as a real scroll does. Use it with `ENCORE_PERF=1` to check that frames fit 120 Hz |
+| `ENCORE_TOUR_PLACEHOLDER_ART=1` | Replaces all artwork with generated gradients, for screenshots that don't include album covers or artist photos |
 
 To profile an optimized build:
 
 ```sh
-MUSIC_PERF=1 MUSIC_TOUR=1 cargo run --release --features tour
+ENCORE_PERF=1 ENCORE_TOUR=1 cargo run --release --features tour
 ```
 
-A page that renders smoothly shows a 95th percentile frame time under 16.7 ms, with few or no slow frames.
+Encore targets 120 Hz on ProMotion displays: a page that renders smoothly shows a 95th percentile frame time under 8.3 ms and animates at about 120 fps.
 
 ## Code style
 
@@ -56,7 +58,7 @@ A page that renders smoothly shows a 95th percentile frame time under 16.7 ms, w
 
 ## Security
 
-Never commit a MusicKit `.p8` key, `musickit.json`, a developer token or a Music User Token. If you find a security issue, please report it privately via a [GitHub security advisory](https://github.com/cpreston321/encore/security/advisories/new) instead of opening a public issue.
+Never commit a MusicKit `.p8` key, `musickit.json`, a developer token or a Music User Token. To report a security issue, follow [SECURITY.md](SECURITY.md) rather than opening a public issue.
 
 ## License
 

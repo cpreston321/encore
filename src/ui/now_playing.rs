@@ -86,9 +86,6 @@ impl MusicApp {
         let base: Hsla = palette.map_or(t.window, |p| Hsla { l: p.bg.l.min(0.2), ..p.bg });
         let accent = palette.map_or(t.accent, |p| p.accent);
         let playing = matches!(self.state, PlayState::Playing | PlayState::Loading);
-        if playing {
-            window.request_animation_frame();
-        }
 
         let panel_w = (vw * 0.36).clamp(340., 500.);
         let art_size = (vh - 330.).min(vw - panel_w - 200.).clamp(200., 520.);

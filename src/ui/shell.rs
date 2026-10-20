@@ -563,14 +563,13 @@ impl MusicApp {
         search_focused: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let pill_w = (content_w - 48.).clamp(440., 780.);
         let page_theme = self.page_palette(cx).map(|p| t.tinted(p));
         let page_t = page_theme.as_ref().unwrap_or(t);
         // Background color blends between pages instead of snapping.
         let page_bg = self.fx.borrow_mut().page_bg.update(page_t.window);
-        let (queue, notice, key_help) = {
+        let (queue, notice) = {
             let fx = self.fx.borrow();
-            (fx.queue, fx.notice, fx.key_help)
+            (fx.queue, fx.notice)
         };
         let direction = self.nav_direction;
 
@@ -637,17 +636,6 @@ impl MusicApp {
                     ),
                 )
             })
-            .child(
-                div()
-                    .absolute()
-                    .left(px(SIDEBAR_W))
-                    .right_0()
-                    .bottom(px(14.))
-                    .flex()
-                    .justify_center()
-                    .child(self.render_player(t, pill_w, cx)),
-            )
-            .when(key_help.visible(), |d| d.child(self.render_key_help(t, cx).opacity(key_help.value())))
     }
 
     pub(crate) fn render_key_help(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {

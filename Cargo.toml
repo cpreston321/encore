@@ -31,5 +31,5 @@ serde_json = "1.0.154"
 ureq = { version = "3", features = ["json"] }
 
 [features]
-# Debug-only page tour (MUSIC_TOUR=1), also available in optimized builds for profiling.
+# Debug-only page tour (ENCORE_TOUR=1), also available in optimized builds for profiling.
 tour = []

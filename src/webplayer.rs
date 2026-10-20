@@ -1,13 +1,13 @@
 //! Full-length playback for signed-in subscribers. Apple only streams complete songs to its
 //! own players, so this runs MusicKit JS (Apple's web player) in a hidden WebKit view and
-//! drives it over a small localhost bridge: the page polls for commands and posts back its
-//! playback state.
+//! drives it over a small localhost bridge: the page long-polls for commands and posts back
+//! its playback state.
 
 use std::{
     net::{TcpListener, TcpStream},
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        Arc, Condvar, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -21,6 +21,9 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString, NSURL, NSURLRequest};
 use objc2_web_kit::{WKAudiovisualMediaTypes, WKWebView, WKWebViewConfiguration};
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+/// How long a `/cmd` request waits for a command before answering with none.
+const LONG_POLL: Duration = Duration::from_secs(15);
 
 // MusicKit.PlaybackStates
 const PLAYING: i64 = 2;
@@ -64,7 +67,20 @@ struct Shared {
     /// Reports older than this predate the last seek and are ignored.
     seeked_at: Mutex<Option<Instant>>,
     commands: Mutex<Vec<Value>>,
+    commands_ready: Condvar,
+    closed: AtomicBool,
     track: Mutex<Track>,
+}
+
+impl Shared {
+    fn wait_for_commands(&self, timeout: Duration) -> Vec<Value> {
+        let commands = self.commands.lock().unwrap();
+        let (mut commands, _) = self
+            .commands_ready
+            .wait_timeout_while(commands, timeout, |c| c.is_empty() && !self.closed.load(Ordering::Relaxed))
+            .unwrap();
+        std::mem::take(&mut *commands)
+    }
 }
 
 pub struct WebPlayer {
@@ -79,6 +95,8 @@ impl Drop for WebPlayer {
     /// page doesn't outlive the player (e.g. after signing out).
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        self.shared.closed.store(true, Ordering::Relaxed);
+        self.shared.commands_ready.notify_all();
         unsafe {
             if let Some(blank) = NSURL::URLWithString(&NSString::from_str("about:blank")) {
                 self.webview.loadRequest(&NSURLRequest::requestWithURL(&blank));
@@ -98,6 +116,8 @@ impl WebPlayer {
             shown: Mutex::new(None),
             seeked_at: Mutex::new(None),
             commands: Mutex::new(Vec::new()),
+            commands_ready: Condvar::new(),
+            closed: AtomicBool::new(false),
             track: Mutex::new(Track::default()),
         });
         let key = localhost::random_hex(16)?;
@@ -147,6 +167,7 @@ impl WebPlayer {
 
     fn send(&self, command: Value) {
         self.shared.commands.lock().unwrap().push(command);
+        self.shared.commands_ready.notify_all();
     }
 
     fn snapshot(&self) -> (Snapshot, Instant) {
@@ -260,7 +281,7 @@ impl WebPlayer {
     }
 }
 
-fn handle(stream: &TcpStream, req: Request, shared: &Shared, key: &str, page: &str) -> Result<()> {
+fn handle(stream: &TcpStream, req: Request, shared: &Arc<Shared>, key: &str, page: &str) -> Result<()> {
     // Only the page we served knows the key, so other local pages can't drive playback.
     if req.query != format!("k={key}") {
         return localhost::respond(stream, "403 Forbidden", "text/plain", "forbidden");
@@ -268,8 +289,14 @@ fn handle(stream: &TcpStream, req: Request, shared: &Shared, key: &str, page: &s
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/player") => localhost::respond(stream, "200 OK", "text/html; charset=utf-8", page),
         ("GET", "/cmd") => {
-            let commands = std::mem::take(&mut *shared.commands.lock().unwrap());
-            localhost::respond(stream, "200 OK", "application/json", &serde_json::to_string(&commands)?)
+            // The wait runs on its own thread so the bridge keeps taking state reports.
+            let (stream, shared) = (stream.try_clone()?, shared.clone());
+            std::thread::spawn(move || {
+                let commands = shared.wait_for_commands(LONG_POLL);
+                let body = serde_json::to_string(&commands).unwrap_or_else(|_| "[]".into());
+                let _ = localhost::respond(&stream, "200 OK", "application/json", &body);
+            });
+            Ok(())
         }
         ("POST", "/state") => {
             if let Ok(snap) = serde_json::from_slice::<Snapshot>(&req.body) {
@@ -344,8 +371,9 @@ async function poll() {
     try {
       const commands = await (await fetch('/cmd?k=' + KEY)).json();
       for (const c of commands) await run(c);
-    } catch (e) {}
-    await new Promise(r => setTimeout(r, 80));
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 500));
+    }
   }
 }
 

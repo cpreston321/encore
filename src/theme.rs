@@ -25,9 +25,9 @@ pub struct Theme {
 
 impl Theme {
     pub fn for_appearance(appearance: WindowAppearance) -> Self {
-        // MUSIC_APPEARANCE=light|dark forces a theme (for checking both without changing
+        // ENCORE_APPEARANCE=light|dark forces a theme (for checking both without changing
         // the system setting).
-        match std::env::var("MUSIC_APPEARANCE").as_deref() {
+        match std::env::var("ENCORE_APPEARANCE").as_deref() {
             Ok("light") => return Self::light(),
             Ok("dark") => return Self::dark(),
             _ => {}
