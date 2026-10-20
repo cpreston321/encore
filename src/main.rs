@@ -10,6 +10,7 @@ mod localhost;
 mod lyrics;
 mod media;
 mod model;
+mod native;
 mod perf;
 mod queue;
 mod spectrum;

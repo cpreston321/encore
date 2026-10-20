@@ -35,6 +35,18 @@ The built-in Liquid Retina XDR display refreshes at up to 120 Hz, which leaves 8
 
 A few frames on the artist and playlist pages go over budget, about 3% of them. Those are most likely moments when newly downloaded artwork arrives mid-scroll and redraws the whole window. Apple's Music app doesn't expose frame timings, so it has no column here.
 
+## Native player
+
+On macOS 14+, full songs play through MusicKit's native player instead of MusicKit JS in a web view. Here's a second run with the native player, against the web player run above:
+
+| While playing | Encore, web player | Encore, native player | Music |
+| --- | ---: | ---: | ---: |
+| CPU (30 s average) | 5.5% | **2.9%** | 3.0% |
+| Processes | 6 | **3** | 6 |
+| Memory added by playback | +110 MB | **+61 MB** | |
+
+Memory totals varied between the two runs: idle Encore was 280 MB in the first and 542 MB in the second, and Music varied as much. That's down to how much artwork each app had loaded, so this table shows how much playback added. A crossfade still starts a web player for the incoming song, so these numbers apply to the time between crossfades, or to all of it with crossfade off.
+
 ## Idle
 
 GPUI keeps the macOS display link running for as long as a window is visible, which wakes the app 120 times a second even when nothing changes. Encore carries a small patch to GPUI ([vendor/gpui/PATCHES.md](../vendor/gpui/PATCHES.md)) that lets the link sleep until something needs drawing. Encore's own timers also run only while a song is playing. Measured on its own after settling, Encore's idle CPU went from **0.64%** to **0.02%**, against Music's 0.2%. The table above was recorded before this change.

@@ -13,7 +13,12 @@ cargo build --release "$@"
 app=target/Encore.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+mkdir -p "$app/Contents/Frameworks"
 cp target/release/encore "$app/Contents/MacOS/Encore"
+# The native MusicKit player; without it, full songs use the web player.
+if [ -f target/release/libencore_native.dylib ]; then
+  cp target/release/libencore_native.dylib "$app/Contents/Frameworks/"
+fi
 cp assets/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 cat > "$app/Contents/Info.plist" <<PLIST
@@ -31,6 +36,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$version</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSAppleMusicUsageDescription</key><string>Encore plays songs from your Apple Music subscription.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Encore sets the volume of the songs it plays by routing their audio through itself. Nothing is recorded.</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
 </dict>
@@ -39,10 +46,16 @@ PLIST
 
 identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)
 if [ -n "$identity" ]; then
+  for lib in "$app"/Contents/Frameworks/*.dylib; do
+    [ -e "$lib" ] && codesign --force --sign "$identity" "$lib"
+  done
   codesign --force --sign "$identity" --identifier io.github.cpreston321.encore "$app"
   codesign --verify --verbose=1 "$app"
 else
   echo "No Apple Development certificate found; signing ad hoc (Keychain will ask again after each build)." >&2
+  for lib in "$app"/Contents/Frameworks/*.dylib; do
+    [ -e "$lib" ] && codesign --force --sign - "$lib"
+  done
   codesign --force --sign - --identifier io.github.cpreston321.encore "$app"
 fi
 

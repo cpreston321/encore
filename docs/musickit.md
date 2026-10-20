@@ -69,6 +69,10 @@ Click **Sign In** at the bottom of the sidebar:
 3. The page posts the resulting **Music User Token** back to Encore. The page only accepts the token with a random per-session value, so other pages can't hand Encore a token.
 4. Encore saves the token in your Keychain under the service `Encore`.
 
+The first time you play a full song, macOS asks whether Encore can access Apple Music. Allowing it lets Encore use Apple's native player. If you don't, full songs play through the web player.
+
+The first time you change the volume or the crossfade setting, macOS asks to let Encore record system audio. MusicKit has no volume control on macOS, so Encore routes the native player's audio through itself to set its volume. Nothing is recorded or saved.
+
 The first time Encore reads the Keychain, macOS asks for permission. Click **Always Allow**. If you build with `./scripts/build.sh` and an Apple Development certificate, the app keeps the same identity between builds, so you won't be asked again.
 
 To sign out, click your name in the sidebar and choose **Sign Out**.

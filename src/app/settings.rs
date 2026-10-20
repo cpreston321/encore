@@ -8,6 +8,7 @@ impl MusicApp {
             crossfade_secs: self.crossfade_secs,
             collapsed: self.collapsed_sections.iter().cloned().collect(),
             recent_searches: self.recent_searches.clone(),
+            native_volume: self.native_volume_allowed,
         }
         .save();
     }
@@ -34,6 +35,9 @@ impl MusicApp {
 
     pub(crate) fn set_crossfade(&mut self, secs: u32, cx: &mut Context<Self>) {
         self.crossfade_secs = secs;
+        if secs > 0 {
+            self.ensure_native_volume(cx);
+        }
         self.save_settings();
         cx.notify();
     }

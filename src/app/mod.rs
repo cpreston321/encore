@@ -15,7 +15,7 @@ use gpui::{
 
 use crate::{
     api::{self, Catalog},
-    audio::{Audio, Preview},
+    audio::{Audio, FullPlayer, Preview},
     auth,
     library::Library,
     model::{Album, ArtistDetail, Browse, Playlist, RemoteLibrary, SearchResults, Song, Station},
@@ -138,6 +138,10 @@ struct Settings {
     collapsed: Vec<String>,
     #[serde(default)]
     recent_searches: Vec<String>,
+    /// The user has turned on volume control for the native player (and so been asked for
+    /// System Audio Recording permission).
+    #[serde(default)]
+    native_volume: bool,
 }
 
 fn default_crossfade() -> u32 {
@@ -154,6 +158,7 @@ impl Settings {
             crossfade_secs: default_crossfade(),
             collapsed: Vec::new(),
             recent_searches: Vec::new(),
+            native_volume: false,
         })
     }
 
@@ -330,6 +335,11 @@ pub struct MusicApp {
     /// Full-song players (Apple's web player), created on demand. A crossfade needs two:
     /// one finishing the old song while the other starts the next.
     web_players: Vec<Rc<WebPlayer>>,
+    /// MusicKit's native player, once the user has allowed Apple Music access.
+    pub(crate) native_player: Option<Rc<crate::native::NativePlayer>>,
+    /// The native player can't work here (macOS 13, no app bundle, access denied).
+    native_unavailable: bool,
+    pub(crate) native_volume_allowed: bool,
     /// The song fading out during a crossfade.
     fade: Option<Fade>,
     /// Crossfade length in seconds (0 = off); persisted in settings.json.
@@ -452,6 +462,9 @@ impl MusicApp {
             audio,
             progress,
             web_players: Vec::new(),
+            native_player: None,
+            native_unavailable: false,
+            native_volume_allowed: Settings::load().native_volume,
             fade: None,
             crossfade_secs: Settings::load().crossfade_secs,
             collapsed_sections: Settings::load().collapsed.into_iter().collect(),
@@ -670,8 +683,8 @@ impl Render for MusicApp {
             .on_action(cx.listener(|this, _: &PlayPause, _, cx| this.toggle_play(cx)))
             .on_action(cx.listener(|this, _: &NextTrack, _, cx| this.next(cx)))
             .on_action(cx.listener(|this, _: &PreviousTrack, _, cx| this.previous(cx)))
-            .on_action(cx.listener(|this, _: &VolumeUp, _, cx| this.set_volume(this.volume + 0.1, cx)))
-            .on_action(cx.listener(|this, _: &VolumeDown, _, cx| this.set_volume(this.volume - 0.1, cx)))
+            .on_action(cx.listener(|this, _: &VolumeUp, _, cx| this.change_volume(this.volume + 0.1, cx)))
+            .on_action(cx.listener(|this, _: &VolumeDown, _, cx| this.change_volume(this.volume - 0.1, cx)))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.go_root(Route::Search, window, cx);
             }))

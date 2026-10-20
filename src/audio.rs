@@ -1,13 +1,87 @@
-use std::{path::Path, time::Duration};
+use std::{path::Path, rc::Rc, time::Duration};
 
 use anyhow::{Context as _, Result};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 
-/// Playback engine: 30-second previews decoded locally, or full songs through Apple's
-/// web player when signed in.
+use crate::{native::NativePlayer, webplayer::WebPlayer};
+
+/// Playback engine: 30-second previews decoded locally, or full songs through one of Apple's
+/// players when signed in.
 pub enum Audio {
     Preview(Preview),
-    Full(std::rc::Rc<crate::webplayer::WebPlayer>),
+    Full(FullPlayer),
+}
+
+/// A player for complete songs: MusicKit's native player, or MusicKit JS in a hidden web
+/// view. A crossfade needs two at once and there's only one native player, so the incoming
+/// song can play on a web player while the native one fades out.
+#[derive(Clone)]
+pub enum FullPlayer {
+    Native(Rc<NativePlayer>),
+    Web(Rc<WebPlayer>),
+}
+
+macro_rules! forward {
+    ($self:ident.$method:ident($($arg:expr),*)) => {
+        match $self {
+            FullPlayer::Native(p) => p.$method($($arg),*),
+            FullPlayer::Web(p) => p.$method($($arg),*),
+        }
+    };
+}
+
+impl FullPlayer {
+    pub fn same(&self, other: &FullPlayer) -> bool {
+        match (self, other) {
+            (Self::Native(a), Self::Native(b)) => Rc::ptr_eq(a, b),
+            (Self::Web(a), Self::Web(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    pub fn load(&self, song_id: &str, volume: f32) {
+        forward!(self.load(song_id, volume))
+    }
+
+    pub fn play(&self) {
+        forward!(self.play())
+    }
+
+    pub fn pause(&self) {
+        forward!(self.pause())
+    }
+
+    pub fn stop(&self) {
+        forward!(self.stop())
+    }
+
+    pub fn seek(&self, secs: f32) {
+        forward!(self.seek(secs))
+    }
+
+    pub fn set_volume(&self, volume: f32) {
+        forward!(self.set_volume(volume))
+    }
+
+    pub fn is_playing(&self) -> bool {
+        forward!(self.is_playing())
+    }
+
+    pub fn position(&self) -> f32 {
+        forward!(self.position())
+    }
+
+    pub fn duration(&self) -> Option<f32> {
+        forward!(self.duration())
+    }
+
+    pub fn finished(&self) -> bool {
+        forward!(self.finished())
+    }
+
+    pub fn startup_error(&self) -> Option<String> {
+        forward!(self.startup_error())
+    }
 }
 
 impl Audio {

@@ -81,16 +81,25 @@ src/
 | Charts | `rss.marketingtools.apple.com` | Apple Music API charts |
 | Details, search | iTunes Search / Lookup | `api.music.apple.com` |
 | Library | local `library.json` | the user's Apple Music library (needs sign-in) |
-| Playback | 30 s previews | full songs via the web player, previews as fallback |
+| Playback | 30 s previews | full songs via the native or web player, previews as fallback |
 
 Every API call blocks, so `app/data.rs` runs them on GPUI's background executor and stores the result in a `Load<T>` (`Loading`, `Ready`, `Failed`). Pages render placeholders while data loads, sized like the real content so nothing shifts. Charts, the remote library and personal Home are cached on disk and shown right away on the next launch while fresh data loads.
 
 ## Playback
 
-`MusicApp.audio` holds an `Audio` value. It's either `Preview`, played by rodio from a downloaded file, or `Full`, played by `webplayer::WebPlayer`. Both expose the same small interface: play, pause, seek, volume, position and duration. That lets the queue, crossfade and player UI ignore which engine is active.
+`MusicApp.audio` holds an `Audio` value. It's either `Preview`, played by rodio from a downloaded file, or `Full`, holding an `audio::FullPlayer`. A `FullPlayer` is either the native player or a web player. All of them expose the same small interface: play, pause, seek, volume, position and duration. That lets the queue, crossfade and player UI ignore which engine is active.
 
-- **Full songs.** Apple only streams complete tracks to its own players. `WebPlayer` loads MusicKit JS into an offscreen `WKWebView` from a page served on `127.0.0.1`. The page long-polls `/cmd` for commands, so the request waits until there's something to do. It posts its state to `/state`. Both are keyed with a random token. A load sequence number makes sure a late error from an earlier song is ignored.
-- **Crossfade.** Near the end of a track, the playing engine moves to a fade-out slot. The next song starts silently in a fresh one, and `step_fade` trades their volumes every 30 ms.
+- **Native player (macOS 14+).** `native.rs` loads `libencore_native.dylib`, built from `native/EncoreNative.swift` by `build.rs`, and drives MusicKit's `ApplicationMusicPlayer` through a small C interface.
+  - MusicKit only issues developer tokens to apps registered with its service, so Encore hands it its own token through `MusicDataRequest.tokenProvider`.
+  - The song plays in MediaPlayer's `RemotePlayerService`, an XPC service macOS runs for the app, with no web view.
+  - At the end of a queue MusicKit reports "paused" with the time back at 0. `NativePlayer` tells that apart from a real pause by remembering whether the song reached its last seconds.
+  - Where the dylib can't load, as on macOS 13 or a binary outside an app bundle, Encore uses web players. So does `ENCORE_PLAYER=web`.
+- **Volume and the live visualizer (macOS 14.2+).** MusicKit has no volume control on macOS, so once the user asks for it, the Swift side taps `RemotePlayerService`'s audio with a Core Audio process tap.
+  - The tap mutes the service's own output, and a private aggregate device plays the audio again, scaled by the gain. The same callback fills a ring buffer that `spectrum::Live` analyzes for the visualizer.
+  - Because the tap mutes MusicKit, a silent tap would mean silence. A watchdog rebuilds it when the service restarts or the tap stops delivering audio during playback, and after repeated failures removes it, so MusicKit's own output plays.
+  - Creating the tap asks for System Audio Recording permission, so Encore only does it after the user changes the volume or the crossfade setting.
+- **Web players.** `WebPlayer` loads MusicKit JS into an offscreen `WKWebView` from a page served on `127.0.0.1`. The page long-polls `/cmd` for commands, so the request waits until there's something to do. It posts its state to `/state`. Both are keyed with a random token. A load sequence number makes sure a late error from an earlier song is ignored.
+- **Crossfade.** Near the end of a track, the playing engine moves to a fade-out slot. The next song starts silently in a fresh one, and `step_fade` trades their volumes every 30 ms. There's only one native player, so `full_player` picks a web player for the incoming song while the native one fades out, and the reverse at the next track. Idle web players are closed once the native player takes over again. The native player only fades once its volume control is on; until then, songs change without a crossfade.
 - **Gapless playback.** For consecutive tracks on the same album, the next track starts `GAPLESS_LEAD` (1.2 s) before the current one ends, and the two swap in a 120 ms handoff instead of an audible fade.
 - **System integration.** `media.rs` registers for media key and Control Center commands and publishes the Now Playing info.
 

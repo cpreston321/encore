@@ -17,13 +17,13 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 ## Features
 
 - **Your library.** Sign in with your Apple Music account to browse your Recently Added, Artists, Albums, Songs, playlists and Favorite Songs. You can also add to your library and playlists.
-- **Full songs.** Subscribers hear complete tracks, played by Apple's MusicKit JS player in a hidden web view. Everyone else gets 30-second previews.
-- **Crossfade and gapless playback.** Choose a 3, 6 or 12 second crossfade, or none. Consecutive album tracks hand off without a gap.
+- **Full songs.** Subscribers hear complete tracks through Apple's native MusicKit player on macOS 14 and later, or through MusicKit JS in a hidden web view on macOS 13. Everyone else gets 30-second previews.
+- **Crossfade and gapless playback.** Choose a 3, 6 or 12 second crossfade, or none. Consecutive album tracks hand off without a gap. Since there's only one native player, a crossfade plays the incoming song on a web player while the outgoing one fades out, and the two swap each track.
 - **Synced lyrics.** Lyrics come from [LRCLIB](https://lrclib.net) and follow along with the song. Click a line to jump there.
 - **Detail pages that take on the artwork's colors.** Album, artist and playlist pages tint to match their artwork, the header moves with parallax, and a compact title bar fades in as you scroll.
 - **Quick search (⌘K).** Spotlight-style results show a top result, artists, albums, songs and playlists from both your library and the Apple Music catalog.
 - **A Mac app first.** Media keys and Control Center's Now Playing work. There's a Mini Player, Dock menu controls, a menu bar item for every page, and full keyboard navigation.
-- **Visualizer.** Hovering the progress bar shows a live spectrum computed from the song's preview audio.
+- **Visualizer.** Hovering the progress bar shows a live spectrum of the song as it plays. Before volume control is on, or on the web player, it's computed from the song's preview instead.
 - **Library tools.** Sort and filter your Songs, Favorites and Albums. ⌘-click or ⇧-click to select several songs, and drag songs onto a playlist or into Playing Next.
 - **Fast and accessible.** Encore scrolls and animates at 120 fps on ProMotion displays. It launches in about a quarter of a second and uses less CPU than Music.app while playing ([benchmarks](docs/benchmarks.md)). It follows the system's light or dark appearance and honors Reduce Motion.
 
@@ -38,7 +38,7 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 
 ### Requirements
 
-- macOS 13 or later. The design targets macOS 26 Tahoe.
+- macOS 13 or later. The native player needs macOS 14, and its volume control needs 14.2. The design targets macOS 26 Tahoe.
 - [Rust](https://rustup.rs) 1.88 or later.
 - Xcode Command Line Tools: `xcode-select --install`.
 
@@ -93,10 +93,10 @@ Signing in needs a MusicKit key from an Apple Developer account. [docs/musickit.
 
 These limits come from Apple's APIs, not from Encore:
 
-- **Full-length playback needs a MusicKit key and an Apple Music subscription.** Apple only streams complete songs to its own players, so Encore drives MusicKit JS in a hidden web view.
+- **Full-length playback needs a MusicKit key and an Apple Music subscription.** Apple only streams complete songs to its own players: MusicKit's native player, or MusicKit JS in a hidden web view.
+- **Volume control for the native player needs System Audio Recording permission.** MusicKit has no volume control on macOS. So the first time you change the volume or crossfade setting, Encore asks to route the player's audio through itself using a Core Audio process tap. Nothing is recorded. If you decline, the slider changes the Mac's volume instead, and track changes don't crossfade.
 - **Playlists can be added to, but not edited.** The API can add songs and create playlists. It can't remove or reorder songs, and it can't delete anything from your library.
 - **Lyrics come from LRCLIB.** Apple doesn't share its own lyrics with third-party apps, so some songs have none.
-- **The visualizer analyzes the 30-second preview.** Full songs are DRM-protected and their audio can't be read.
 
 ## Where things are stored
 

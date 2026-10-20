@@ -36,27 +36,50 @@ impl MusicApp {
                     }
                 })
                 .ok();
-                // ENCORE_TOUR_SEEK_END=1: jump near the end once playing, to exercise crossfade.
-                if std::env::var_os("ENCORE_TOUR_SEEK_END").is_some() {
+                // ENCORE_TOUR_VOLUME=0.3: once playing, change the volume like the slider does.
+                if let Some(volume) = std::env::var("ENCORE_TOUR_VOLUME").ok().and_then(|v| v.parse::<f32>().ok()) {
+                    for _ in 0..60 {
+                        pause(1).await;
+                        if this.update(cx, |this, _| this.state == PlayState::Playing).unwrap_or(true) {
+                            break;
+                        }
+                    }
+                    this.update(cx, |this, cx| this.change_volume(volume, cx)).ok();
+                }
+                // ENCORE_TOUR_SEEK_END=n: jump near the end of n songs in a row, to exercise
+                // crossfades (with the native player, both directions of the engine swap).
+                let seek_ends = std::env::var("ENCORE_TOUR_SEEK_END").ok().map(|n| n.parse::<usize>().unwrap_or(1));
+                for _ in 0..seek_ends.unwrap_or(0) {
+                    let mut seeked_song = None;
                     for _ in 0..100 {
                         pause(1).await;
-                        let seeked = this
+                        seeked_song = this
                             .update(cx, |this, _| {
-                                if this.state != PlayState::Playing {
-                                    return false;
+                                if this.state != PlayState::Playing || this.fade.is_some() {
+                                    return None;
                                 }
-                                let Some(d) = this.audio.borrow().as_ref().and_then(Audio::duration) else {
-                                    return false;
-                                };
+                                let d = this.audio.borrow().as_ref().and_then(Audio::duration)?;
                                 let target = d - this.crossfade_secs as f32 - 4.;
                                 eprintln!("TOUR seeking to {target:.0}s of {d:.0}s");
                                 if let Some(audio) = this.audio.borrow().as_ref() {
                                     audio.seek(target);
                                 }
-                                true
+                                this.queue.current().map(|s| s.id.clone())
+                            })
+                            .unwrap_or(None);
+                        if seeked_song.is_some() {
+                            break;
+                        }
+                    }
+                    // Wait for the next song to take over before seeking again.
+                    for _ in 0..60 {
+                        pause(1).await;
+                        let moved_on = this
+                            .update(cx, |this, _| {
+                                this.fade.is_none() && this.queue.current().map(|s| &s.id) != seeked_song.as_ref()
                             })
                             .unwrap_or(true);
-                        if seeked {
+                        if moved_on {
                             break;
                         }
                     }
@@ -145,6 +168,15 @@ impl MusicApp {
                 pause(6).await;
             }
             this.update(cx, |this, _| {
+                if let Some(native) = &this.native_player {
+                    let mut samples = vec![0f32; 2048];
+                    let rate = native.samples(&mut samples);
+                    let peak = samples.iter().fold(0f32, |m, s| m.max(s.abs()));
+                    eprintln!(
+                        "TOUR native: volume control {:?}, live samples at {rate}Hz, peak {peak:.3}",
+                        native.volume_control()
+                    );
+                }
                 let full = this.audio.borrow().as_ref().is_some_and(Audio::is_full);
                 eprintln!(
                     "TOUR playback: full={full} state={:?} position={:.1}s duration={:.1}s",

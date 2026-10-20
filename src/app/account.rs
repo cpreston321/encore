@@ -189,6 +189,8 @@ impl MusicApp {
         }
         self.cancel_fade();
         self.web_players.clear();
+        self.native_player = None;
+        self.native_unavailable = false;
         self.personal = None;
         let _ = std::fs::remove_file(api::cache_dir().join("personal-home.json"));
         self.full_unavailable = false;

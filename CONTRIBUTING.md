@@ -36,6 +36,9 @@ For UI changes, include a screenshot or a short recording. If the change looks d
 | `ENCORE_TOUR=1` | Steps through every page every few seconds, for screenshots and profiling (debug builds, or `--features tour`) |
 | `ENCORE_TOUR_ONLY=albums,artist` | Limits the tour to those steps |
 | `ENCORE_TOUR_PLAY=1` | Starts silent playback during the tour |
+| `ENCORE_TOUR_VOLUME=0.3` | Once playing, changes the volume the way the slider does |
+| `ENCORE_TOUR_SEEK_END=2` | Jumps near the end of that many songs in a row, to exercise crossfades |
+| `ENCORE_PLAYER=web` | Uses the web player for full songs instead of the native one |
 | `ENCORE_TOUR_OVERLAY=palette` / `shortcuts` / `nowplaying` | Opens that overlay for the tour (`nowplaying` also needs `ENCORE_TOUR_PLAY=1`) |
 | `ENCORE_TOUR_SCROLL=1` | On each tour page, scrolls smoothly down and back, redrawing only the page, as a real scroll does. Use it with `ENCORE_PERF=1` to check that frames fit 120 Hz |
 | `ENCORE_TOUR_PLACEHOLDER_ART=1` | Replaces all artwork with generated gradients, for screenshots that don't include album covers or artist photos |

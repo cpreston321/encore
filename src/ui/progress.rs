@@ -55,6 +55,7 @@ pub struct Progress {
     /// The current song's spectrum (set by the app once analyzed).
     pub spectrum: RefCell<Option<std::sync::Arc<crate::spectrum::Spectrum>>>,
     shown_levels: RefCell<[f32; crate::spectrum::BANDS]>,
+    live: RefCell<crate::spectrum::Live>,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     /// Fill length last drawn, in half points.
     drawn_step: Cell<i64>,
@@ -73,6 +74,7 @@ impl Progress {
             hover: Cell::new(HoverAnim { hovered: false, from: 0., at: Instant::now() }),
             spectrum: RefCell::new(None),
             shown_levels: RefCell::new([0.; crate::spectrum::BANDS]),
+            live: RefCell::new(crate::spectrum::Live::new()),
             bounds,
             drawn_step: Cell::new(-1),
             app,
@@ -150,8 +152,15 @@ impl Progress {
     /// for previews and looped for full songs (whose DRM-protected audio can't be read).
     fn equalizer(&self, color: gpui::Hsla, playing: bool, position: f32) -> Vec<gpui::Div> {
         use crate::spectrum::BANDS;
-        let levels = match (&*self.spectrum.borrow(), playing) {
-            (Some(s), true) => s.at(position),
+        let live = match self.audio.borrow().as_ref() {
+            Some(Audio::Full(crate::audio::FullPlayer::Native(p))) if playing => {
+                self.live.borrow_mut().bands(|buf| p.samples(buf))
+            }
+            _ => None,
+        };
+        let levels = match (live, &*self.spectrum.borrow(), playing) {
+            (Some(levels), _, _) => levels,
+            (None, Some(s), true) => s.at(position),
             _ => [0.; BANDS],
         };
         // Ease toward the target each frame so pausing settles instead of snapping.

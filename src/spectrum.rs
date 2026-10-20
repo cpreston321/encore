@@ -1,5 +1,6 @@
-//! Frequency analysis of a song's preview clip for the player's visualizer. Full songs are
-//! DRM-protected and can't be read, but the 30-second preview is the song's real audio.
+//! Frequency analysis for the player's visualizer: live from the native player's audio when
+//! Encore routes it (see `native`), otherwise from the song's 30-second preview, which is the
+//! song's real audio. MusicKit JS's protected stream can't be read.
 
 use std::path::Path;
 
@@ -45,16 +46,8 @@ pub fn analyze(path: &Path) -> Result<Spectrum> {
     }
     let mono: Vec<f32> = interleaved.chunks(channels).map(|c| c.iter().sum::<f32>() / channels as f32).collect();
 
-    // Log-spaced band edges from 40 Hz to 16 kHz, as FFT bin indices.
-    let bin_hz = rate / FFT as f32;
-    let edges: Vec<usize> = (0..=BANDS)
-        .map(|i| {
-            let hz = 40. * (16_000f32 / 40.).powf(i as f32 / BANDS as f32);
-            ((hz / bin_hz) as usize).clamp(1, FFT / 2 - 1)
-        })
-        .collect();
-    let window: Vec<f32> =
-        (0..FFT).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos()).collect();
+    let edges = band_edges(rate);
+    let window = hann();
 
     let hop = (rate / FPS) as usize;
     let mut frames = Vec::new();
@@ -97,6 +90,74 @@ pub fn analyze(path: &Path) -> Result<Spectrum> {
     Ok(Spectrum { frames })
 }
 
+/// Log-spaced band edges from 40 Hz to 16 kHz, as FFT bin indices.
+fn band_edges(rate: f32) -> Vec<usize> {
+    let bin_hz = rate / FFT as f32;
+    (0..=BANDS)
+        .map(|i| {
+            let hz = 40. * (16_000f32 / 40.).powf(i as f32 / BANDS as f32);
+            ((hz / bin_hz) as usize).clamp(1, FFT / 2 - 1)
+        })
+        .collect()
+}
+
+fn hann() -> Vec<f32> {
+    (0..FFT).map(|i| 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos()).collect()
+}
+
+/// Band levels from a stream of samples as it plays. A live stream can't be normalised against
+/// the whole clip like `analyze` does, so the range follows a slowly decaying loudest band.
+pub struct Live {
+    rate: f32,
+    edges: Vec<usize>,
+    window: Vec<f32>,
+    samples: Vec<f32>,
+    peak_db: f32,
+    prev: [f32; BANDS],
+}
+
+impl Default for Live {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Live {
+    pub fn new() -> Self {
+        Self { rate: 0., edges: Vec::new(), window: hann(), samples: vec![0.; FFT], peak_db: -20., prev: [0.; BANDS] }
+    }
+
+    /// The buffer `fill` copies the latest `FFT` mono samples into; it returns the sample rate.
+    pub fn bands(&mut self, fill: impl FnOnce(&mut [f32]) -> f32) -> Option<[f32; BANDS]> {
+        let rate = fill(&mut self.samples);
+        if rate <= 0. {
+            return None;
+        }
+        if rate != self.rate {
+            self.rate = rate;
+            self.edges = band_edges(rate);
+        }
+        let mut re: Vec<f32> = self.samples.iter().zip(&self.window).map(|(s, w)| s * w).collect();
+        let mut im = vec![0f32; FFT];
+        fft(&mut re, &mut im);
+        let db: [f32; BANDS] = std::array::from_fn(|b| {
+            let (lo, hi) = (self.edges[b], self.edges[b + 1].max(self.edges[b] + 1));
+            let power: f32 = (lo..hi).map(|k| re[k] * re[k] + im[k] * im[k]).sum::<f32>() / (hi - lo) as f32;
+            10. * (power + 1e-12).log10() + 9. * b as f32 / BANDS as f32
+        });
+        let loudest = db.iter().copied().fold(f32::MIN, f32::max);
+        self.peak_db = loudest.max(self.peak_db - 0.05);
+        const RANGE: f32 = 45.;
+        let mut out = [0f32; BANDS];
+        for b in 0..BANDS {
+            let level = ((db[b] - (self.peak_db - RANGE)) / RANGE).clamp(0., 1.).powf(1.4);
+            out[b] = if level > self.prev[b] { level } else { self.prev[b] * 0.82 + level * 0.18 };
+        }
+        self.prev = out;
+        Some(out)
+    }
+}
+
 /// In-place iterative radix-2 FFT.
 fn fft(re: &mut [f32], im: &mut [f32]) {
     let n = re.len();
@@ -134,6 +195,28 @@ fn fft(re: &mut [f32], im: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_bands_follow_a_tone() {
+        let mut live = Live::new();
+        let rate = 48_000.;
+        let tone = |buf: &mut [f32]| {
+            for (i, s) in buf.iter_mut().enumerate() {
+                *s = (std::f32::consts::TAU * 1_000. * i as f32 / rate).sin() * 0.5;
+            }
+            rate
+        };
+        let mut bands = [0.; BANDS];
+        for _ in 0..5 {
+            bands = live.bands(tone).unwrap();
+        }
+        let edges = band_edges(rate);
+        let bin = (1_000. / (rate / FFT as f32)) as usize;
+        let band = (0..BANDS).find(|&b| bin >= edges[b] && bin < edges[b + 1].max(edges[b] + 1)).unwrap();
+        assert!(bands[band] > 0.8, "band {band} at {}", bands[band]);
+        assert!(bands[0] < bands[band] && bands[BANDS - 1] < bands[band]);
+        assert!(live.bands(|_| 0.).is_none());
+    }
 
     #[test]
     fn fft_finds_a_pure_tone() {

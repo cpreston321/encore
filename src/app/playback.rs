@@ -2,6 +2,7 @@
 //! and the media keys / Control Center integration.
 
 use super::*;
+use crate::native::VolumeControl;
 
 impl MusicApp {
     pub(crate) fn play(&mut self, songs: Vec<Song>, start: usize, shuffle: bool, cx: &mut Context<Self>) {
@@ -46,6 +47,7 @@ impl MusicApp {
         self.load_spectrum(&song, cx);
         if let Some(player) = self.full_player() {
             *self.audio.borrow_mut() = Some(Audio::Full(player.clone()));
+            self.release_web_players();
             player.load(&song.id, self.start_volume());
             self.state = PlayState::Loading;
             self.loading_since = Some(std::time::Instant::now());
@@ -58,7 +60,7 @@ impl MusicApp {
 
     /// The signed-in full-song player, created on first use. `None` when signed out or
     /// after full playback proved unavailable this session.
-    pub(crate) fn full_player(&mut self) -> Option<Rc<WebPlayer>> {
+    pub(crate) fn full_player(&mut self) -> Option<FullPlayer> {
         if self.account != Account::SignedIn || self.full_unavailable {
             return None;
         }
@@ -67,19 +69,54 @@ impl MusicApp {
             Some(Audio::Full(p)) => Some(p.clone()),
             _ => None,
         };
-        if let Some(player) = self.web_players.iter().find(|p| busy.as_ref().is_none_or(|b| !Rc::ptr_eq(b, p))) {
-            return Some(player.clone());
+        let free = |p: &FullPlayer| busy.as_ref().is_none_or(|b| !b.same(p));
+        if let Some(native) = self.native().map(FullPlayer::Native).filter(free) {
+            return Some(native);
+        }
+        if let Some(player) = self.web_players.iter().map(|p| FullPlayer::Web(p.clone())).find(free) {
+            return Some(player);
         }
         let (developer, user) = (self.catalog.developer_token()?, self.catalog.user_token()?);
         match WebPlayer::new(developer, user) {
             Ok(player) => {
                 let player = Rc::new(player);
                 self.web_players.push(player.clone());
-                Some(player)
+                Some(FullPlayer::Web(player))
             }
             Err(e) => {
                 eprintln!("full playback unavailable: {e:#}");
                 self.full_unavailable = true;
+                None
+            }
+        }
+    }
+
+    /// MusicKit's native player, opened on first use. Until the user answers MusicKit's
+    /// permission prompt, full songs keep using the web player. `ENCORE_PLAYER=web` forces it.
+    fn native(&mut self) -> Option<Rc<crate::native::NativePlayer>> {
+        use crate::native::{NativePlayer, Open};
+        if let Some(player) = &self.native_player {
+            return Some(player.clone());
+        }
+        if self.native_unavailable {
+            return None;
+        }
+        if std::env::var("ENCORE_PLAYER").as_deref() == Ok("web") {
+            self.native_unavailable = true;
+            return None;
+        }
+        match NativePlayer::open(self.catalog.developer_token()?) {
+            Open::Ready(player) => {
+                if self.native_volume_allowed {
+                    player.enable_volume();
+                }
+                let player = Rc::new(player);
+                self.native_player = Some(player.clone());
+                Some(player)
+            }
+            Open::Waiting => None,
+            Open::Unavailable => {
+                self.native_unavailable = true;
                 None
             }
         }
@@ -235,8 +272,10 @@ impl MusicApp {
                 };
                 let timed_out = self.loading_since.is_some_and(|t| t.elapsed() > Duration::from_secs(20));
                 if playing {
+                    let native = matches!(self.audio.borrow().as_ref(), Some(Audio::Full(FullPlayer::Native(_))));
                     eprintln!(
-                        "full playback started ({:.0}s long)",
+                        "full playback started on the {} player ({:.0}s long)",
+                        if native { "native" } else { "web" },
                         self.audio.borrow().as_ref().and_then(Audio::duration).unwrap_or(0.)
                     );
                     self.state = PlayState::Playing;
@@ -361,7 +400,7 @@ impl MusicApp {
             // Starts the next track just before this one ends; streams need a moment to
             // begin, so this lands close to seamless.
             Some(GAPLESS_LEAD)
-        } else if self.crossfade_secs > 0 {
+        } else if self.crossfade_secs > 0 && self.can_fade_out() {
             Some(self.crossfade_secs as f32)
         } else {
             None
@@ -448,9 +487,19 @@ impl MusicApp {
             if let Some(mut fade) = self.fade.take() {
                 fade.outgoing.stop();
             }
+            self.release_web_players();
             return false;
         }
         true
+    }
+
+    /// With the native player playing, web players are only needed for the next crossfade, and
+    /// each keeps a WebKit page with several processes alive, so they're closed until then.
+    fn release_web_players(&mut self) {
+        let native_playing = matches!(self.audio.borrow().as_ref(), Some(Audio::Full(FullPlayer::Native(_))));
+        if native_playing && self.fade.is_none() {
+            self.web_players.clear();
+        }
     }
 
     /// Ends any fade at once: the old song stops and the new one jumps to full volume.
@@ -461,6 +510,7 @@ impl MusicApp {
                 audio.set_volume(self.volume);
             }
         }
+        self.release_web_players();
     }
 
     pub(crate) fn jump_ahead(&mut self, n: usize, cx: &mut Context<Self>) {
@@ -495,6 +545,50 @@ impl MusicApp {
         match self.queue.current() {
             Some(s) if full && s.duration_ms > 0 => s.duration_ms as f32 / 1000.,
             _ => 30.,
+        }
+    }
+
+    /// A volume change from the user. The first one with the native player turns on its
+    /// volume control; if that's unavailable, the Mac's output volume changes instead.
+    pub(crate) fn change_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        self.set_volume(volume, cx);
+        self.ensure_native_volume(cx);
+        let native = match self.audio.borrow().as_ref() {
+            Some(Audio::Full(FullPlayer::Native(p))) => Some(p.clone()),
+            _ => None,
+        };
+        if let Some(native) = native
+            && native.volume_control() == VolumeControl::Unavailable
+        {
+            native.set_system_volume(self.volume);
+        }
+    }
+
+    /// Turns on the native player's volume control the first time it's needed, saying why
+    /// macOS is about to ask for System Audio Recording permission.
+    pub(crate) fn ensure_native_volume(&mut self, cx: &mut Context<Self>) {
+        let Some(native) = self.native_player.clone() else { return };
+        if native.volume_control() != VolumeControl::None {
+            return;
+        }
+        if !self.native_volume_allowed {
+            self.native_volume_allowed = true;
+            self.save_settings();
+            self.show_notice(
+                "macOS will ask to let Encore record system audio. Encore only uses it to set the volume of the songs it plays."
+                    .into(),
+                cx,
+            );
+        }
+        native.enable_volume();
+    }
+
+    /// The playing song can be faded down: anything but the native player before its volume
+    /// control is on.
+    fn can_fade_out(&self) -> bool {
+        match self.audio.borrow().as_ref() {
+            Some(Audio::Full(FullPlayer::Native(p))) => p.volume_control() == VolumeControl::Active,
+            _ => true,
         }
     }
 
@@ -538,7 +632,7 @@ impl MusicApp {
                 p.set_scrub(Some(fraction));
                 cx.notify();
             }),
-            Drag::Volume => self.set_volume(fraction, cx),
+            Drag::Volume => self.change_volume(fraction, cx),
             Drag::BigProgress => {
                 self.np_scrub = Some(fraction);
                 cx.notify();
