@@ -257,7 +257,13 @@ impl Elastic {
             .map_or(1. / 120., |last| now.duration_since(last).as_secs_f32())
             .clamp(1. / 240., 1. / 30.);
         self.last_event = Some(now);
-        self.last_tick = Some(now);
+        // A spring keeps its own clock. Momentum events go on arriving while it pulls the
+        // view back, each just before a frame, and restarting the clock at each one would
+        // step the spring by only the time since that event: it would barely move until
+        // the momentum ran out.
+        if !self.springing() {
+            self.last_tick = Some(now);
+        }
         let input = ScrollInput::of(event);
         match input {
             ScrollInput::Touch => match event.touch_phase {
@@ -299,6 +305,10 @@ impl Elastic {
         self.phased = false;
         self.x.release();
         self.y.release();
+    }
+
+    fn springing(&self) -> bool {
+        self.x.spring.is_some() || self.y.spring.is_some()
     }
 
     pub(crate) fn is_stretched(&self) -> bool {
@@ -375,6 +385,34 @@ mod tests {
             }
         }
         (now, peak)
+    }
+
+    #[test]
+    fn momentum_events_dont_stall_the_spring_back() {
+        let mut elastic = Elastic::default();
+        let mut offset = 0.;
+        let mut now = Instant::now();
+        feed(&mut elastic, &mut offset, touch(TouchPhase::Started, 0.), 1000., now);
+        for _ in 0..20 {
+            now += Duration::from_millis(8);
+            feed(&mut elastic, &mut offset, touch(TouchPhase::Moved, 30.), 1000., now);
+        }
+        now += Duration::from_millis(8);
+        feed(&mut elastic, &mut offset, touch(TouchPhase::Ended, 0.), 1000., now);
+        let stretched = elastic.y.overscroll;
+        assert!(stretched > 50.);
+        // Momentum arrives 1 ms before every frame for half a second.
+        for _ in 0..60 {
+            now += Duration::from_millis(7);
+            feed(&mut elastic, &mut offset, momentum(TouchPhase::Moved, 4.), 1000., now);
+            now += Duration::from_millis(1);
+            elastic.tick(now);
+        }
+        assert!(
+            elastic.y.overscroll.abs() < stretched * 0.05,
+            "still {} of {stretched} past the edge",
+            elastic.y.overscroll
+        );
     }
 
     #[test]
