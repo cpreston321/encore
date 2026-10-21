@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::api::More;
+
 use gpui::{
     AnyElement, Context, Div, FontWeight, Hsla, ObjectFit, ScrollHandle, SharedString, Stateful, div, img,
     linear_color_stop, linear_gradient, prelude::*, px, white,
@@ -350,6 +352,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Top Songs",
+                    Some(More::ArtistTopSongs(id.to_string())),
                     move |this| {
                         (match this.artists.get(&artist_id) {
                             Some(Load::Ready(d)) => Some(d),
@@ -376,6 +379,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     title,
+                    None,
                     move |this| {
                         (match this.artists.get(&artist_id) {
                             Some(Load::Ready(d)) => Some(d),
@@ -414,6 +418,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Similar Artists",
+                    Some(More::SimilarArtists(id.to_string())),
                     move |this| {
                         (match this.artists.get(&artist_id) {
                             Some(Load::Ready(d)) => Some(d),
@@ -845,6 +850,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "You Might Also Like",
+                    None,
                     move |this| match this.related_albums.get(&id) {
                         Some(Load::Ready(albums)) => Some(SeeAllItems::Albums(Arc::new(albums.clone()))),
                         _ => None,

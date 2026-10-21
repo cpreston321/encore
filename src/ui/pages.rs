@@ -1,6 +1,7 @@
 //! Browse pages: routing plus Home, New, Radio and Search.
 
 use super::*;
+use crate::api::More;
 use crate::{app::SeeAllItems, keys::TextFieldId};
 
 impl MusicApp {
@@ -121,6 +122,7 @@ impl MusicApp {
             .child(self.section_link(
                 t,
                 "Best New Songs",
+                Some(More::BestNewSongs),
                 |this| this.browse.ready().map(|b| SeeAllItems::Songs(Arc::new(b.best_new_songs()))),
                 cx,
             ))
@@ -135,6 +137,7 @@ impl MusicApp {
             .child(self.section_link(
                 t,
                 "New Releases",
+                Some(More::NewReleases),
                 |this| this.browse.ready().map(|b| SeeAllItems::Albums(Arc::new(b.new_releases()))),
                 cx,
             ))
@@ -142,6 +145,7 @@ impl MusicApp {
             .child(self.section_link(
                 t,
                 "Top Playlists",
+                Some(More::TopPlaylists),
                 |this| this.browse.ready().map(|b| SeeAllItems::Playlists(Arc::new(b.top_playlists.clone()))),
                 cx,
             ))
@@ -230,6 +234,7 @@ impl MusicApp {
                     .child(self.section_link(
                         t,
                         "Recently Played",
+                        None,
                         |this| {
                             (match &this.personal {
                                 Some(Load::Ready(Some(home))) => Some(home),
@@ -253,6 +258,7 @@ impl MusicApp {
                     .child(self.section_link(
                         t,
                         title.clone(),
+                        None,
                         move |this| {
                             (match &this.personal {
                                 Some(Load::Ready(Some(home))) => Some(home),
@@ -269,6 +275,7 @@ impl MusicApp {
                     .child(self.section_link(
                         t,
                         "Heavy Rotation",
+                        None,
                         |this| {
                             (match &this.personal {
                                 Some(Load::Ready(Some(home))) => Some(home),
@@ -312,6 +319,7 @@ impl MusicApp {
             .child(self.section_link(
                 t,
                 if self.personal.is_some() { "Top Picks" } else { "Top Picks for You" },
+                Some(More::TopPlaylists),
                 |this| this.browse.ready().map(|b| SeeAllItems::Playlists(Arc::new(b.top_playlists.clone()))),
                 cx,
             ))
@@ -319,6 +327,7 @@ impl MusicApp {
             .child(self.section_link(
                 t,
                 "Top Songs",
+                Some(More::TopSongs),
                 |this| this.browse.ready().map(|b| SeeAllItems::Songs(Arc::new(b.top_songs.clone()))),
                 cx,
             ))
@@ -333,6 +342,7 @@ impl MusicApp {
             .child(self.section_link(
                 t,
                 "Top Albums",
+                Some(More::TopAlbums),
                 |this| this.browse.ready().map(|b| SeeAllItems::Albums(Arc::new(b.top_albums.clone()))),
                 cx,
             ))
@@ -445,6 +455,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Live Stations",
+                    None,
                     |this| match &this.stations {
                         Some(Load::Ready(s)) if s.len() > 1 => Some(SeeAllItems::Stations(Arc::new(s[1..].to_vec()))),
                         _ => None,
@@ -574,6 +585,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Top Results",
+                    None,
                     |this| {
                         (this
                             .search_results
@@ -614,6 +626,7 @@ impl MusicApp {
                     .child(self.section_link(
                         t,
                         "Top Songs Right Now",
+                        Some(More::TopSongs),
                         |this| this.browse.ready().map(|b| SeeAllItems::Songs(Arc::new(b.top_songs.clone()))),
                         cx,
                     ))
@@ -675,6 +688,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Artists",
+                    None,
                     |this| {
                         (this
                             .search_results
@@ -691,6 +705,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Songs",
+                    None,
                     |this| {
                         (this
                             .search_results
@@ -711,6 +726,7 @@ impl MusicApp {
                 .child(self.section_link(
                     t,
                     "Albums",
+                    None,
                     |this| {
                         (this
                             .search_results

@@ -363,7 +363,9 @@ impl MusicApp {
         }
         if let Some(browse) = self.browse.ready() {
             use crate::app::{SeeAll, SeeAllItems};
-            let page = |title: &str, items| Route::SeeAll(Arc::new(SeeAll { title: title.to_string().into(), items }));
+            let page = |title: &str, items| {
+                Route::SeeAll(Arc::new(SeeAll { title: title.to_string().into(), items, more: None }))
+            };
             steps.push((
                 "see-all-songs".into(),
                 page("Top Songs", SeeAllItems::Songs(Arc::new(browse.top_songs.clone()))),

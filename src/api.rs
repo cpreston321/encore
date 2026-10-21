@@ -18,6 +18,25 @@ use crate::model::{
 
 pub const STOREFRONT: &str = "us";
 
+/// A shelf whose See All page can show more than the shelf loaded.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum More {
+    TopSongs,
+    BestNewSongs,
+    TopAlbums,
+    NewReleases,
+    TopPlaylists,
+    ArtistTopSongs(String),
+    SimilarArtists(String),
+}
+
+pub enum MoreItems {
+    Songs(Vec<Song>),
+    Albums(Vec<Album>),
+    Playlists(Vec<Playlist>),
+    Artists(Vec<Artist>),
+}
+
 /// Developer token, plus the signed-in user's Music User Token when there is one.
 #[derive(Clone)]
 pub struct Auth {
@@ -69,6 +88,15 @@ impl Catalog {
         match self {
             Self::Public => public::browse(),
             Self::MusicKit(auth) => musickit::browse(auth),
+        }
+    }
+
+    /// The longer list behind a See All page. The public feeds have nothing beyond what the
+    /// shelves already show, so they answer `None`.
+    pub fn more(&self, more: &More) -> Result<Option<MoreItems>> {
+        match self {
+            Self::Public => Ok(None),
+            Self::MusicKit(auth) => musickit::more(auth, more).map(Some),
         }
     }
 
@@ -733,6 +761,63 @@ mod musickit {
         })
     }
 
+    /// How far down Apple's charts a See All page goes; the API pages them 50 at a time.
+    const CHART_DEPTH: usize = 200;
+
+    /// One chart, `kind` being `songs`, `albums` or `playlists`, fetched a page per thread.
+    fn chart(auth: &Auth, kind: &str) -> Result<Vec<Value>> {
+        const PAGE: usize = 50;
+        let pages = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..CHART_DEPTH / PAGE)
+                .map(|n| s.spawn(move || get(auth, &format!("charts?types={kind}&limit={PAGE}&offset={}", n * PAGE))))
+                .collect();
+            handles.into_iter().map(|h| h.join()).collect::<Vec<_>>()
+        });
+        let mut out = Vec::new();
+        for page in pages {
+            let page = page.map_err(|_| anyhow!("chart request panicked"))?;
+            // A chart shorter than the depth answers the pages past its end with nothing or
+            // an error; what came before is still the whole chart.
+            let Ok(page) = page else { break };
+            let data = page["results"][kind][0]["data"].as_array().cloned().unwrap_or_default();
+            if data.is_empty() {
+                break;
+            }
+            out.extend(data);
+        }
+        if out.is_empty() {
+            return Err(anyhow!("Apple Music returned an empty {kind} chart"));
+        }
+        Ok(out)
+    }
+
+    pub fn more(auth: &Auth, more: &More) -> Result<MoreItems> {
+        let songs = |values: Vec<Value>| values.iter().map(song).collect::<Vec<_>>();
+        let albums = |values: Vec<Value>| values.iter().map(parse_album).collect::<Vec<_>>();
+        Ok(match more {
+            More::TopSongs => MoreItems::Songs(songs(chart(auth, "songs")?)),
+            More::BestNewSongs => MoreItems::Songs(
+                Browse { top_songs: songs(chart(auth, "songs")?), ..Browse::default() }.best_new_songs(),
+            ),
+            More::TopAlbums => MoreItems::Albums(albums(chart(auth, "albums")?)),
+            More::NewReleases => MoreItems::Albums(
+                Browse { top_albums: albums(chart(auth, "albums")?), ..Browse::default() }.new_releases(),
+            ),
+            More::TopPlaylists => MoreItems::Playlists(chart(auth, "playlists")?.iter().map(playlist).collect()),
+            More::ArtistTopSongs(id) => MoreItems::Songs(songs(get_all(
+                auth,
+                &format!("{API}/{STOREFRONT}/artists/{id}/view/top-songs?limit=20"),
+                100,
+            )?)),
+            More::SimilarArtists(id) => MoreItems::Artists(
+                get_all(auth, &format!("{API}/{STOREFRONT}/artists/{id}/view/similar-artists?limit=15"), 60)?
+                    .iter()
+                    .map(parse_artist)
+                    .collect(),
+            ),
+        })
+    }
+
     pub fn album(auth: &Auth, id: &str) -> Result<(Album, Vec<Song>)> {
         if id.starts_with("l.") {
             let json = get_me(auth, &format!("library/albums/{id}?include=catalog"))?;
@@ -1221,6 +1306,35 @@ mod tests {
     }
 
     /// Uses the configured MusicKit key against the live API. Run with `cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn live_see_all_goes_past_the_shelves() {
+        let (catalog, note) = Catalog::from_env();
+        assert!(note.is_none(), "{note:?}");
+        let count = |more: More| match catalog.more(&more).map_err(|e| format!("{more:?}: {e:#}")).unwrap().unwrap() {
+            MoreItems::Songs(v) => v.len(),
+            MoreItems::Albums(v) => v.len(),
+            MoreItems::Playlists(v) => v.len(),
+            MoreItems::Artists(v) => v.len(),
+        };
+        let (songs, albums, playlists) = (count(More::TopSongs), count(More::TopAlbums), count(More::TopPlaylists));
+        println!("top songs {songs}, albums {albums}, playlists {playlists}");
+        let shelf = catalog.browse().unwrap();
+        println!(
+            "best new songs {} (shelf {}), new releases {} (shelf {})",
+            count(More::BestNewSongs),
+            shelf.best_new_songs().len(),
+            count(More::NewReleases),
+            shelf.new_releases().len()
+        );
+        assert!(songs > 50 && albums > 50, "charts stopped at the shelf's 50");
+        let artist = catalog.find_artist("Zach Bryan").unwrap().expect("Zach Bryan");
+        let top = count(More::ArtistTopSongs(artist.clone()));
+        let similar = count(More::SimilarArtists(artist));
+        println!("artist top songs {top}, similar {similar}");
+        assert!(top > 20);
+    }
+
     #[test]
     #[ignore]
     fn live_musickit_catalog() {

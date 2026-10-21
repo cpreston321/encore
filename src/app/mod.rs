@@ -77,7 +77,10 @@ pub enum Route {
 #[derive(Clone, Debug)]
 pub struct SeeAll {
     pub title: SharedString,
+    /// What the shelf had loaded, shown at once.
     pub items: SeeAllItems,
+    /// Where the rest comes from, when the shelf showed only the start of a longer list.
+    pub more: Option<crate::api::More>,
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +94,16 @@ pub enum SeeAllItems {
 }
 
 impl SeeAllItems {
+    pub(crate) fn from_more(items: crate::api::MoreItems) -> Self {
+        use crate::api::MoreItems;
+        match items {
+            MoreItems::Songs(v) => Self::Songs(Arc::new(v)),
+            MoreItems::Albums(v) => Self::Albums(Arc::new(v)),
+            MoreItems::Playlists(v) => Self::Playlists(Arc::new(v)),
+            MoreItems::Artists(v) => Self::Artists(Arc::new(v)),
+        }
+    }
+
     fn len(&self) -> usize {
         match self {
             Self::Songs(v) => v.len(),
@@ -360,6 +373,8 @@ pub struct MusicApp {
         RefCell<Option<((String, (usize, usize, usize, usize, usize)), Arc<crate::keys::LocalMatches>)>>,
     pub(crate) forward_history: Vec<Route>,
     /// Horizontal shelves by id, for settling them on a tile after a swipe.
+    /// See All pages' longer lists, fetched when a page opens.
+    pub(crate) see_all_more: HashMap<crate::api::More, Load<SeeAllItems>>,
     pub(crate) shelves: RefCell<HashMap<&'static str, crate::ui::gestures::Shelf>>,
     /// A two-finger swipe toward the previous or next page, while it's in progress.
     pub(crate) nav_swipe: Option<crate::ui::gestures::Swipe>,
@@ -533,6 +548,7 @@ impl MusicApp {
             local_matches_cache: RefCell::default(),
             forward_history: Vec::new(),
             shelves: RefCell::default(),
+            see_all_more: HashMap::new(),
             nav_swipe: None,
             player_swipe: Default::default(),
             swipe_seen: None,

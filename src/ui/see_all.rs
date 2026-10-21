@@ -1,7 +1,10 @@
 //! See All pages: everything in a shelf whose header was clicked.
 
 use super::*;
-use crate::app::{SeeAll, SeeAllItems};
+use crate::{
+    api::More,
+    app::{SeeAll, SeeAllItems},
+};
 
 impl MusicApp {
     /// A shelf title with a chevron that opens the shelf's See All page. `items` builds the full
@@ -10,14 +13,45 @@ impl MusicApp {
         &self,
         t: &Theme,
         title: impl Into<SharedString>,
+        more: Option<More>,
         items: impl Fn(&MusicApp) -> Option<SeeAllItems> + 'static,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let title = title.into();
         let page_title = title.clone();
-        self.section_header_clickable(t, title, cx, move |this| {
-            items(this).map(|items| Route::SeeAll(Arc::new(SeeAll { title: page_title.clone(), items })))
+        self.section_header_clickable(t, title, cx, move |this, cx| {
+            let items = items(this)?;
+            if let Some(more) = &more {
+                this.load_more(more.clone(), cx);
+            }
+            Some(Route::SeeAll(Arc::new(SeeAll { title: page_title.clone(), items, more: more.clone() })))
         })
+    }
+
+    /// Starts fetching a See All page's longer list, unless it's loaded or on its way.
+    fn load_more(&mut self, more: More, cx: &mut Context<Self>) {
+        if matches!(self.see_all_more.get(&more), Some(Load::Ready(_) | Load::Loading)) {
+            return;
+        }
+        self.see_all_more.insert(more.clone(), Load::Loading);
+        let job = more.clone();
+        self.fetch(
+            cx,
+            move |c| c.more(&job),
+            move |this, load, cx| {
+                match load {
+                    Load::Ready(Some(items)) => {
+                        this.see_all_more.insert(more, Load::Ready(SeeAllItems::from_more(items)));
+                    }
+                    // Nothing more to show, or it failed: the page keeps the shelf's items, and
+                    // opening it again tries again.
+                    _ => {
+                        this.see_all_more.remove(&more);
+                    }
+                }
+                cx.notify();
+            },
+        );
     }
 
     /// A shelf title with a chevron that opens `route`.
@@ -28,7 +62,7 @@ impl MusicApp {
         route: Route,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        self.section_header_clickable(t, title.into(), cx, move |_| Some(route.clone()))
+        self.section_header_clickable(t, title.into(), cx, move |_, _| Some(route.clone()))
     }
 
     fn section_header_clickable(
@@ -36,13 +70,13 @@ impl MusicApp {
         t: &Theme,
         title: SharedString,
         cx: &mut Context<Self>,
-        target: impl Fn(&MusicApp) -> Option<Route> + 'static,
+        target: impl Fn(&mut MusicApp, &mut Context<MusicApp>) -> Option<Route> + 'static,
     ) -> impl IntoElement {
         tahoe::SectionHeader::new(ElementId::Name(format!("see-all-{title}").into()), title)
             .inset(PAD)
             .theme(*t)
             .on_click(cx.listener(move |this, _, _, cx| {
-                if let Some(route) = target(this) {
+                if let Some(route) = target(this, cx) {
                     this.push(route, cx);
                 }
             }))
@@ -57,7 +91,13 @@ impl MusicApp {
     ) -> AnyElement {
         let (_, tile) = grid_layout(content_w, 170., usize::MAX);
         let grid = |children: Vec<AnyElement>| grid_container().pb_6().children(children);
-        let body: AnyElement = match &page.items {
+        let items = page
+            .more
+            .as_ref()
+            .and_then(|more| self.see_all_more.get(more))
+            .and_then(Load::ready)
+            .unwrap_or(&page.items);
+        let body: AnyElement = match items {
             SeeAllItems::Songs(songs) => {
                 self.song_table(t, "see-all-songs", songs.as_ref().clone(), cx).into_any_element()
             }
