@@ -1139,17 +1139,41 @@ float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
 // Apple-style continuous corners. A circular corner meets the straight edge with
 // a jump in curvature, which reads as a kink, most of all in a glass rim's
 // highlight. Here each corner is the curve (x/Rx)^nx + (y/Ry)^ny = 1 in a box
-// Rx by Ry, up to CONTINUOUS_CORNER_REACH times the radius, so the curve starts
-// further along the edge. Where an edge has room for that, its exponent rises
-// to CONTINUOUS_CORNER_EXPONENT, and the curve leaves the edge with no curvature
-// at all; where it doesn't (the ends of a capsule, a circle), the exponent stays
-// 2, so circles stay circles and capsule ends stay round.
+// Rx by Ry, so the curve can start further along the edge than a circle's. Along
+// an edge with room for that, the exponent rises to CONTINUOUS_CORNER_EXPONENT
+// and the curve leaves the edge with no curvature at all; where there's no room
+// (a circle, or across a capsule) it stays 2.
+//
+// How far the curve reaches along an edge depends on the other edge. With room
+// on both, a corner reaches CONTINUOUS_CORNER_REACH times the radius, a squircle.
+// With room on only one, as at a capsule's end, it reaches n / 2 times the
+// radius, which keeps the tip's curvature that of a circle (2 Rx / (n Ry^2)), so
+// the end stays round instead of stretching into an oval.
 constant float CONTINUOUS_CORNER_REACH = 1.7;
 constant float CONTINUOUS_CORNER_EXPONENT = 2.8;
 
+struct ContinuousCorner {
+    float2 box;
+    float2 exponent;
+};
+
+ContinuousCorner continuous_corner(float2 half_size, float r) {
+    float2 room = saturate((min(float2(r * CONTINUOUS_CORNER_REACH), half_size) - r) /
+                           (r * (CONTINUOUS_CORNER_REACH - 1.0)));
+    float2 n = 2.0 + (CONTINUOUS_CORNER_EXPONENT - 2.0) * room;
+    float2 reach = mix(n / 2.0, float2(CONTINUOUS_CORNER_REACH), room.yx);
+    ContinuousCorner corner;
+    corner.box = min(r * reach, half_size);
+    corner.exponent = n;
+    return corner;
+}
+
 float2 continuous_corner_box(float2 half_size, float corner_radius) {
     float r = min(corner_radius, min(half_size.x, half_size.y));
-    return min(float2(r * CONTINUOUS_CORNER_REACH), half_size);
+    if (r <= 0.0) {
+        return float2(0.0);
+    }
+    return continuous_corner(half_size, r).box;
 }
 
 float continuous_corner_sdf(float2 corner_to_point, float2 half_size, float corner_radius) {
@@ -1157,18 +1181,14 @@ float continuous_corner_sdf(float2 corner_to_point, float2 half_size, float corn
     if (r <= 0.0) {
         return max(corner_to_point.x, corner_to_point.y);
     }
-    float2 box = continuous_corner_box(half_size, r);
-    float2 q = corner_to_point + box;
+    ContinuousCorner corner = continuous_corner(half_size, r);
+    float2 q = corner_to_point + corner.box;
     if (q.x <= 0.0 || q.y <= 0.0) {
         // Along a straight edge.
         return max(corner_to_point.x, corner_to_point.y);
     }
-    float2 room = saturate((box - r) / (r * (CONTINUOUS_CORNER_REACH - 1.0)));
-    // The exponent along x shapes where the curve meets the top or bottom edge,
-    // so it depends on how far that edge reaches.
-    float2 n = 2.0 + (CONTINUOUS_CORNER_EXPONENT - 2.0) * room;
-    float2 u = q / box;
-    float2 term = pow(u, n);
+    float2 n = corner.exponent;
+    float2 term = pow(q / corner.box, n);
     float f = term.x + term.y - 1.0;
     float2 gradient = n * term / max(q, float2(1e-4));
     // First-order distance to the curve: exact enough for the pixel or two of
