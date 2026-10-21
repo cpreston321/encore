@@ -3,7 +3,6 @@ mod api;
 mod app;
 mod audio;
 mod auth;
-mod chrome;
 mod keys;
 mod library;
 mod localhost;
@@ -19,75 +18,27 @@ mod theme;
 mod ui;
 mod webplayer;
 
-use std::borrow::Cow;
-
 use gpui::{
-    App, Application, AssetSource, Bounds, Menu, MenuItem, SharedString, TitlebarOptions, WindowBackgroundAppearance,
-    WindowBounds, WindowOptions, point, prelude::*, px, size,
+    App, Application, Bounds, Menu, MenuItem, TitlebarOptions, WindowBackgroundAppearance, WindowBounds, WindowOptions,
+    point, prelude::*, px, size,
 };
 
 use app::{MusicApp, NextTrack, PlayPause, PreviousTrack, Quit, ToggleQueue, VolumeDown, VolumeUp};
 
-macro_rules! icons {
-    ($($name:literal),* $(,)?) => {
-        &[$((concat!("icons/", $name, ".svg"), include_bytes!(concat!("../assets/icons/", $name, ".svg")))),*]
-    };
-}
-
-const ICONS: &[(&str, &[u8])] = icons![
-    "airplay",
-    "album",
-    "check",
-    "chevron-down",
-    "chevron-left",
-    "chevron-right",
-    "clock",
-    "ellipsis",
-    "heart",
-    "heart-fill",
-    "home",
-    "lyrics",
-    "mic",
-    "new",
-    "next",
-    "note",
-    "open",
-    "pause",
-    "person",
-    "play",
-    "play-next",
-    "playlist",
-    "playlists",
-    "plus",
-    "prev",
-    "queue",
-    "radio",
-    "repeat",
-    "repeat-one",
-    "search",
-    "shuffle",
-    "speaker",
-    "speaker-loud",
-    "star-square",
-    "xmark",
-];
-
-struct Assets;
-
-impl AssetSource for Assets {
-    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, bytes)| Cow::Borrowed(*bytes)))
-    }
-
-    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        Ok(ICONS.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| SharedString::from(*p)).collect())
-    }
-}
-
 fn main() {
     perf::init();
+    // ENCORE_APPEARANCE=light|dark and ENCORE_REDUCE_MOTION=1, for checking both without
+    // changing the system settings.
+    match std::env::var("ENCORE_APPEARANCE").as_deref() {
+        Ok("light") => theme::force_appearance(Some(theme::Appearance::Light)),
+        Ok("dark") => theme::force_appearance(Some(theme::Appearance::Dark)),
+        _ => {}
+    }
+    if std::env::var_os("ENCORE_REDUCE_MOTION").is_some() {
+        anim::force_reduce_motion();
+    }
     api::migrate_legacy_dirs();
-    Application::new().with_assets(Assets).run(|cx: &mut App| {
+    Application::new().with_assets(tahoe::Assets).run(|cx: &mut App| {
         keys::bind(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.set_menus(vec![
@@ -161,7 +112,7 @@ fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                chrome::use_tahoe_corners(window);
+                tahoe::chrome::use_tahoe_corners_with_identifier(window, "io.github.cpreston321.encore.main");
                 let view = cx.new(|cx| MusicApp::new(window, cx));
                 let mini_app = view.clone();
                 cx.on_action(move |_: &keys::ToggleMiniPlayer, cx| ui::mini::toggle(mini_app.clone(), cx));

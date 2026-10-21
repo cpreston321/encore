@@ -38,23 +38,14 @@ impl MusicApp {
         cx: &mut Context<Self>,
         target: impl Fn(&MusicApp) -> Option<Route> + 'static,
     ) -> impl IntoElement {
-        div().px(px(PAD)).pt_7().pb_2p5().flex().child(
-            div()
-                .id(ElementId::Name(format!("see-all-{title}").into()))
-                .flex()
-                .items_center()
-                .gap_1()
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.7))
-                .active(|s| s.opacity(0.5))
-                .child(div().text_size(px(19.)).font_weight(FontWeight::BOLD).child(title))
-                .child(icon("chevron-right", 14., t.text_secondary))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(route) = target(this) {
-                        this.push(route, cx);
-                    }
-                })),
-        )
+        tahoe::SectionHeader::new(ElementId::Name(format!("see-all-{title}").into()), title)
+            .inset(PAD)
+            .theme(*t)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if let Some(route) = target(this) {
+                    this.push(route, cx);
+                }
+            }))
     }
 
     pub(crate) fn render_see_all(
@@ -157,31 +148,9 @@ impl MusicApp {
                 .into_any_element()
             }
         };
-        // A round, translucent toolbar button beside the title, as in macOS Tahoe.
-        let back = (!self.history.is_empty()).then(|| {
-            div()
-                .id("see-all-back")
-                .size(px(32.))
-                .flex_none()
-                .rounded_full()
-                .bg(t.text.opacity(0.07))
-                .border_1()
-                .border_color(t.text.opacity(0.1))
-                .shadow_sm()
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .hover(|s| s.bg(t.text.opacity(0.13)))
-                .active(|s| s.bg(t.text.opacity(0.18)))
-                .child(icon("chevron-left", 13., t.text))
-                .on_click(cx.listener(|this, _, _, cx| this.back(cx)))
-        });
-        div()
-            .child(div().px(px(PAD)).pt(px(42.)).pb_4().flex().items_center().gap_3().children(back).child(
-                div().min_w_0().truncate().text_size(px(28.)).font_weight(FontWeight::BOLD).child(page.title.clone()),
-            ))
-            .child(body)
-            .into_any_element()
+        let header = tahoe::PageHeader::new(page.title.clone()).inset(PAD).theme(*t);
+        let header =
+            if self.history.is_empty() { header } else { header.on_back(cx.listener(|this, _, _, cx| this.back(cx))) };
+        div().child(header).child(body).into_any_element()
     }
 }

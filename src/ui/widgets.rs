@@ -2,65 +2,10 @@
 
 use super::*;
 
-pub(crate) fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
-    svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
-}
-
-pub(crate) fn icon_button(t: &Theme, id: &'static str, name: &'static str, size: f32, color: Hsla) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(30.))
-        .flex_none()
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .hover(|s| s.bg(t.hover))
-        .active(|s| s.opacity(0.6))
-        .child(icon(name, size, color))
-}
-
-pub(crate) fn pill_button(
-    t: &Theme,
-    id: &'static str,
-    icon_name: &'static str,
-    label: &'static str,
-    filled: bool,
-) -> Stateful<Div> {
-    if filled {
-        button(t, id, icon_name, label, t.accent.into(), crate::theme::readable_on(t.accent, white()))
-    } else {
-        button(t, id, icon_name, label, t.button.into(), t.accent)
-    }
-}
-
-/// Capsule button; the icon follows the label color.
-pub(crate) fn button(
-    _t: &Theme,
-    id: &'static str,
-    icon_name: &'static str,
-    label: &'static str,
-    bg: gpui::Fill,
-    fg: Hsla,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .min_w(px(112.))
-        .px_4()
-        .h(px(32.))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap_1p5()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(fg)
-        .bg(bg)
-        .hover(|s| s.opacity(0.85))
-        .active(|s| s.opacity(0.7))
-        .child(icon(icon_name, 12., fg))
-        .child(label)
-}
+pub(crate) use tahoe::{
+    icon,
+    primitives::{button, icon_button, pill_button},
+};
 
 /// Small rounded toggle, filled with the accent when on (shuffle / repeat).
 pub(crate) fn toggle_chip(t: &Theme, id: &'static str, icon_name: &'static str, on: bool) -> Stateful<Div> {
@@ -91,18 +36,7 @@ pub(crate) fn group_digits(n: usize) -> String {
 }
 
 pub(crate) fn explicit_badge(t: &Theme) -> impl IntoElement {
-    div()
-        .size(px(13.))
-        .flex_none()
-        .rounded(px(2.5))
-        .bg(t.text_tertiary)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(9.))
-        .font_weight(FontWeight::BOLD)
-        .text_color(t.window)
-        .child("E")
+    tahoe::primitives::badge(t, "E")
 }
 
 pub(crate) fn table_header(t: &Theme) -> impl IntoElement {
@@ -131,8 +65,8 @@ pub(crate) fn page_title(title: impl Into<SharedString>) -> impl IntoElement {
 
 /// A section title with nothing more to show. Sections that open a fuller page use
 /// `MusicApp::section_link`, which adds the chevron.
-pub(crate) fn section_header(_t: &Theme, title: &'static str) -> impl IntoElement {
-    div().px(px(PAD)).pt_7().pb_2p5().text_size(px(19.)).font_weight(FontWeight::BOLD).child(title)
+pub(crate) fn section_header(t: &Theme, title: &'static str) -> impl IntoElement {
+    tahoe::SectionHeader::new(title, title).inset(PAD).theme(*t)
 }
 
 pub(crate) fn loading(t: &Theme) -> Div {

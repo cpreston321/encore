@@ -33,20 +33,7 @@ const NOTES_PREVIEW_CHARS: usize = 160;
 
 /// Frosted circular button floating over artwork.
 fn glass_button(id: &'static str, icon_name: &'static str, size: f32) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(size))
-        .flex_none()
-        .rounded_full()
-        .bg(white().opacity(0.16))
-        .border_1()
-        .border_color(white().opacity(0.22))
-        .hover(|s| s.bg(white().opacity(0.26)))
-        .active(|s| s.opacity(0.75))
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(icon(icon_name, size * 0.42, white()))
+    tahoe::primitives::glass_button(id, icon_name, size)
 }
 
 impl MusicApp {
@@ -75,7 +62,7 @@ impl MusicApp {
         let average = self.art_color(artwork, cx).map(Palette::from_average);
         match colors {
             Some(c) => {
-                let mut palette = Palette::from_art_colors(c);
+                let mut palette = Palette::from_art_colors(c.bg, c.text);
                 // Apple's text colors are often greys; borrow a hue from the image instead.
                 if palette.accent.s < 0.3
                     && let Some(avg) = average
@@ -480,7 +467,7 @@ impl MusicApp {
         // reads on it; otherwise the artwork's average color.
         let base = album
             .colors
-            .map(|c| Palette::from_art_colors(c).bg)
+            .map(|c| Palette::from_art_colors(c.bg, c.text).bg)
             .or_else(|| self.art_color(&album.artwork, cx))
             .unwrap_or(t.hover);
         let bg = Hsla { s: base.s.min(0.55), l: base.l.clamp(0.1, 0.2), a: 1., ..base };
@@ -1126,19 +1113,7 @@ impl MusicApp {
 
 /// Round icon button.
 fn circle(_t: &Theme, id: &'static str, icon_name: &'static str, size: f32, bg: Hsla, fg: Hsla) -> Stateful<Div> {
-    let fg = crate::theme::readable_on(bg, fg);
-    div()
-        .id(id)
-        .size(px(size))
-        .flex_none()
-        .rounded_full()
-        .bg(bg)
-        .hover(|s| s.opacity(0.88))
-        .active(|s| s.opacity(0.72))
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(icon(icon_name, size * 0.38, fg))
+    tahoe::primitives::circle_button(id, icon_name, size, bg, fg)
 }
 
 fn relative(f: f32) -> gpui::DefiniteLength {

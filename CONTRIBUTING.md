@@ -17,9 +17,9 @@ That runs Encore on Apple's public APIs, which is enough for most UI work. To wo
 ## Before you open a pull request
 
 ```sh
-cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+cargo fmt --all
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
 ```
 
 CI runs the same three checks on macOS.
@@ -58,6 +58,7 @@ Encore targets 120 Hz on ProMotion displays: a page that renders smoothly shows 
 
 - `rustfmt.toml` sets a 120-column width. Let `cargo fmt` handle formatting.
 - Keep comments sparse. A comment should explain what the code can't: a constraint, a workaround, or why the obvious approach doesn't work. It shouldn't narrate what the next line does.
+- Reusable, app-agnostic components go in the Tahoe library (`crates/tahoe`), the way Zed keeps its `ui` crate; `cargo run -p tahoe --example gallery` shows them all. Encore-specific views stay in `ui/`.
 - `ui/` code renders and dispatches. It shouldn't do I/O directly; put that in `app/` or the module that owns it.
 - Anything that blocks, including every `api` call, runs on the background executor.
 - New animations check `anim::reduce_motion()` and can be interrupted midway.

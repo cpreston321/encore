@@ -19,6 +19,10 @@ flowchart LR
     Web & Auth --> Local["localhost<br/>127.0.0.1 HTTP"]
 ```
 
+## The Tahoe component library
+
+`crates/tahoe` holds what isn't specific to a music app: the theme and contrast helpers, motion, icons, window chrome, and components such as `Button`, `IconButton`, `Link`, `SectionHeader`, `PageHeader` and `Card`. Encore re-exports its `theme` and `anim` modules and builds its widgets on it. See [its README](../crates/tahoe/README.md), and run `cargo run -p tahoe --example gallery` to see every component.
+
 ## Source layout
 
 ```text
@@ -63,9 +67,8 @@ src/
 ├── model.rs         Song, Album, Artist, Playlist…
 ├── keys.rs          Actions, key bindings, list navigation, search matching
 ├── textfield.rs     Single-line text editing for search fields
-├── theme.rs         Light and dark palettes
-├── anim.rs          Reversible open/close transitions and color blends
-├── chrome.rs        Native window tweaks GPUI doesn't expose
+├── theme.rs         Re-exports Tahoe's theme
+├── anim.rs          Re-exports Tahoe's motion helpers
 └── perf.rs          Opt-in frame and request timing
 ```
 
@@ -127,7 +130,7 @@ Encore builds against a vendored GPUI 0.2.2 with one patch: the display link sle
 
 GPUI doesn't cover everything a Mac app needs, so `objc2` bindings fill the gaps:
 
-- `chrome.rs` adds an empty `NSToolbar`, which gives the window Tahoe's larger corner radius.
+- `tahoe::chrome` adds an empty `NSToolbar`, which gives the window Tahoe's larger corner radius.
 - `webplayer.rs` hosts WebKit.
 - `media.rs` uses MediaPlayer.
 - `ui/mini.rs` opens a second, floating window.

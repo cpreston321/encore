@@ -1,0 +1,18 @@
+[package]
+name = "tahoe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "macOS Tahoe-style components for GPUI: buttons, links, headers, cards, theme tokens and motion"
+license = "MIT"
+repository = "https://github.com/cpreston321/encore"
+keywords = ["gpui", "macos", "ui", "components"]
+categories = ["gui"]
+publish = false
+
+[dependencies]
+gpui = "0.2.2"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSView", "NSToolbar", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", features = ["NSString"] }
+raw-window-handle = "0.6"

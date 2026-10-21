@@ -1757,6 +1757,7 @@ dependencies = [
  "rodio",
  "serde",
  "serde_json",
+ "tahoe",
  "ureq",
 ]
 
@@ -6254,6 +6255,17 @@ dependencies = [
  "grid",
  "serde",
  "slotmap",
+]
+
+[[package]]
+name = "tahoe"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "raw-window-handle",
 ]
 
 [[package]]

@@ -122,6 +122,10 @@ ENCORE_PERF=1 cargo run --release   # frame times, request durations and startup
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the debug tools, and [docs/architecture.md](docs/architecture.md) explains how the code is laid out.
 
+## Tahoe components
+
+Encore's buttons, links, headers, cards, theme and motion live in a reusable library, [`crates/tahoe`](crates/tahoe/README.md), for other GPUI apps that want to look at home on macOS Tahoe. `cargo run -p tahoe --example gallery` shows them all.
+
 ## Acknowledgements
 
 - [GPUI](https://www.gpui.rs), the UI framework from [Zed](https://zed.dev).

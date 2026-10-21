@@ -12,6 +12,7 @@ categories = ["multimedia::audio", "gui"]
 publish = false
 
 [dependencies]
+tahoe = { path = "crates/tahoe" }
 anyhow = "1.0.104"
 block2 = "0.6"
 dirs = "7.0.0"
@@ -34,6 +35,9 @@ ureq = { version = "3", features = ["json"] }
 [features]
 # Debug-only page tour (ENCORE_TOUR=1), also available in optimized builds for profiling.
 tour = []
+
+[workspace]
+members = ["crates/tahoe"]
 
 [profile.release]
 # A quarter smaller (20 MB to 16 MB) at no build-time cost. Profiling needs the symbols back:

@@ -9,6 +9,11 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 /// toolbar. An empty, invisible unified toolbar earns the window those corners, which the
 /// floating sidebar's own radius is designed to be concentric with.
 pub fn use_tahoe_corners(window: &gpui::Window) {
+    use_tahoe_corners_with_identifier(window, "tahoe.window-corners")
+}
+
+/// `use_tahoe_corners`, with the toolbar's identifier (AppKit saves toolbar state under it).
+pub fn use_tahoe_corners_with_identifier(window: &gpui::Window, identifier: &str) {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -23,8 +28,7 @@ pub fn use_tahoe_corners(window: &gpui::Window) {
     let Some(ns_window) = view.window() else {
         return;
     };
-    let toolbar: Retained<NSToolbar> =
-        NSToolbar::initWithIdentifier(mtm.alloc(), &NSString::from_str("io.github.cpreston321.encore.main"));
+    let toolbar: Retained<NSToolbar> = NSToolbar::initWithIdentifier(mtm.alloc(), &NSString::from_str(identifier));
     #[allow(deprecated)]
     toolbar.setShowsBaselineSeparator(false);
     ns_window.setToolbar(Some(&toolbar));
