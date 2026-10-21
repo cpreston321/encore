@@ -81,6 +81,8 @@ With a trackpad, scrolling past either end of a scroll view stretches it with re
 - **Frames.** The spring asks for the next frame from prepaint only while it moves, so the display link still sleeps once it settles.
 - **Turning it off.** `cx.set_global(ElasticScrolling(false))` restores hard stops; Tahoe's `layout::init_scrolling` does that when Reduce Motion is on.
 
+- **One axis per gesture.** A trackpad gesture keeps the axis its first movement favored, through its momentum, until the next gesture begins, as in AppKit. Each scroll view then drops movement on the other axis, unless it allows concurrent scrolling. Without this, the sideways drift in a vertical swipe scrolled any horizontal list under the pointer. Wheels aren't affected.
+
 ## Overlay scrollbars
 
 `InteractiveElement::overlay_scrollbar()` (or `overlay_scrollbar_style(OverlayScrollbar { color, insets })`) draws a macOS-style scrollbar over a scroll view's edge, like "Show scroll bars: When scrolling". It's opt-in per element.

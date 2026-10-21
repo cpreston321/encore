@@ -16,6 +16,7 @@
 //! constructed by combining these two systems into an all-in-one element.
 
 use crate::{
+    Axis,
     AbsoluteLength, Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, Bounds, ClickEvent,
     DispatchPhase, Display, Element, ElementId, Entity, FocusHandle, Global, GlobalElementId,
     Hitbox, HitboxBehavior, HitboxId, InspectorElementId, IntoElement, IsZero, KeyContext,
@@ -2603,7 +2604,14 @@ impl Interactivity {
 
                 let mut scroll_offset = scroll_offset.borrow_mut();
                 let old_scroll_offset = *scroll_offset;
-                let delta = event.delta.pixel_delta(line_height);
+                let mut delta = event.delta.pixel_delta(line_height);
+                if !allow_concurrent_scroll {
+                    match gesture_axis(event) {
+                        Some(Axis::Vertical) => delta.x = Pixels::ZERO,
+                        Some(Axis::Horizontal) => delta.y = Pixels::ZERO,
+                        None => {}
+                    }
+                }
 
                 let mut delta_x = Pixels::ZERO;
                 if overflow.x == Overflow::Scroll {
@@ -3502,5 +3510,63 @@ impl ScrollHandle {
     /// Get the count of children for scrollable item.
     pub fn children_count(&self) -> usize {
         self.0.borrow().child_bounds.len()
+    }
+}
+
+thread_local! {
+    static GESTURE_AXIS: std::cell::Cell<Option<Axis>> = const { std::cell::Cell::new(None) };
+}
+
+/// The axis a trackpad gesture is locked to, as in AppKit: whichever its first movement
+/// favors, held through the gesture and its momentum until the next gesture begins. Without
+/// it, the sideways drift in a vertical swipe scrolls any horizontal list under the pointer.
+/// Every scroll view sees the same event, so locking on the first movement agrees for all.
+fn gesture_axis(event: &ScrollWheelEvent) -> Option<Axis> {
+    if !event.delta.precise() {
+        return None;
+    }
+    GESTURE_AXIS.with(|axis| {
+        if event.momentum_phase.is_none() && matches!(event.touch_phase, TouchPhase::Started) {
+            axis.set(None);
+        }
+        if axis.get().is_none() {
+            let d = event.delta.pixel_delta(px(1.));
+            if !d.x.is_zero() || !d.y.is_zero() {
+                axis.set(Some(if d.x.abs() > d.y.abs() { Axis::Horizontal } else { Axis::Vertical }));
+            }
+        }
+        axis.get()
+    })
+}
+
+#[cfg(test)]
+mod gesture_axis_tests {
+    use super::*;
+    use crate::{Modifiers, ScrollDelta, point};
+
+    fn swipe(phase: TouchPhase, dx: f32, dy: f32) -> ScrollWheelEvent {
+        ScrollWheelEvent {
+            position: point(px(0.), px(0.)),
+            delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
+            modifiers: Modifiers::default(),
+            touch_phase: phase,
+            momentum_phase: None,
+        }
+    }
+
+    #[test]
+    fn a_gesture_keeps_the_axis_it_started_on() {
+        assert_eq!(gesture_axis(&swipe(TouchPhase::Started, 0., 0.)), None);
+        assert_eq!(gesture_axis(&swipe(TouchPhase::Moved, 1., -6.)), Some(Axis::Vertical));
+        assert_eq!(gesture_axis(&swipe(TouchPhase::Moved, 8., -1.)), Some(Axis::Vertical));
+        let mut momentum = swipe(TouchPhase::Moved, 3., -1.);
+        momentum.momentum_phase = Some(TouchPhase::Moved);
+        assert_eq!(gesture_axis(&momentum), Some(Axis::Vertical));
+
+        assert_eq!(gesture_axis(&swipe(TouchPhase::Started, 0., 0.)), None);
+        assert_eq!(gesture_axis(&swipe(TouchPhase::Moved, 6., 1.)), Some(Axis::Horizontal));
+
+        let wheel = ScrollWheelEvent { delta: ScrollDelta::Lines(point(1., -3.)), ..swipe(TouchPhase::Moved, 0., 0.) };
+        assert_eq!(gesture_axis(&wheel), None);
     }
 }

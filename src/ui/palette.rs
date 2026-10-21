@@ -360,7 +360,7 @@ impl MusicApp {
         item: PaletteItem,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let art_size = if big { 52. } else { 36. };
+        let art_size = if big { 44. } else { 36. };
         let sub = if is_sel { t.on_accent().opacity(0.8) } else { t.text_secondary };
         let (art, title, subtitle, trailing): (AnyElement, String, String, AnyElement) = match &item {
             PaletteItem::Artist(n, id, a) => (
@@ -485,7 +485,7 @@ impl MusicApp {
             .group(SharedString::from(format!("palette-row-{i}")))
             .mx_1p5()
             .px_2p5()
-            .h(px(if big { 68. } else { 48. }))
+            .h(px(if big { 60. } else { 48. }))
             .rounded(px(10.))
             .flex()
             .items_center()
