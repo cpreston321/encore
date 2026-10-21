@@ -12,7 +12,6 @@ use crate::{
     app::{Account, ContextMenu, MenuEntry, MusicApp},
     keys::matches,
     model::{Album, Song},
-    textfield::TextField,
     theme::Theme,
     ui::{PAD, icon},
 };
@@ -46,7 +45,7 @@ impl SortKey {
 #[derive(Default)]
 pub struct ListView {
     pub sort: SortKey,
-    pub filter: TextField,
+    pub filter: tahoe::TextField,
 }
 
 pub fn sort_songs(songs: &[Song], key: SortKey, filter: &str) -> Vec<Song> {
@@ -90,7 +89,7 @@ impl MusicApp {
             m.entry(key).or_insert_with(|| ListView {
                 // Albums default to A–Z, like the Music app; song lists to recently added.
                 sort: if key == "albums" { SortKey::Title } else { SortKey::Added },
-                filter: TextField::default(),
+                filter: tahoe::TextField::default(),
             })
         })
     }
@@ -229,10 +228,7 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let (sort, focused) = (self.list_view(key).sort, self.filter_focused && self.filter_target == key);
-        let filter_text = {
-            let v = self.list_view(key);
-            v.filter.text().to_string()
-        };
+        let filter_text = self.list_view(key).filter.render_text(t, focused, "Filter", 14.);
         let options = options.to_vec();
         let n_selected = self.multi.len();
         div()
@@ -242,31 +238,11 @@ impl MusicApp {
             .items_center()
             .gap_2()
             .child(
-                div()
-                    .id(SharedString::from(format!("filter-{key}")))
+                tahoe::textfield::text_input(t, SharedString::from(format!("filter-{key}")), Some("search"), focused)
                     .key_context("SearchField")
                     .track_focus(&self.filter_focus)
                     .w(px(240.))
-                    .h(px(30.))
-                    .px_2p5()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .rounded(px(8.))
-                    .bg(t.field)
-                    .border_1()
-                    .border_color(if focused { t.accent.opacity(0.55) } else { gpui::transparent_black() })
-                    .child(icon("search", 12., t.text_secondary))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(px(13.))
-                            .when(filter_text.is_empty(), |d| d.text_color(t.text_tertiary).child("Filter"))
-                            .when(!filter_text.is_empty(), |d| d.child(filter_text.clone()))
-                            .when(focused, |d| d.child(div().w(px(1.5)).h(px(14.)).bg(t.accent))),
-                    )
+                    .child(div().flex_1().min_w_0().text_size(px(13.)).child(filter_text))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
@@ -341,7 +317,7 @@ impl MusicApp {
         }
         let used = {
             let mut v = self.list_view(key);
-            crate::keys::edit_text(&mut v.filter, k, cx)
+            v.filter.handle_key(k, cx)
         };
         if used {
             cx.notify();

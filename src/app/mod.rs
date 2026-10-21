@@ -310,7 +310,7 @@ pub struct MusicApp {
     pub(crate) selected_library_artist: Option<String>,
     /// Keys of descriptions expanded with MORE.
     pub(crate) expanded_notes: std::collections::HashSet<String>,
-    pub(crate) search: crate::textfield::TextField,
+    pub(crate) search: tahoe::TextField,
     pub(crate) palette_open: bool,
     pub(crate) palette_index: usize,
     pub(crate) show_shortcuts: bool,

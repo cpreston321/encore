@@ -265,7 +265,7 @@ impl MusicApp {
             }
         }
         let hint = |keys: &'static str, what: &'static str| {
-            div().flex().items_center().gap_1().child(div().px_1().rounded(px(4.)).bg(t.button).child(keys)).child(what)
+            div().flex().items_center().gap_1().child(tahoe::primitives::kbd(t, keys)).child(what)
         };
         let footer = div()
             .h(px(32.))
@@ -296,17 +296,13 @@ impl MusicApp {
             .border_color(t.separator)
             .text_size(px(17.))
             .child(icon("search", 17., t.text_secondary))
-            .child(div().flex_1().min_w_0().child(self.search_text(t, focused, "Search songs, albums, artists…", 20.)))
-            .child(
-                div()
-                    .px_1p5()
-                    .py_0p5()
-                    .rounded(px(5.))
-                    .bg(t.button)
-                    .text_size(px(11.))
-                    .text_color(t.text_secondary)
-                    .child("esc"),
-            );
+            .child(div().flex_1().min_w_0().child(self.search.render_text(
+                t,
+                focused,
+                "Search songs, albums, artists…",
+                20.,
+            )))
+            .child(tahoe::primitives::kbd(t, "esc"));
 
         Some(
             div()

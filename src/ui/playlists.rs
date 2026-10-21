@@ -9,13 +9,12 @@ use gpui::{
 use crate::{
     app::{Account, ContextMenu, Load, MenuEntry, MusicApp},
     model::Song,
-    textfield::TextField,
     theme::Theme,
 };
 
 /// The "New Playlist" sheet: its name field, and the song to start it with.
 pub struct NewPlaylist {
-    pub name: TextField,
+    pub name: tahoe::TextField,
     pub song: Option<Song>,
 }
 
@@ -75,7 +74,7 @@ impl MusicApp {
         if self.account != Account::SignedIn {
             return self.show_notice("Sign in to Apple Music to create playlists.".into(), cx);
         }
-        let mut name = TextField::default();
+        let mut name = tahoe::TextField::default();
         name.set(song.as_ref().map_or("New Playlist".to_string(), |s| format!("{} Mix", s.title)));
         name.select_all();
         self.new_playlist = Some(NewPlaylist { name, song });
@@ -112,41 +111,21 @@ impl MusicApp {
 
     /// Keys for the New Playlist name field. Returns true if used.
     pub(crate) fn new_playlist_key(&mut self, k: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        use crate::textfield::TextField as F;
         let Some(sheet) = self.new_playlist.as_mut() else { return false };
-        let f = &mut sheet.name;
-        let (cmd, alt, shift) = (k.modifiers.platform, k.modifiers.alt, k.modifiers.shift);
-        match (k.key.as_str(), cmd, alt) {
-            ("enter", ..) => {
+        match k.key.as_str() {
+            "enter" => {
                 self.create_new_playlist(window, cx);
                 return true;
             }
-            ("escape", ..) => {
+            "escape" => {
                 self.new_playlist = None;
                 window.focus(&self.focus);
             }
-            ("backspace", true, _) => f.delete_to_start(),
-            ("backspace", _, true) => f.delete_word_back(),
-            ("backspace", ..) => f.backspace(),
-            ("left", true, _) => f.motion(shift, F::home),
-            ("right", true, _) => f.motion(shift, F::end),
-            ("left", _, true) => f.motion(shift, F::word_left),
-            ("right", _, true) => f.motion(shift, F::word_right),
-            ("left", ..) if shift => f.motion(true, F::left),
-            ("right", ..) if shift => f.motion(true, F::right),
-            ("left", ..) => f.collapse_or(true, F::left),
-            ("right", ..) => f.collapse_or(false, F::right),
-            ("a", true, _) => f.select_all(),
-            ("v", true, _) => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    f.insert(&text);
+            _ => {
+                if !sheet.name.handle_key(k, cx) {
+                    return false;
                 }
             }
-            _ if cmd || k.modifiers.control => return false,
-            _ => match &k.key_char {
-                Some(ch) if !ch.chars().any(char::is_control) => f.insert(ch),
-                _ => return false,
-            },
         }
         cx.notify();
         true
@@ -155,32 +134,7 @@ impl MusicApp {
     pub(crate) fn render_new_playlist(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sheet = self.new_playlist.as_ref()?;
         let f = &sheet.name;
-        let text = f.text();
-        let field_text: AnyElement = match f.selection() {
-            Some(sel) => div()
-                .flex()
-                .whitespace_nowrap()
-                .child(SharedString::from(text[..sel.start].to_string()))
-                .child(
-                    div()
-                        .rounded(px(3.))
-                        .bg(t.accent.opacity(0.38))
-                        .child(SharedString::from(text[sel.clone()].to_string())),
-                )
-                .child(SharedString::from(text[sel.end..].to_string()))
-                .into_any_element(),
-            None => {
-                let (a, b) = text.split_at(f.cursor());
-                div()
-                    .flex()
-                    .items_center()
-                    .whitespace_nowrap()
-                    .child(SharedString::from(a.to_string()))
-                    .child(div().w(px(1.5)).h(px(17.)).bg(t.accent))
-                    .child(SharedString::from(b.to_string()))
-                    .into_any_element()
-            }
-        };
+        let field_text = f.render_text(t, true, "Playlist Name", 17.);
         let button = |id: &'static str, label: &'static str, primary: bool| {
             div()
                 .id(id)

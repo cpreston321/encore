@@ -473,7 +473,7 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let focused = focused && !self.palette_open;
-        let text = self.search_text(t, focused, "Artists, Songs, Albums, and More", 17.);
+        let text = self.search.render_text(t, focused, "Artists, Songs, Albums, and More", 17.);
 
         let field = div()
             .id("search-field")

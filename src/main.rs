@@ -13,7 +13,6 @@ mod native;
 mod perf;
 mod queue;
 mod spectrum;
-mod textfield;
 mod theme;
 mod ui;
 mod webplayer;

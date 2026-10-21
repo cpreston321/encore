@@ -1,7 +1,19 @@
-//! Single-line text editing for the search field: a cursor, a selection, word-wise
-//! movement and deletion, clipboard. Positions are byte offsets on char boundaries.
+//! Single-line text editing: a cursor, a selection, word-wise movement and deletion, the
+//! clipboard, and drawing the text with its caret. Positions are byte offsets on char
+//! boundaries.
+//!
+//! The field is plain state the view owns. Route key-downs from the focused element to
+//! [`TextField::handle_key`] after the view's own keys (Escape, Enter), and draw it with
+//! [`TextField::render_text`] inside whatever box suits the view, or [`text_input`].
 
 use std::ops::Range;
+
+use gpui::{
+    AnyElement, App, ClipboardItem, Div, ElementId, InteractiveElement, IntoElement, Keystroke, ParentElement,
+    SharedString, Stateful, Styled, div, prelude::FluentBuilder, px, transparent_black,
+};
+
+use crate::{icons::icon, theme::Theme};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextField {
@@ -169,6 +181,105 @@ impl TextField {
         let before = self.text[..at].trim_end();
         before.rfind(char::is_whitespace).map_or(0, |i| i + before[i..].chars().next().map_or(1, char::len_utf8))
     }
+}
+
+impl TextField {
+    /// Applies the standard macOS editing keys: typing, ⌫ / ⌥⌫ / ⌘⌫, forward delete, ← → with
+    /// ⌥ (word) and ⌘ (line), ⇧ to select, Home/End, ⌘A, and ⌘C / ⌘X / ⌘V. Returns false for
+    /// keys it leaves to the caller, such as Escape, Enter, ↑ ↓ and other ⌘ shortcuts.
+    pub fn handle_key(&mut self, k: &Keystroke, cx: &mut App) -> bool {
+        let (cmd, alt, shift) = (k.modifiers.platform, k.modifiers.alt, k.modifiers.shift);
+        match (k.key.as_str(), cmd, alt) {
+            ("backspace", true, _) => self.delete_to_start(),
+            ("backspace", _, true) => self.delete_word_back(),
+            ("backspace", ..) => self.backspace(),
+            ("delete", ..) => self.delete_forward(),
+            ("left", true, _) | ("home", ..) => self.motion(shift, Self::home),
+            ("right", true, _) | ("end", ..) => self.motion(shift, Self::end),
+            ("left", _, true) => self.motion(shift, Self::word_left),
+            ("right", _, true) => self.motion(shift, Self::word_right),
+            ("left", ..) if shift => self.motion(true, Self::left),
+            ("right", ..) if shift => self.motion(true, Self::right),
+            ("left", ..) => self.collapse_or(true, Self::left),
+            ("right", ..) => self.collapse_or(false, Self::right),
+            ("a", true, _) => self.select_all(),
+            ("c", true, _) | ("x", true, _) => {
+                if let Some(text) = self.selected_text() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                    if k.key == "x" {
+                        self.backspace();
+                    }
+                }
+            }
+            ("v", true, _) => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                    self.insert(&text);
+                }
+            }
+            _ if cmd || k.modifiers.control => return false,
+            _ => match &k.key_char {
+                Some(ch) if !ch.chars().any(char::is_control) => self.insert(ch),
+                _ => return false,
+            },
+        }
+        true
+    }
+
+    /// The text with a caret at the cursor and the selection highlighted, or `placeholder`
+    /// when empty. `caret_h` should match the font's line height.
+    pub fn render_text(
+        &self,
+        t: &Theme,
+        focused: bool,
+        placeholder: impl Into<SharedString>,
+        caret_h: f32,
+    ) -> AnyElement {
+        let text = self.text();
+        let placeholder = placeholder.into();
+        if text.is_empty() && !focused {
+            return div().text_color(t.text_tertiary).child(placeholder).into_any_element();
+        }
+        let row = div().flex().items_center().min_w_0().overflow_hidden().whitespace_nowrap();
+        let piece = |s: &str| SharedString::from(s.to_string());
+        if let Some(sel) = self.selection() {
+            // Like macOS: no caret while text is selected, just the highlight.
+            let highlight = if focused { t.accent.opacity(0.38) } else { t.selected };
+            return row
+                .when(sel.start > 0, |d| d.child(piece(&text[..sel.start])))
+                .child(div().rounded(px(3.)).bg(highlight).child(piece(&text[sel.clone()])))
+                .when(sel.end < text.len(), |d| d.child(piece(&text[sel.end..])))
+                .into_any_element();
+        }
+        let (before, after) = text.split_at(self.cursor());
+        row.when(!before.is_empty(), |d| d.child(piece(before)))
+            .when(focused, |d| d.child(div().flex_none().w(px(1.5)).h(px(caret_h)).bg(t.accent)))
+            .when(!after.is_empty(), |d| d.child(piece(after)))
+            .when(text.is_empty(), |d| d.child(div().pl_0p5().text_color(t.text_tertiary).child(placeholder)))
+            .into_any_element()
+    }
+}
+
+/// A rounded input box with an optional leading icon and an accent ring while focused. Add
+/// `.track_focus(..)`, a key handler and [`TextField::render_text`] as its child.
+pub fn text_input(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    leading_icon: Option<&'static str>,
+    focused: bool,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(30.))
+        .px_2p5()
+        .flex()
+        .items_center()
+        .gap_2()
+        .rounded(px(8.))
+        .bg(t.field)
+        .border_1()
+        .border_color(if focused { t.accent.opacity(0.55) } else { transparent_black() })
+        .overflow_hidden()
+        .when_some(leading_icon, |d, name| d.child(icon(name, 12., t.text_secondary)))
 }
 
 #[cfg(test)]

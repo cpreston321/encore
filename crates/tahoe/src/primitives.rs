@@ -153,3 +153,63 @@ pub fn badge(t: &Theme, letter: impl Into<SharedString>) -> Div {
 pub fn skeleton_block(t: &Theme, w: f32, h: f32, radius: f32) -> Div {
     div().w(px(w)).h(px(h)).flex_none().rounded(px(radius)).bg(t.placeholder)
 }
+
+/// A small rounded toggle, filled with the accent when on, like shuffle and repeat.
+pub fn toggle_button(t: &Theme, id: impl Into<ElementId>, icon_name: &'static str, on: bool) -> Stateful<Div> {
+    div()
+        .id(id)
+        .w(px(34.))
+        .h(px(26.))
+        .rounded(px(8.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(if on { t.accent } else { t.button })
+        .hover(|s| s.opacity(0.85))
+        .child(icon(icon_name, 13., if on { t.on_accent() } else { t.icon }))
+}
+
+/// A keyboard key or shortcut drawn as a key cap, like `⌘K`.
+pub fn kbd(t: &Theme, keys: impl Into<SharedString>) -> Div {
+    div()
+        .flex_none()
+        .px_1p5()
+        .py_0p5()
+        .rounded(px(5.))
+        .bg(t.button)
+        .border_1()
+        .border_color(t.separator)
+        .text_size(px(11.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(t.text_secondary)
+        .child(keys.into())
+}
+
+/// A centered title and hint for a list or page with nothing in it.
+pub fn empty_state(t: &Theme, title: impl Into<SharedString>, hint: impl Into<SharedString>) -> Div {
+    div()
+        .pt(px(100.))
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_1()
+        .child(div().text_size(px(18.)).font_weight(FontWeight::BOLD).child(title.into()))
+        .child(div().text_color(t.text_secondary).child(hint.into()))
+}
+
+/// Up to two initials on a grey circle, the fallback for a missing profile photo.
+pub fn initials_avatar(name: &str, size: f32) -> Div {
+    let initials: String = name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
+    div()
+        .size(px(size))
+        .flex_none()
+        .rounded_full()
+        .bg(crate::theme::gradient(0x8e8e93, 0x3a3a3c))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(size * 0.36))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(white())
+        .child(initials.to_uppercase())
+}

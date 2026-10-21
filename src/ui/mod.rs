@@ -1,12 +1,12 @@
 //! Everything drawn on screen. Each file adds `impl MusicApp` methods for one area; shared
 //! imports and layout constants live here and reach the children through `use super::*`.
 
-use std::{cell::Cell, ops::Range, rc::Rc, sync::Arc, time::Duration};
+use std::{ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Bounds, ClickEvent, Context, Div, ElementId, FontWeight, Hsla, MouseButton,
-    MouseDownEvent, ObjectFit, Pixels, SharedString, Stateful, Svg, anchored, canvas, deferred, div, ease_out_quint,
-    img, linear_color_stop, linear_gradient, prelude::*, pulsating_between, px, relative, rgb, uniform_list, white,
+    Animation, AnimationExt, AnyElement, ClickEvent, Context, Div, ElementId, FontWeight, Hsla, MouseButton,
+    MouseDownEvent, ObjectFit, Pixels, SharedString, Stateful, Svg, anchored, deferred, div, ease_out_quint, img,
+    linear_color_stop, linear_gradient, prelude::*, pulsating_between, px, relative, rgb, uniform_list, white,
 };
 
 use crate::{

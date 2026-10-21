@@ -447,3 +447,217 @@ impl RenderOnce for Card {
         base
     }
 }
+
+/// A keyboard shortcut drawn as a key cap.
+#[derive(IntoElement)]
+pub struct Kbd {
+    keys: SharedString,
+    theme: Option<Theme>,
+}
+
+impl Kbd {
+    pub fn new(keys: impl Into<SharedString>) -> Self {
+        Self { keys: keys.into(), theme: None }
+    }
+
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+}
+
+impl RenderOnce for Kbd {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        primitives::kbd(&theme_for(self.theme, window), self.keys)
+    }
+}
+
+/// What a list or page shows when there's nothing in it: a title, a hint, and optionally a
+/// button to fix that.
+#[derive(IntoElement)]
+pub struct EmptyState {
+    title: SharedString,
+    hint: SharedString,
+    action: Option<AnyElement>,
+    theme: Option<Theme>,
+}
+
+impl EmptyState {
+    pub fn new(title: impl Into<SharedString>, hint: impl Into<SharedString>) -> Self {
+        Self { title: title.into(), hint: hint.into(), action: None, theme: None }
+    }
+
+    pub fn action(mut self, action: impl IntoElement) -> Self {
+        self.action = Some(action.into_any_element());
+        self
+    }
+
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+}
+
+impl RenderOnce for EmptyState {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let t = theme_for(self.theme, window);
+        primitives::empty_state(&t, self.title, self.hint).when_some(self.action, |d, a| d.child(div().pt_4().child(a)))
+    }
+}
+
+/// A round profile picture: `image` when there is one, otherwise the name's initials.
+#[derive(IntoElement)]
+pub struct Avatar {
+    name: SharedString,
+    size: f32,
+    image: Option<AnyElement>,
+}
+
+impl Avatar {
+    pub fn new(name: impl Into<SharedString>) -> Self {
+        Self { name: name.into(), size: 32., image: None }
+    }
+
+    /// Diameter in points (32 by default).
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// The photo, already sized and clipped by the caller (for example a rounded `img`).
+    pub fn image(mut self, image: impl IntoElement) -> Self {
+        self.image = Some(image.into_any_element());
+        self
+    }
+}
+
+impl RenderOnce for Avatar {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        match self.image {
+            Some(image) => div().size(px(self.size)).flex_none().rounded_full().overflow_hidden().child(image),
+            None => primitives::initials_avatar(&self.name, self.size),
+        }
+    }
+}
+
+/// An icon toggle, filled with the accent when on.
+#[derive(IntoElement)]
+pub struct ToggleButton {
+    id: ElementId,
+    icon: &'static str,
+    on: bool,
+    theme: Option<Theme>,
+    on_click: Option<ClickHandler>,
+}
+
+impl ToggleButton {
+    pub fn new(id: impl Into<ElementId>, icon: &'static str, on: bool) -> Self {
+        Self { id: id.into(), icon, on, theme: None, on_click: None }
+    }
+
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+
+    pub fn on_click(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.on_click = Some(Box::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for ToggleButton {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let t = theme_for(self.theme, window);
+        primitives::toggle_button(&t, self.id, self.icon, self.on).when_some(self.on_click, |d, f| d.on_click(f))
+    }
+}
+
+/// How a [`SegmentedControl`] is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SegmentedStyle {
+    /// A sunken track whose selected segment is raised, like an `NSSegmentedControl`.
+    #[default]
+    Track,
+    /// Separate white capsules for artwork and photos, like Now Playing's tabs.
+    Glass,
+}
+
+struct Segment {
+    id: ElementId,
+    label: SharedString,
+    selected: bool,
+    on_click: ClickHandler,
+}
+
+/// A row of mutually exclusive options. Add one `.segment(..)` per option; the owner decides
+/// which is selected.
+#[derive(IntoElement)]
+pub struct SegmentedControl {
+    segments: Vec<Segment>,
+    style: SegmentedStyle,
+    theme: Option<Theme>,
+}
+
+impl SegmentedControl {
+    pub fn new() -> Self {
+        Self { segments: Vec::new(), style: SegmentedStyle::default(), theme: None }
+    }
+
+    pub fn segment(
+        mut self,
+        id: impl Into<ElementId>,
+        label: impl Into<SharedString>,
+        selected: bool,
+        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.segments.push(Segment { id: id.into(), label: label.into(), selected, on_click: Box::new(on_click) });
+        self
+    }
+
+    pub fn style(mut self, style: SegmentedStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+}
+
+impl Default for SegmentedControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderOnce for SegmentedControl {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let t = theme_for(self.theme, window);
+        let glass = self.style == SegmentedStyle::Glass;
+        let row =
+            if glass { div().flex().gap_1() } else { div().flex().p(px(2.)).gap(px(2.)).rounded(px(9.)).bg(t.button) };
+        row.children(self.segments.into_iter().map(|s| {
+            let on = s.selected;
+            let seg = div().id(s.id).flex().items_center().font_weight(FontWeight::MEDIUM);
+            let seg = if glass {
+                seg.px_3()
+                    .h(px(28.))
+                    .rounded_full()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .when(on, |d| d.bg(white().opacity(0.18)).text_color(white()))
+                    .when(!on, |d| d.text_color(white().opacity(0.6)).hover(|s| s.text_color(white())))
+            } else {
+                seg.px_2()
+                    .h(px(22.))
+                    .rounded(px(7.))
+                    .text_size(px(11.5))
+                    .when(on, |d| d.bg(t.menu).shadow_sm().text_color(t.text))
+                    .when(!on, |d| d.text_color(t.text_secondary).hover(|s| s.text_color(t.text)))
+            };
+            seg.child(s.label).on_click(s.on_click)
+        }))
+    }
+}

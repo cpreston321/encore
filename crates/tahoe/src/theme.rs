@@ -219,6 +219,11 @@ pub fn readable_on(bg: Hsla, preferred: Hsla) -> Hsla {
     if contrast(preferred, bg) >= 3. { preferred } else { best_of_black_white(bg, preferred.a) }
 }
 
+/// A 135° gradient between two RGB hex colors, the fill for avatars and placeholder art.
+pub fn gradient(from: u32, to: u32) -> gpui::Background {
+    gpui::linear_gradient(135., gpui::linear_color_stop(rgb(from), 0.), gpui::linear_color_stop(rgb(to), 1.))
+}
+
 fn white_ish(alpha: f32) -> Hsla {
     Hsla { h: 0., s: 0., l: 1., a: alpha }
 }

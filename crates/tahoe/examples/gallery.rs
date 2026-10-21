@@ -2,18 +2,23 @@
 //! TAHOE_APPEARANCE=light|dark forces an appearance.
 
 use gpui::{
-    App, Application, Bounds, Context, Hsla, IntoElement, ParentElement, Render, Styled, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, Hsla, IntoElement, KeyDownEvent, ParentElement, Render, Styled,
+    TitlebarOptions, Window, WindowBounds, WindowOptions, div, point, prelude::*, px, size,
 };
 use tahoe::{
     prelude::*,
     primitives::skeleton_block,
+    textfield::text_input,
     theme::{Appearance, force_appearance},
 };
 
 struct Gallery {
     clicks: usize,
     last: &'static str,
+    field: TextField,
+    field_focus: FocusHandle,
+    segment: usize,
+    shuffle: bool,
 }
 
 impl Gallery {
@@ -36,10 +41,6 @@ fn swatch(label: &'static str, color: Hsla, t: &Theme) -> impl IntoElement {
 impl Render for Gallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::for_appearance(window.appearance());
-        // A page tinted by artwork, with a pale accent from light cover art.
-        let tinted = t.tinted(Palette::from_art_colors(0x2b1d14, [0xf3e4d6, 0xd9c2ad, 0xe7d3c0, 0xc8b29c]));
-        let row = || div().px(px(32.)).flex().flex_wrap().items_center().gap_3();
-
         div()
             .id("gallery")
             .size_full()
@@ -48,6 +49,20 @@ impl Render for Gallery {
             .text_color(t.text)
             .font_family(".SystemUIFont")
             .text_size(px(13.))
+            .child(self.contents(&t, window, cx))
+    }
+}
+
+impl Gallery {
+    fn contents(&self, t: &Theme, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = *t;
+        // A page tinted by artwork, with a pale accent from light cover art.
+        let tinted = t.tinted(Palette::from_art_colors(0x2b1d14, [0xf3e4d6, 0xd9c2ad, 0xe7d3c0, 0xc8b29c]));
+        let row = || div().px(px(32.)).flex().flex_wrap().items_center().gap_3();
+        let focused = self.field_focus.is_focused(window);
+        div()
+            .flex()
+            .flex_col()
             .child(PageHeader::new("Tahoe").on_back(cx.listener(|this, _, _, cx| this.clicked("back", cx))))
             .child(
                 div()
@@ -77,6 +92,53 @@ impl Render for Gallery {
                     .child(IconButton::new("toolbar-more", "ellipsis"))
                     .child(IconButton::new("plain-icon", "heart").style(IconButtonStyle::Plain))
                     .child(IconButton::new("filled-icon", "play").size(44.).style(IconButtonStyle::Filled(t.accent))),
+            )
+            .child(SectionHeader::new("controls", "Controls"))
+            .child(
+                row()
+                    .child((0..3).fold(SegmentedControl::new(), |c, i| {
+                        c.segment(
+                            ("seg", i),
+                            ["Off", "6s", "12s"][i],
+                            self.segment == i,
+                            cx.listener(move |this, _, _, cx| {
+                                this.segment = i;
+                                cx.notify();
+                            }),
+                        )
+                    }))
+                    .child(ToggleButton::new("shuffle", "shuffle", self.shuffle).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.shuffle = !this.shuffle;
+                            cx.notify();
+                        },
+                    )))
+                    .child(Kbd::new("⌘K"))
+                    .child(Kbd::new("esc")),
+            )
+            .child(
+                row().pt_3().child(
+                    text_input(&t, "field", Some("search"), focused)
+                        .w(px(260.))
+                        .track_focus(&self.field_focus)
+                        .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| {
+                            if this.field.handle_key(&e.keystroke, cx) {
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(cx.listener(|this, _, window, _| window.focus(&this.field_focus)))
+                        .child(div().flex_1().min_w_0().child(self.field.render_text(&t, focused, "Filter", 14.))),
+                ),
+            )
+            .child(SectionHeader::new("people", "Avatars and empty states"))
+            .child(row().child(Avatar::new("Christian Preston").size(40.)).child(Avatar::new("Lana Del Rey").size(32.)))
+            .child(
+                row().pt_4().child(
+                    Card::new().w(px(360.)).h(px(300.)).child(
+                        EmptyState::new("No Songs", "Songs you add appear here.")
+                            .action(Button::new("browse", "Browse").style(ButtonStyle::Tinted)),
+                    ),
+                ),
             )
             .child(SectionHeader::new("links", "Links and badges"))
             .child(
@@ -155,7 +217,7 @@ fn main() {
         _ => {}
     }
     Application::new().with_assets(tahoe::Assets).run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(820.), px(760.)), cx);
+        let bounds = Bounds::centered(None, size(px(820.), px(1000.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -168,7 +230,14 @@ fn main() {
             },
             |window, cx| {
                 tahoe::chrome::use_tahoe_corners(window);
-                cx.new(|_| Gallery { clicks: 0, last: "nothing yet" })
+                cx.new(|cx| Gallery {
+                    clicks: 0,
+                    last: "nothing yet",
+                    field: TextField::default(),
+                    field_focus: cx.focus_handle(),
+                    segment: 0,
+                    shuffle: false,
+                })
             },
         )
         .unwrap();

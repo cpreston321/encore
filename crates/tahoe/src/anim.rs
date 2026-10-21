@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use gpui::{Hsla, Rgba};
+use gpui::{Animation, AnimationExt, ElementId, Hsla, IntoElement, Rgba, Styled, ease_out_quint, pulsating_between};
 
 /// The system "Reduce motion" accessibility setting (read once), or the override from
 /// `force_reduce_motion`. Components and transitions skip their motion when it's on.
@@ -25,6 +25,20 @@ static FORCE_REDUCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 /// Decelerating curve used for nearly every transition in the app.
 pub fn ease_out(t: f32) -> f32 {
     1. - (1. - t.clamp(0., 1.)).powi(3)
+}
+
+/// An overlay's entrance: short and decelerating, so it feels responsive rather than slow.
+pub fn pop_in() -> Animation {
+    Animation::new(Duration::from_millis(if reduce_motion() { 1 } else { 170 })).with_easing(ease_out_quint())
+}
+
+/// Gently pulses an element's opacity, for loading placeholders.
+pub fn pulse<E: IntoElement + Styled + 'static>(id: impl Into<ElementId>, el: E) -> impl IntoElement {
+    el.with_animation(
+        id,
+        Animation::new(Duration::from_millis(1300)).repeat().with_easing(pulsating_between(0.5, 1.)),
+        |el, p| el.opacity(p),
+    )
 }
 
 /// Tracks an open/closed flag as a 0–1 value that eases between states, so things can

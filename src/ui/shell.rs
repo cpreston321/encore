@@ -89,8 +89,15 @@ impl MusicApp {
         )
     }
 
+    fn user_avatar(&self, size: f32) -> tahoe::Avatar {
+        let avatar = tahoe::Avatar::new(self.user_name.clone()).size(size);
+        match &self.avatar {
+            Some(path) => avatar.image(img(path.clone()).size_full().object_fit(ObjectFit::Cover)),
+            None => avatar,
+        }
+    }
+
     pub(crate) fn render_account(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let initials: String = self.user_name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
         // Signed in, the row is just photo and name, like the Music app.
         let status: Option<AnyElement> = match self.account {
             Account::SignedIn => None,
@@ -105,27 +112,7 @@ impl MusicApp {
                 .into_any_element()
                 .into(),
         };
-        let avatar: AnyElement = match &self.avatar {
-            Some(path) => img(path.clone())
-                .size(px(30.))
-                .flex_none()
-                .rounded_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element(),
-            None => div()
-                .size(px(30.))
-                .flex_none()
-                .rounded_full()
-                .bg(gradient(0x8e8e93, 0x48484a))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(12.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(white())
-                .child(initials.to_uppercase())
-                .into_any_element(),
-        };
+        let avatar = self.user_avatar(30.);
         // Red badge, as in the Music app, but only when there's something to act on.
         let needs_attention = self.account == Account::SignedOut;
 
@@ -210,7 +197,6 @@ impl MusicApp {
             return None;
         }
         let row = self.account_bounds.get();
-        let initials: String = self.user_name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
         let stats = match self.remote() {
             Some(r) => format!(
                 "{} songs · {} albums · {} playlists",
@@ -271,55 +257,29 @@ impl MusicApp {
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
-                div()
-                    .p_4()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(match &self.avatar {
-                        Some(path) => img(path.clone())
-                            .size(px(48.))
-                            .flex_none()
-                            .rounded_full()
-                            .object_fit(ObjectFit::Cover)
-                            .into_any_element(),
-                        None => div()
-                            .size(px(48.))
-                            .flex_none()
-                            .rounded_full()
-                            .bg(gradient(0x8e8e93, 0x48484a))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(18.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(white())
-                            .child(initials.to_uppercase())
-                            .into_any_element(),
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(px(15.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(self.user_name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .text_size(px(12.))
-                                    .text_color(t.text_secondary)
-                                    .child(div().size(px(6.)).rounded_full().bg(gpui::rgb(0x34c759)))
-                                    .child("Signed in to Apple Music"),
-                            ),
-                    ),
+                div().p_4().flex().items_center().gap_3().child(self.user_avatar(48.)).child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(15.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(self.user_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .text_size(px(12.))
+                                .text_color(t.text_secondary)
+                                .child(div().size(px(6.)).rounded_full().bg(gpui::rgb(0x34c759)))
+                                .child("Signed in to Apple Music"),
+                        ),
+                ),
             )
             .child(
                 div()

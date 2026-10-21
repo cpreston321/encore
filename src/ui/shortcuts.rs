@@ -47,18 +47,6 @@ impl MusicApp {
             ),
             ("Library", &[("⌘R", "Refresh library"), ("⌘/", "This list")]),
         ];
-        let key_cap = |k: &str| {
-            div()
-                .px_1p5()
-                .py_0p5()
-                .rounded(px(5.))
-                .bg(t.button)
-                .border_1()
-                .border_color(t.separator)
-                .text_size(px(11.5))
-                .font_weight(FontWeight::MEDIUM)
-                .child(k.to_string())
-        };
         let mut columns = div().flex().flex_wrap().gap_x_8().gap_y_6();
         for (title, rows) in groups {
             let mut col = div().w(px(250.)).flex().flex_col().gap_2().child(
@@ -72,7 +60,7 @@ impl MusicApp {
                         .justify_between()
                         .gap_3()
                         .child(div().text_color(t.text_secondary).child(what.to_string()))
-                        .child(key_cap(keys)),
+                        .child(tahoe::primitives::kbd(t, *keys).text_size(px(11.5)).text_color(t.text)),
                 );
             }
             columns = columns.child(col);

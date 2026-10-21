@@ -298,25 +298,15 @@ impl MusicApp {
         };
 
         let repeat_icon = if self.queue.repeat == Repeat::One { "repeat-one" } else { "repeat" };
-        let mut crossfade = div().flex().p(px(2.)).gap(px(2.)).rounded(px(9.)).bg(t.button);
-        for secs in crate::app::CROSSFADE_OPTIONS {
-            let on = self.crossfade_secs == secs;
-            crossfade = crossfade.child(
-                div()
-                    .id(("crossfade", secs as usize))
-                    .px_2()
-                    .h(px(22.))
-                    .rounded(px(7.))
-                    .flex()
-                    .items_center()
-                    .text_size(px(11.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .when(on, |d| d.bg(t.menu).shadow_sm().text_color(t.text))
-                    .when(!on, |d| d.text_color(t.text_secondary).hover(|s| s.text_color(t.text)))
-                    .child(if secs == 0 { "Off".to_string() } else { format!("{secs}s") })
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_crossfade(secs, cx))),
-            );
-        }
+        let crossfade =
+            crate::app::CROSSFADE_OPTIONS.into_iter().fold(tahoe::SegmentedControl::new().theme(*t), |c, secs| {
+                c.segment(
+                    ("crossfade", secs as usize),
+                    if secs == 0 { "Off".to_string() } else { format!("{secs}s") },
+                    self.crossfade_secs == secs,
+                    cx.listener(move |this, _, _, cx| this.set_crossfade(secs, cx)),
+                )
+            });
         panel = panel
             .child(heading("Now Playing"))
             .child(self.queue_row(t, &current, cx).bg(t.hover))
@@ -335,18 +325,20 @@ impl MusicApp {
                     div()
                         .flex()
                         .gap_1()
-                        .child(toggle_chip(t, "queue-shuffle", "shuffle", self.queue.shuffle).on_click(cx.listener(
+                        .child(toggle_button(t, "queue-shuffle", "shuffle", self.queue.shuffle).on_click(cx.listener(
                             |this, _, _, cx| {
                                 this.queue.toggle_shuffle();
                                 cx.notify();
                             },
                         )))
-                        .child(toggle_chip(t, "queue-repeat", repeat_icon, self.queue.repeat != Repeat::Off).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.queue.cycle_repeat();
-                                cx.notify();
-                            }),
-                        )),
+                        .child(
+                            toggle_button(t, "queue-repeat", repeat_icon, self.queue.repeat != Repeat::Off).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.queue.cycle_repeat();
+                                    cx.notify();
+                                }),
+                            ),
+                        ),
                 ),
             );
 

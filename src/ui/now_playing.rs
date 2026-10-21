@@ -251,25 +251,26 @@ impl MusicApp {
             NowPlayingTab::Lyrics => self.render_lyrics_panel(&song, window, cx),
             NowPlayingTab::UpNext => self.render_up_next_panel(t, cx),
         };
-        let tab = |id: &'static str, label: &'static str, which: NowPlayingTab| {
-            let on = self.now_playing_tab == which;
-            div()
-                .id(id)
-                .px_3()
-                .h(px(28.))
-                .rounded_full()
-                .flex()
-                .items_center()
-                .text_size(px(13.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .when(on, |d| d.bg(white_a(0.18)).text_color(white()))
-                .when(!on, |d| d.text_color(white_a(0.6)).hover(|s| s.text_color(white())))
-                .child(label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.now_playing_tab = which;
-                    cx.notify();
-                }))
+        let tab = |which: NowPlayingTab| {
+            cx.listener(move |this: &mut Self, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                this.now_playing_tab = which;
+                cx.notify();
+            })
         };
+        let tabs = tahoe::SegmentedControl::new()
+            .style(tahoe::SegmentedStyle::Glass)
+            .segment(
+                "np-tab-lyrics",
+                "Lyrics",
+                self.now_playing_tab == NowPlayingTab::Lyrics,
+                tab(NowPlayingTab::Lyrics),
+            )
+            .segment(
+                "np-tab-queue",
+                "Up Next",
+                self.now_playing_tab == NowPlayingTab::UpNext,
+                tab(NowPlayingTab::UpNext),
+            );
         let right = div()
             .w(px(panel_w))
             .flex_none()
@@ -277,11 +278,7 @@ impl MusicApp {
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().flex().gap_1().child(tab("np-tab-lyrics", "Lyrics", NowPlayingTab::Lyrics)).child(tab(
-                "np-tab-queue",
-                "Up Next",
-                NowPlayingTab::UpNext,
-            )))
+            .child(tabs)
             .child(div().flex_1().min_h_0().child(panel_body));
 
         Some(

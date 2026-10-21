@@ -70,47 +70,6 @@ pub fn bind(cx: &mut App) {
     ]);
 }
 
-/// Generic single-line editing (typing, deletion, cursor/selection movement, clipboard).
-/// Returns false for keys it doesn't handle.
-pub fn edit_text(f: &mut crate::textfield::TextField, k: &Keystroke, cx: &mut Context<MusicApp>) -> bool {
-    use crate::textfield::TextField as F;
-    let (cmd, alt, shift) = (k.modifiers.platform, k.modifiers.alt, k.modifiers.shift);
-    match (k.key.as_str(), cmd, alt) {
-        ("backspace", true, _) => f.delete_to_start(),
-        ("backspace", _, true) => f.delete_word_back(),
-        ("backspace", ..) => f.backspace(),
-        ("delete", ..) => f.delete_forward(),
-        ("left", true, _) | ("home", ..) => f.motion(shift, F::home),
-        ("right", true, _) | ("end", ..) => f.motion(shift, F::end),
-        ("left", _, true) => f.motion(shift, F::word_left),
-        ("right", _, true) => f.motion(shift, F::word_right),
-        ("left", ..) if shift => f.motion(true, F::left),
-        ("right", ..) if shift => f.motion(true, F::right),
-        ("left", ..) => f.collapse_or(true, F::left),
-        ("right", ..) => f.collapse_or(false, F::right),
-        ("a", true, _) => f.select_all(),
-        ("c", true, _) | ("x", true, _) => {
-            if let Some(text) = f.selected_text() {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
-                if k.key == "x" {
-                    f.backspace();
-                }
-            }
-        }
-        ("v", true, _) => {
-            if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                f.insert(&text);
-            }
-        }
-        _ if cmd || k.modifiers.control => return false,
-        _ => match &k.key_char {
-            Some(ch) if !ch.chars().any(char::is_control) => f.insert(ch),
-            _ => return false,
-        },
-    }
-    true
-}
-
 /// What ⌘K results and the Search page's "In Your Library" section show.
 #[derive(Default)]
 pub struct LocalMatches {
@@ -256,37 +215,9 @@ impl MusicApp {
 
     /// Edits the search query. Returns true if the key was used.
     pub(crate) fn search_key(&mut self, k: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        use crate::textfield::TextField as F;
-        let (cmd, alt, ctrl, shift) = (k.modifiers.platform, k.modifiers.alt, k.modifiers.control, k.modifiers.shift);
+        let (cmd, alt) = (k.modifiers.platform, k.modifiers.alt);
         let before = self.search.text().to_string();
         match (k.key.as_str(), cmd, alt) {
-            ("backspace", true, _) => self.search.delete_to_start(),
-            ("backspace", _, true) => self.search.delete_word_back(),
-            ("backspace", ..) => self.search.backspace(),
-            ("delete", ..) => self.search.delete_forward(),
-            // Movement; with ⇧ it extends the selection.
-            ("left", true, _) | ("home", ..) => self.search.motion(shift, F::home),
-            ("right", true, _) | ("end", ..) => self.search.motion(shift, F::end),
-            ("left", _, true) => self.search.motion(shift, F::word_left),
-            ("right", _, true) => self.search.motion(shift, F::word_right),
-            ("left", ..) if shift => self.search.motion(true, F::left),
-            ("right", ..) if shift => self.search.motion(true, F::right),
-            ("left", ..) => self.search.collapse_or(true, F::left),
-            ("right", ..) => self.search.collapse_or(false, F::right),
-            ("a", true, _) => self.search.select_all(),
-            ("c", true, _) | ("x", true, _) => {
-                if let Some(text) = self.search.selected_text() {
-                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
-                    if k.key == "x" {
-                        self.search.backspace();
-                    }
-                }
-            }
-            ("v", true, _) => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    self.search.insert(&text);
-                }
-            }
             ("escape", ..) => {
                 if self.palette_open || self.search.is_empty() {
                     self.palette_open = false;
@@ -311,11 +242,11 @@ impl MusicApp {
                 window.focus(&self.focus);
                 self.move_selection(1, cx);
             }
-            _ if cmd || ctrl => return false,
-            _ => match &k.key_char {
-                Some(ch) if !ch.chars().any(char::is_control) => self.search.insert(ch),
-                _ => return false,
-            },
+            _ => {
+                if !self.search.handle_key(k, cx) {
+                    return false;
+                }
+            }
         }
         if self.search.text() != before {
             self.palette_index = 0;

@@ -267,20 +267,7 @@ impl MusicApp {
         if !artwork.is_empty() {
             return self.art(artwork, size, size / 2., t, cx);
         }
-        let initials: String = name.split_whitespace().filter_map(|w| w.chars().next()).take(2).collect();
-        div()
-            .size(px(size))
-            .flex_none()
-            .rounded_full()
-            .bg(gradient(0x8e8e93, 0x3a3a3c))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(px(size * 0.36))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(white())
-            .child(initials.to_uppercase())
-            .into_any_element()
+        tahoe::primitives::initials_avatar(name, size).into_any_element()
     }
 
     pub(crate) fn hero_card(
@@ -1000,30 +987,5 @@ impl MusicApp {
             .ok();
         })
         .detach();
-    }
-
-    /// The query with a caret at the cursor, or the placeholder.
-    pub(crate) fn search_text(&self, t: &Theme, focused: bool, placeholder: &'static str, caret_h: f32) -> AnyElement {
-        let text = self.search.text();
-        if text.is_empty() && !focused {
-            return div().text_color(t.text_tertiary).child(placeholder).into_any_element();
-        }
-        let row = div().flex().items_center().min_w_0().overflow_hidden().whitespace_nowrap();
-        let piece = |s: &str| SharedString::from(s.to_string());
-        if let Some(sel) = self.search.selection() {
-            // Like macOS: no caret while text is selected, just the highlight.
-            let highlight = if focused { t.accent.opacity(0.38) } else { t.selected };
-            return row
-                .when(sel.start > 0, |d| d.child(piece(&text[..sel.start])))
-                .child(div().rounded(px(3.)).bg(highlight).child(piece(&text[sel.clone()])))
-                .when(sel.end < text.len(), |d| d.child(piece(&text[sel.end..])))
-                .into_any_element();
-        }
-        let (before, after) = text.split_at(self.search.cursor());
-        row.when(!before.is_empty(), |d| d.child(piece(before)))
-            .when(focused, |d| d.child(div().flex_none().w(px(1.5)).h(px(caret_h)).bg(t.accent)))
-            .when(!after.is_empty(), |d| d.child(piece(after)))
-            .when(text.is_empty(), |d| d.child(div().pl_0p5().text_color(t.text_tertiary).child(placeholder)))
-            .into_any_element()
     }
 }

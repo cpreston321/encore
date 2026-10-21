@@ -3,37 +3,12 @@
 use super::*;
 
 pub(crate) use tahoe::{
+    anim::{pop_in, pulse},
     icon,
-    primitives::{button, icon_button, pill_button},
+    layout::{capture_bounds, group_digits, lock_scroll_axis},
+    primitives::{button, empty_state, icon_button, pill_button, toggle_button},
+    theme::gradient,
 };
-
-/// Small rounded toggle, filled with the accent when on (shuffle / repeat).
-pub(crate) fn toggle_chip(t: &Theme, id: &'static str, icon_name: &'static str, on: bool) -> Stateful<Div> {
-    div()
-        .id(id)
-        .w(px(34.))
-        .h(px(26.))
-        .rounded(px(8.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(if on { t.accent } else { t.button })
-        .hover(|s| s.opacity(0.85))
-        .child(icon(icon_name, 13., if on { t.on_accent() } else { t.icon }))
-}
-
-/// `1395` → `1,395`.
-pub(crate) fn group_digits(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out
-}
 
 pub(crate) fn explicit_badge(t: &Theme) -> impl IntoElement {
     tahoe::primitives::badge(t, "E")
@@ -141,14 +116,6 @@ pub(crate) fn skeleton(t: &Theme) -> impl IntoElement {
         )
 }
 
-fn pulse<E: IntoElement + Styled + 'static>(id: &'static str, el: E) -> impl IntoElement {
-    el.with_animation(
-        id,
-        Animation::new(Duration::from_millis(1300)).repeat().with_easing(pulsating_between(0.5, 1.)),
-        |el, p| el.opacity(p),
-    )
-}
-
 /// Placeholder song rows: art square, two text lines, duration.
 pub(crate) fn skeleton_rows(t: &Theme, n: usize) -> impl IntoElement {
     let block = |w: f32, h: f32| div().w(px(w)).h(px(h)).flex_none().rounded(px(4.)).bg(t.placeholder);
@@ -206,11 +173,6 @@ pub(crate) fn skeleton_detail(t: &Theme) -> impl IntoElement {
         .child(skeleton_rows(t, 6))
 }
 
-/// Overlay entrance: short and decelerating, so it feels responsive rather than slow.
-pub(crate) fn pop_in() -> Animation {
-    Animation::new(Duration::from_millis(170)).with_easing(ease_out_quint())
-}
-
 /// Fades and lifts each new page into place. Keyed by navigation count so it replays.
 pub(crate) fn page_transition(
     generation: usize,
@@ -235,21 +197,6 @@ pub(crate) fn page_transition(
     )
 }
 
-pub(crate) fn empty_state(t: &Theme, title: &'static str, hint: &'static str) -> impl IntoElement {
-    div()
-        .pt(px(100.))
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap_1()
-        .child(div().text_size(px(18.)).font_weight(FontWeight::BOLD).child(title))
-        .child(div().text_color(t.text_secondary).child(hint))
-}
-
-pub(crate) fn gradient(from: u32, to: u32) -> gpui::Background {
-    linear_gradient(135., linear_color_stop(rgb(from), 0.), linear_color_stop(rgb(to), 1.))
-}
-
 pub(crate) fn art_overlay(size: f32, child: Svg) -> Div {
     div()
         .absolute()
@@ -272,32 +219,7 @@ pub(crate) fn grid_container() -> Div {
     div().px(px(PAD)).flex().flex_wrap().gap_x(px(GAP)).gap_y(px(26.))
 }
 
-/// Without this, gpui maps a horizontal swipe onto a vertical-only container (and vice versa),
-/// so swiping a carousel sideways would also scroll the page.
-pub(crate) fn lock_scroll_axis<E: Styled>(mut element: E) -> E {
-    element.style().restrict_scroll_to_axis = Some(true);
-    element
-}
-
-/// Records an element's laid-out bounds so mouse positions can be mapped onto it.
-pub(crate) fn capture_bounds(cell: Rc<Cell<Bounds<Pixels>>>) -> impl IntoElement {
-    canvas(move |bounds, _, _| cell.set(bounds), |_, _, _, _| {}).absolute().size_full()
-}
-
 /// Columns and tile width that fill `width` with tiles at least `min_tile` wide.
 pub(crate) fn grid_layout(width: f32, min_tile: f32, max_cols: usize) -> (usize, f32) {
-    let avail = (width - 2. * PAD - 2.).max(min_tile);
-    let cols = (((avail + GAP) / (min_tile + GAP)).floor() as usize).clamp(1, max_cols.max(1));
-    let tile = (avail - GAP * (cols as f32 - 1.)) / cols as f32;
-    (cols, tile.floor())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn groups_digits() {
-        assert_eq!(super::group_digits(7), "7");
-        assert_eq!(super::group_digits(1395), "1,395");
-        assert_eq!(super::group_digits(1_234_567), "1,234,567");
-    }
+    tahoe::layout::grid_layout(width, min_tile, max_cols, PAD, GAP)
 }
