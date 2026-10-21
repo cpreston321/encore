@@ -405,7 +405,7 @@ pub struct MusicApp {
     pub(crate) state: PlayState,
     pub(crate) playback_error: Option<String>,
     /// Shared with the progress view, which redraws itself while playing.
-    audio: crate::ui::progress::SharedAudio,
+    pub(crate) audio: crate::ui::progress::SharedAudio,
     pub(crate) progress: gpui::Entity<crate::ui::progress::Progress>,
     /// Full-song players (Apple's web player), created on demand. A crossfade needs two:
     /// one finishing the old song while the other starts the next.
@@ -450,6 +450,7 @@ pub struct MusicApp {
     pub(crate) selected_song: Option<String>,
     pub(crate) drag: Option<Drag>,
     pub(crate) progress_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) native_fill: RefCell<Option<crate::ui::native_fill::NativeFill>>,
     pub(crate) volume_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) show_volume: bool,
     /// The player's speaker button, which the volume popover opens above.
@@ -581,6 +582,7 @@ impl MusicApp {
             selected_song: None,
             drag: None,
             progress_bounds,
+            native_fill: RefCell::new(None),
             volume_bounds: Rc::default(),
             show_volume: false,
             muted_volume: None,

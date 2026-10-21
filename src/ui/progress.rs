@@ -56,6 +56,9 @@ pub struct Progress {
     hover: Cell<HoverAnim>,
     /// Space kept clear left and right of the subtitle line, for the art and menu beside it.
     insets: Cell<(f32, f32)>,
+    /// Where the native fill layer expects the song to be, while it's drawing the fill
+    /// instead of this view (see `native_fill`).
+    native: Cell<Option<(f32, Instant)>>,
     /// The current song's spectrum (set by the app once analyzed).
     pub spectrum: RefCell<Option<std::sync::Arc<crate::spectrum::Spectrum>>>,
     shown_levels: RefCell<[f32; crate::spectrum::BANDS]>,
@@ -78,6 +81,7 @@ impl Progress {
             subtitle: RefCell::default(),
             hover: Cell::new(HoverAnim { hovered: false, from: 0., at: Instant::now() }),
             insets: Cell::new((0., 0.)),
+            native: Cell::new(None),
             spectrum: RefCell::new(None),
             shown_levels: RefCell::new([0.; crate::spectrum::BANDS]),
             live: RefCell::new(crate::spectrum::Live::new()),
@@ -103,6 +107,11 @@ impl Progress {
                         if this.needs_redraw() {
                             cx.notify();
                         }
+                        // The native fill runs on its own clock; a seek or a stall puts it
+                        // out of step, and the player then re-times it.
+                        if this.native_drifted() {
+                            this.app.update(cx, |_, cx| cx.notify()).ok();
+                        }
                         this.ticking = this.playing();
                         this.ticking
                     })
@@ -126,10 +135,27 @@ impl Progress {
         let Some(audio) = audio.as_ref().filter(|a| a.is_playing()) else {
             return false;
         };
+        if self.native.get().is_some() {
+            return false;
+        }
         let duration = audio.duration().unwrap_or(30.).max(1.);
         let width = f32::from(self.bounds.get().size.width);
         let step = (audio.position() / duration * width * 2.) as i64;
         self.drawn_step.replace(step) != step
+    }
+
+    fn native_drifted(&self) -> bool {
+        let Some((position, at)) = self.native.get() else { return false };
+        let audio = self.audio.borrow();
+        audio.as_ref().is_some_and(|a| (a.position() - (position + at.elapsed().as_secs_f32())).abs() > 0.75)
+    }
+
+    pub fn set_native(&self, native: Option<(f32, Instant)>) {
+        self.native.set(native);
+    }
+
+    pub fn fill_color(&self) -> gpui::Hsla {
+        self.colors.get().1
     }
 
     pub fn set_resume(&self, resume: Option<(f32, f32)>) {

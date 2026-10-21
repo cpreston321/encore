@@ -104,6 +104,7 @@ impl MusicApp {
                 if self.progress.read(cx).hover_amount().1 {
                     window.request_animation_frame();
                 }
+                self.sync_native_fill(window, cx);
                 div()
                     .size_full()
                     .child(

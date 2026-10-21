@@ -40,6 +40,7 @@ pub(crate) mod detail;
 pub(crate) mod library;
 pub(crate) mod list_tools;
 pub(crate) mod mini;
+pub(crate) mod native_fill;
 pub(crate) mod now_playing;
 pub(crate) mod pages;
 pub(crate) mod palette;
