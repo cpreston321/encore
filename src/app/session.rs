@@ -19,6 +19,11 @@ fn path() -> PathBuf {
 impl MusicApp {
     pub(crate) fn save_session(&mut self) {
         self.session_saved_at = Some(std::time::Instant::now());
+        // Signed out, the queue holds at most previews; the session saved while signed in
+        // stays for the next sign-in. Signing out clears it on purpose (`sign_out`).
+        if self.account == Account::SignedOut {
+            return;
+        }
         if self.queue.current().is_none() {
             self.clear_session();
             return;

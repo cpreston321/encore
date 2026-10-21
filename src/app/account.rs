@@ -50,11 +50,13 @@ impl MusicApp {
                         this.account = Account::SignedOut;
                         this.remote = Load::Loading;
                         // Signed out, the last session's song can't play in full; start
-                        // from the welcome screen instead.
+                        // from the welcome screen instead. The saved session stays on disk:
+                        // a Keychain read that fails once, or a build that can't read it,
+                        // shouldn't lose it.
                         if this.state == PlayState::Paused && this.audio.borrow().is_none() {
                             this.queue.clear();
                             this.state = PlayState::Idle;
-                            this.clear_session();
+                            this.resume_at = None;
                             this.progress.read(cx).set_resume(None);
                             this.update_now_playing(cx);
                         }
