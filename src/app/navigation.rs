@@ -57,8 +57,10 @@ impl MusicApp {
 
     pub(crate) fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
         self.multi.clear();
-        // A link clicked to get here never sees the pointer leave it.
+        // Whatever the pointer was over goes with the page and never sees it leave, so
+        // nothing would fade its hover back out. The sidebar's keys stay.
         self.hovered_link.replace(None);
+        self.fx.borrow_mut().hovers.retain(|key, _| key.starts_with("nav-"));
         self.route = route;
         self.route_generation += 1;
         self.menu = None;

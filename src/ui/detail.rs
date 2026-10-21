@@ -680,8 +680,6 @@ impl MusicApp {
                     .items_center()
                     .child(
                         div()
-                            .relative()
-                            .top(px(scroll * 0.35))
                             .opacity(fade)
                             .rounded(px(10.))
                             .shadow_lg()
