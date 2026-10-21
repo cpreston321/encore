@@ -309,6 +309,76 @@ impl MetalRenderer {
         self.update_path_intermediate_textures(device_pixels_size);
     }
 
+    /// Renders `scene` into an offscreen texture the size of the drawable and reads it back
+    /// as 8-bit sRGB, clamping wide-gamut colors.
+    pub fn snapshot(&mut self, scene: &Scene) -> Option<image::RgbaImage> {
+        let drawable_size = self.layer.drawable_size();
+        let (width, height) = (drawable_size.width.ceil() as u32, drawable_size.height.ceil() as u32);
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let format = self.layer.pixel_format();
+        let descriptor = metal::TextureDescriptor::new();
+        descriptor.set_width(width as u64);
+        descriptor.set_height(height as u64);
+        descriptor.set_pixel_format(format);
+        descriptor.set_storage_mode(metal::MTLStorageMode::Managed);
+        descriptor.set_usage(metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead);
+        let target = self.device.new_texture(&descriptor);
+        let viewport = size(DevicePixels(width as i32), DevicePixels(height as i32));
+        self.update_path_intermediate_textures(viewport);
+
+        let mut instance_buffer = self.instance_buffer_pool.lock().acquire(&self.device);
+        let command_buffer = self.draw_primitives(scene, &mut instance_buffer, &target, viewport).ok()?;
+        let blit = command_buffer.new_blit_command_encoder();
+        blit.synchronize_resource(&target);
+        blit.end_encoding();
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+        self.instance_buffer_pool.lock().release(instance_buffer);
+
+        let bytes_per_pixel = match format {
+            MTLPixelFormat::RGBA16Float => 8,
+            _ => 4,
+        };
+        let mut pixels = vec![0u8; width as usize * height as usize * bytes_per_pixel];
+        target.get_bytes(
+            pixels.as_mut_ptr().cast(),
+            (width as usize * bytes_per_pixel) as u64,
+            metal::MTLRegion::new_2d(0, 0, width as u64, height as u64),
+            0,
+        );
+        let to_byte = |v: f32| (v.clamp(0., 1.) * 255. + 0.5) as u8;
+        let half = |bits: u16| {
+            let sign = if bits & 0x8000 != 0 { -1. } else { 1. };
+            let exponent = ((bits >> 10) & 0x1f) as i32;
+            let mantissa = (bits & 0x3ff) as f32;
+            sign * if exponent == 0 {
+                mantissa / 1024. * 2f32.powi(-14)
+            } else {
+                (1. + mantissa / 1024.) * 2f32.powi(exponent - 15)
+            }
+        };
+        let mut out = image::RgbaImage::new(width, height);
+        for (i, pixel) in out.pixels_mut().enumerate() {
+            let p = &pixels[i * bytes_per_pixel..(i + 1) * bytes_per_pixel];
+            *pixel = match format {
+                MTLPixelFormat::RGBA16Float => {
+                    let c = |k: usize| half(u16::from_le_bytes([p[2 * k], p[2 * k + 1]]));
+                    image::Rgba([to_byte(c(0)), to_byte(c(1)), to_byte(c(2)), 255])
+                }
+                MTLPixelFormat::BGRA8Unorm => image::Rgba([p[2], p[1], p[0], 255]),
+                _ => {
+                    // BGR10_XR: 384 is 0 and 894 is 1.
+                    let packed = u32::from_le_bytes(p.try_into().unwrap());
+                    let field = |shift: u32| (((packed >> shift) & 0x3ff) as f32 - 384.) / 510.;
+                    image::Rgba([to_byte(field(20)), to_byte(field(10)), to_byte(field(0)), 255])
+                }
+            };
+        }
+        Some(out)
+    }
+
     fn update_path_intermediate_textures(&mut self, size: Size<DevicePixels>) {
         // We are uncertain when this happens, but sometimes size can be 0 here. Most likely before
         // the layout pass on window creation. Zero-sized texture creation causes SIGABRT.

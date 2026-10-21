@@ -5,6 +5,45 @@ use super::*;
 impl MusicApp {
     /// Debug-only: steps through every page so screenshots can be taken without driving
     /// the mouse. Each step is announced on stderr as `TOUR <n> <name>`.
+    /// ENCORE_TOUR_OVERLAY=palette|palette-selected|shortcuts|volume|account|menu: opens that
+    /// overlay over the current page. Returns whether it opened one.
+    fn open_tour_overlay(&mut self, cx: &mut Context<Self>) -> bool {
+        let this = self;
+        match std::env::var("ENCORE_TOUR_OVERLAY").as_deref() {
+            Ok(overlay @ ("palette" | "palette-selected")) => {
+                let select = overlay == "palette-selected";
+                {
+                    this.search.set(std::env::var("ENCORE_TOUR_QUERY").unwrap_or_else(|_| "zach bryan".into()));
+                    if select {
+                        this.search.select_all();
+                    }
+                    this.palette_open = true;
+                    this.schedule_search(cx);
+                    cx.notify();
+                }
+            }
+            Ok("shortcuts") => {
+                this.show_shortcuts = true;
+                cx.notify();
+            }
+            Ok("volume") => {
+                this.show_volume = true;
+                cx.notify();
+            }
+            Ok("account") => {
+                this.show_account = true;
+                cx.notify();
+            }
+            Ok("menu") => {
+                let song = this.browse.ready().and_then(|b| b.top_songs.first().cloned());
+                this.menu = song.map(|s| this.song_menu(&s, point(px(420.), px(240.))));
+                cx.notify();
+            }
+            _ => return false,
+        }
+        true
+    }
+
     pub(crate) fn start_tour(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
@@ -92,22 +131,10 @@ impl MusicApp {
                     }
                 }
             }
-            // ENCORE_TOUR_OVERLAY=palette|shortcuts|volume|account|menu: show that overlay on top of the tour.
-            match std::env::var("ENCORE_TOUR_OVERLAY").as_deref() {
-                Ok(overlay @ ("palette" | "palette-selected")) => {
-                    let select = overlay == "palette-selected";
-                    this.update(cx, |this, cx| {
-                        this.search.set(std::env::var("ENCORE_TOUR_QUERY").unwrap_or_else(|_| "zach bryan".into()));
-                        if select {
-                            this.search.select_all();
-                        }
-                        this.palette_open = true;
-                        this.schedule_search(cx);
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Ok(overlay @ ("nowplaying" | "nowplaying-queue")) => {
+            // ENCORE_TOUR_OVERLAY=nowplaying|nowplaying-queue: play, then open Now Playing. The other
+            // overlays open on each page once it has loaded (see `open_tour_overlay`).
+            if let Ok(overlay @ ("nowplaying" | "nowplaying-queue")) = std::env::var("ENCORE_TOUR_OVERLAY").as_deref() {
+                {
                     let queue = overlay == "nowplaying-queue";
                     for _ in 0..60 {
                         pause(1).await;
@@ -128,36 +155,6 @@ impl MusicApp {
                     })
                     .ok();
                 }
-                Ok("shortcuts") => {
-                    this.update(cx, |this, cx| {
-                        this.show_shortcuts = true;
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Ok("volume") => {
-                    this.update(cx, |this, cx| {
-                        this.show_volume = true;
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Ok("account") => {
-                    this.update(cx, |this, cx| {
-                        this.show_account = true;
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Ok("menu") => {
-                    this.update(cx, |this, cx| {
-                        let song = this.browse.ready().and_then(|b| b.top_songs.first().cloned());
-                        this.menu = song.map(|s| this.song_menu(&s, point(px(420.), px(240.))));
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                _ => {}
             }
             for (n, (name, route, search)) in steps.into_iter().enumerate() {
                 // `name@300` means: show the page scrolled down 300px.
@@ -205,6 +202,40 @@ impl MusicApp {
                     .ok();
                 }
                 pause(6).await;
+                if this.update(cx, |this, cx| this.open_tour_overlay(cx)).unwrap_or(false) {
+                    pause(1).await;
+                }
+                if std::env::var_os("ENCORE_TOUR_GESTURES").is_some() {
+                    tour_gestures(cx, &format!("{n:02}-{name}")).await;
+                }
+                // ENCORE_SNAPSHOT_DIR=dir: save each step's window as a PNG, rendered offscreen so
+                // it works while the screen is locked.
+                if let Some(dir) = std::env::var_os("ENCORE_SNAPSHOT_DIR") {
+                    let path = std::path::Path::new(&dir).join(format!("{n:02}-{name}.png"));
+                    // While the screen is locked nothing draws between snapshots, so the first one
+                    // starts the page's transition and image loads, and the second shows the result.
+                    for _ in 0..2 {
+                        cx.update(|cx| {
+                            if let Some(window) = cx.windows().first() {
+                                window.update(cx, |_, window, cx| window.snapshot(cx)).ok();
+                            }
+                        })
+                        .ok();
+                        pause(1).await;
+                    }
+                    let image = cx
+                        .update(|cx| {
+                            let window = *cx.windows().first()?;
+                            window.update(cx, |_, window, cx| window.snapshot(cx)).ok().flatten()
+                        })
+                        .ok()
+                        .flatten();
+                    match image.map(|image| image.save(&path)) {
+                        Some(Ok(())) => eprintln!("TOUR snapshot {}", path.display()),
+                        Some(Err(e)) => eprintln!("TOUR snapshot failed: {e}"),
+                        None => eprintln!("TOUR snapshot unavailable"),
+                    }
+                }
             }
             this.update(cx, |this, _| {
                 if let Some(native) = &this.native_player {
@@ -346,6 +377,122 @@ impl MusicApp {
         }
         steps
     }
+}
+
+/// ENCORE_TOUR_GESTURES=1: drives the page with the events a trackpad and mouse send, drawing a
+/// frame after each one, so scrolling, rubber-banding and hover can be checked while the screen
+/// is locked. With ENCORE_SNAPSHOT_DIR it saves the page mid-gesture; the pointer is marked with
+/// a red cross so the hovered row can be checked against it.
+async fn tour_gestures(cx: &mut gpui::AsyncApp, prefix: &str) {
+    use gpui::{Modifiers, MouseMoveEvent, PlatformInput, ScrollDelta, ScrollWheelEvent, TouchPhase};
+    let executor = cx.background_executor().clone();
+    let pointer = std::env::var("ENCORE_TOUR_POINTER")
+        .ok()
+        .and_then(|v| {
+            let (x, y) = v.split_once(",")?;
+            Some(point(px(x.parse().ok()?), px(y.parse().ok()?)))
+        })
+        .unwrap_or(point(px(760.), px(300.)));
+    let send = |cx: &mut gpui::AsyncApp, event: Option<PlatformInput>| {
+        cx.update(|cx| {
+            let window = *cx.windows().first()?;
+            window
+                .update(cx, |_, window, cx| {
+                    if let Some(event) = event {
+                        window.dispatch_event(event, cx);
+                    }
+                    window.refresh();
+                    window.draw(cx).clear();
+                })
+                .ok()
+        })
+        .ok()
+        .flatten();
+    };
+    let scroll = |dy: f32, phase: TouchPhase, momentum: Option<TouchPhase>| {
+        Some(PlatformInput::ScrollWheel(ScrollWheelEvent {
+            position: pointer,
+            delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+            modifiers: Modifiers::default(),
+            touch_phase: phase,
+            momentum_phase: momentum,
+        }))
+    };
+    let frames = async |cx: &mut gpui::AsyncApp, count: usize| {
+        for _ in 0..count {
+            executor.timer(Duration::from_millis(16)).await;
+            send(cx, None);
+        }
+    };
+    let snapshot = |cx: &mut gpui::AsyncApp, what: &str| {
+        let Some(dir) = std::env::var_os("ENCORE_SNAPSHOT_DIR") else { return };
+        let image = cx
+            .update(|cx| {
+                let window = *cx.windows().first()?;
+                window
+                    .update(cx, |_, window, cx| window.snapshot(cx).map(|image| (image, window.scale_factor())))
+                    .ok()
+                    .flatten()
+            })
+            .ok()
+            .flatten();
+        let Some((mut image, scale)) = image else { return };
+        let (cx0, cy0) = ((f32::from(pointer.x) * scale) as i32, (f32::from(pointer.y) * scale) as i32);
+        for d in -8i32..=8 {
+            for (x, y) in [(cx0 + d, cy0), (cx0, cy0 + d)] {
+                if x >= 0 && y >= 0 && (x as u32) < image.width() && (y as u32) < image.height() {
+                    image.put_pixel(x as u32, y as u32, image::Rgba([255, 0, 0, 255]));
+                }
+            }
+        }
+        let path = std::path::Path::new(&dir).join(format!("{prefix}-{what}.png"));
+        match image.save(&path) {
+            Ok(()) => eprintln!("TOUR snapshot {}", path.display()),
+            Err(e) => eprintln!("TOUR snapshot failed: {e}"),
+        }
+    };
+
+    let mouse = PlatformInput::MouseMove(MouseMoveEvent {
+        position: pointer,
+        pressed_button: None,
+        modifiers: Modifiers::default(),
+    });
+    send(cx, Some(mouse.clone()));
+    frames(cx, 4).await;
+
+    send(cx, scroll(0., TouchPhase::Started, None));
+    for _ in 0..15 {
+        send(cx, scroll(-30., TouchPhase::Moved, None));
+        frames(cx, 1).await;
+    }
+    send(cx, scroll(0., TouchPhase::Ended, None));
+    frames(cx, 20).await;
+    send(cx, Some(mouse.clone()));
+    frames(cx, 12).await;
+    snapshot(cx, "scrolled");
+
+    send(cx, scroll(0., TouchPhase::Started, None));
+    for _ in 0..25 {
+        send(cx, scroll(40., TouchPhase::Moved, None));
+        frames(cx, 1).await;
+    }
+    snapshot(cx, "stretched");
+    send(cx, scroll(0., TouchPhase::Ended, None));
+    frames(cx, 60).await;
+    snapshot(cx, "settled");
+
+    send(
+        cx,
+        Some(PlatformInput::ScrollWheel(ScrollWheelEvent {
+            position: pointer,
+            delta: ScrollDelta::Lines(point(0., 8.)),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+            momentum_phase: None,
+        })),
+    );
+    frames(cx, 4).await;
+    snapshot(cx, "wheel-at-top");
 }
 
 fn tour_scroll_secs() -> Option<f32> {

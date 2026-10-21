@@ -1406,9 +1406,12 @@ impl Window {
     }
 }
 
+/// What happened to an event passed to [`Window::dispatch_event`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct DispatchEventResult {
+pub struct DispatchEventResult {
+    /// No handler stopped it.
     pub propagate: bool,
+    /// A handler asked for the platform's default behavior to be skipped.
     pub default_prevented: bool,
 }
 
@@ -2151,6 +2154,17 @@ impl Window {
 
     fn complete_frame(&self) {
         self.platform_window.completed_frame();
+    }
+
+    /// Draws the window now and renders the frame offscreen as an 8-bit sRGB image. It works
+    /// while the display is asleep or the screen is locked, when the window isn't drawing, so
+    /// tools and tests can see the app. Only macOS supports it.
+    pub fn snapshot(&mut self, cx: &mut App) -> Option<image::RgbaImage> {
+        self.refresh();
+        self.draw(cx).clear();
+        let scene = &self.rendered_frame.scene;
+        scene.motion_time.set(self.motion_clock.get());
+        self.platform_window.snapshot(scene)
     }
 
     /// Produces a new frame and assigns it to `rendered_frame`. To actually show

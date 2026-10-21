@@ -1508,6 +1508,10 @@ impl PlatformWindow for MacWindow {
         this.renderer.draw(scene);
     }
 
+    fn snapshot(&self, scene: &crate::Scene) -> Option<image::RgbaImage> {
+        self.0.lock().renderer.snapshot(scene)
+    }
+
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
         self.0.lock().renderer.sprite_atlas().clone()
     }
