@@ -35,6 +35,18 @@ ureq = { version = "3", features = ["json"] }
 # Debug-only page tour (ENCORE_TOUR=1), also available in optimized builds for profiling.
 tour = []
 
+[profile.release]
+# A quarter smaller (20 MB to 16 MB) at no build-time cost. Profiling needs the symbols back:
+# CARGO_PROFILE_RELEASE_STRIP=false.
+strip = true
+
+# For builds you ship (DIST=1 scripts/build.sh): another 2.5 MB smaller, but a one-file change
+# takes about 100 s to rebuild instead of 10.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
 # GPUI 0.2.2 with one change: the macOS display link sleeps while the window has nothing to
 # draw (see vendor/gpui/PATCHES.md).
 [patch.crates-io]

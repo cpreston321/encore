@@ -8,16 +8,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-cargo build --release "$@"
+# DIST=1 builds the smaller, slower-to-compile `dist` profile for builds you ship.
+profile=release
+[ "${DIST:-}" = 1 ] && profile=dist
+cargo build --profile "$profile" "$@"
 
 app=target/Encore.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 mkdir -p "$app/Contents/Frameworks"
-cp target/release/encore "$app/Contents/MacOS/Encore"
+cp "target/$profile/encore" "$app/Contents/MacOS/Encore"
 # The native MusicKit player; without it, full songs use the web player.
-if [ -f target/release/libencore_native.dylib ]; then
-  cp target/release/libencore_native.dylib "$app/Contents/Frameworks/"
+if [ -f "target/$profile/libencore_native.dylib" ]; then
+  cp "target/$profile/libencore_native.dylib" "$app/Contents/Frameworks/"
 fi
 cp assets/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)

@@ -35,7 +35,8 @@ For UI changes, include a screenshot or a short recording. If the change looks d
 | `ENCORE_REDUCE_MOTION=1` | Behaves as if Reduce Motion is on |
 | `ENCORE_TOUR=1` | Steps through every page every few seconds, for screenshots and profiling (debug builds, or `--features tour`) |
 | `ENCORE_TOUR_ONLY=albums,artist` | Limits the tour to those steps |
-| `ENCORE_TOUR_PLAY=1` | Starts silent playback during the tour |
+| `ENCORE_TOUR_PLAY=1` / `album` | Starts silent playback during the tour, of the charts or the top new album |
+| `ENCORE_TOUR_EVICT_FAST=1` | Frees unused artwork after 15 seconds instead of two minutes |
 | `ENCORE_TOUR_VOLUME=0.3` | Once playing, changes the volume the way the slider does |
 | `ENCORE_TOUR_SEEK_END=2` | Jumps near the end of that many songs in a row, to exercise crossfades |
 | `ENCORE_PLAYER=web` | Uses the web player for full songs instead of the native one |
@@ -43,11 +44,13 @@ For UI changes, include a screenshot or a short recording. If the change looks d
 | `ENCORE_TOUR_SCROLL=1` | On each tour page, scrolls smoothly down and back, redrawing only the page, as a real scroll does. Use it with `ENCORE_PERF=1` to check that frames fit 120 Hz |
 | `ENCORE_TOUR_PLACEHOLDER_ART=1` | Replaces all artwork with generated gradients, for screenshots that don't include album covers or artist photos |
 
-To profile an optimized build:
+To profile an optimized build (release builds are stripped, so turn that off for `sample` or Instruments to show function names):
 
 ```sh
-ENCORE_PERF=1 ENCORE_TOUR=1 cargo run --release --features tour
+CARGO_PROFILE_RELEASE_STRIP=false ENCORE_PERF=1 ENCORE_TOUR=1 cargo run --release --features tour
 ```
+
+`DIST=1 ./scripts/build.sh` builds the `dist` profile: fat LTO with one codegen unit, about 15% smaller again, but slow to rebuild. Use it for builds you hand to other people.
 
 Encore targets 120 Hz on ProMotion displays: a page that renders smoothly shows a 95th percentile frame time under 8.3 ms and animates at about 120 fps.
 
