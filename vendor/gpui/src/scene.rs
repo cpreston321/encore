@@ -1361,6 +1361,7 @@ mod backdrop_signature_tests {
             },
             texture_crop: PolychromeSprite::WHOLE_TEXTURE,
             motion: SpriteMotion { phase: 0., strength: motion },
+            display_p3: false,
         };
         let with = |motion: f32| {
             signatures(|scene| {
