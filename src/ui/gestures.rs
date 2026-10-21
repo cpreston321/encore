@@ -273,10 +273,11 @@ impl MusicApp {
         }
         let delta = e.delta.pixel_delta(px(20.));
         let change = match gesture_axis(e) {
-            Some(Axis::Horizontal) => f32::from(delta.x),
+            // Fingers moving right scroll content right, a negative delta.
+            Some(Axis::Horizontal) => -f32::from(delta.x),
             Some(Axis::Vertical) => -f32::from(delta.y),
             // Wheels have no gesture: whichever way it turned.
-            None => f32::from(delta.x) - f32::from(delta.y),
+            None => -f32::from(delta.x) - f32::from(delta.y),
         };
         let before = self.volume;
         let after = (before + change / 300.).clamp(0., 1.);
