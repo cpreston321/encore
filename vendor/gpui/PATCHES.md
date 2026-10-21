@@ -150,3 +150,10 @@ GPUI left the `CAMetalLayer`'s `colorspace` unset, which tells the compositor no
 
 The rubber-band spring stepped by `Instant::now()` during prepaint. How far into a frame prepaint runs depends on the frame: one that replays the last frame moved by a scroll reaches it in about a millisecond, one that renders takes several. The display shows frames at a steady rate, so the spring's positions landed unevenly in time and the bounce juddered. `Window::frame_time` is when the platform asked for the frame being drawn, recorded in the frame callback and taken by the draw it leads to; a draw without one (a snapshot, a test) uses the time it starts. The spring steps by it.
 
+## Continuous corners on macOS
+
+GPUI rounded corners with quarter circles. A circle meets a straight edge with a jump in curvature, which reads as a kink, most of all in a glass rim's highlight. Apple draws continuous corners, which ease out of the edge.
+- **The shape.** `continuous_corner_sdf` in `shaders.metal` draws each corner as `(x/Rx)^nx + (y/Ry)^ny = 1` in a box reaching up to 1.7 times the radius along each edge. Where an edge has room for that, its exponent is 2.8, so the curve leaves the edge with zero curvature; where it doesn't, the exponent is 2. Circles stay circles, a capsule's ends stay round with smooth shoulders, and rounded rectangles get squircle corners. The distance is first-order (`f / |∇f|`), accurate over the pixel or two that antialiasing and borders use.
+- **Where it applies.** Quads (backgrounds and uniform borders), `quad_sdf` and so everything built on it: image and surface corner clipping, rounded content masks, unblurred shadows, and the backdrop blur's shape and rim. Borders of different widths on adjacent sides still use the elliptical inner edge, and blurred shadows still integrate a circular corner; both are close enough not to show.
+- **Elsewhere** the Blade and DirectX renderers keep circular corners.
+

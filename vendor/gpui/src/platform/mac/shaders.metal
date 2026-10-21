@@ -30,6 +30,8 @@ float pick_corner_radius(float2 center_to_point, Corners_ScaledPixels corner_rad
 float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
                Corners_ScaledPixels corner_radii);
 float quad_sdf_impl(float2 center_to_point, float corner_radius);
+float2 continuous_corner_box(float2 half_size, float corner_radius);
+float continuous_corner_sdf(float2 corner_to_point, float2 half_size, float corner_radius);
 float gaussian(float x, float sigma);
 float2 erf(float2 x);
 float blur_along_x(float x, float y, float sigma, float corner,
@@ -150,10 +152,16 @@ float4 quad_fragment_body(QuadFragmentInput input, constant Quad *quads) {
   // mirrored into bottom right quadrant.
   float2 corner_center_to_point = corner_to_point + corner_radius;
 
+  // Continuous corners start curving before a circular one would (see
+  // `continuous_corner_sdf`), so "near the corner" covers that longer stretch.
+  float2 corner_box_to_point =
+      corner_to_point + continuous_corner_box(half_size, corner_radius);
+
   // Whether the nearest point on the border is rounded
   bool is_near_rounded_corner =
-    corner_center_to_point.x >= 0.0 &&
-    corner_center_to_point.y >= 0.0;
+    corner_radius > 0.0 &&
+    corner_box_to_point.x >= 0.0 &&
+    corner_box_to_point.y >= 0.0;
 
   // Vector from straight border inner corner to point.
   //
@@ -179,7 +187,7 @@ float4 quad_fragment_body(QuadFragmentInput input, constant Quad *quads) {
   }
 
   // Signed distance of the point to the outside edge of the quad's border
-  float outer_sdf = quad_sdf_impl(corner_center_to_point, corner_radius);
+  float outer_sdf = continuous_corner_sdf(corner_to_point, half_size, corner_radius);
 
   // Approximate signed distance of the point to the inside edge of the quad's
   // border. It is negative outside this edge (within the border), and
@@ -190,7 +198,7 @@ float4 quad_fragment_body(QuadFragmentInput input, constant Quad *quads) {
   //   nearest-point-on-ellipse.
   // * When it is quickly known to be outside the edge, -1.0 is used.
   float inner_sdf = 0.0;
-  if (corner_center_to_point.x <= 0.0 || corner_center_to_point.y <= 0.0) {
+  if (!is_near_rounded_corner) {
     // Fast paths for straight borders
     inner_sdf = -max(straight_border_inner_corner_to_point.x,
                      straight_border_inner_corner_to_point.y);
@@ -1125,8 +1133,47 @@ float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
     float2 center_to_point = point - center;
     float corner_radius = pick_corner_radius(center_to_point, corner_radii);
     float2 corner_to_point = fabs(center_to_point) - half_size;
-    float2 corner_center_to_point = corner_to_point + corner_radius;
-    return quad_sdf_impl(corner_center_to_point, corner_radius);
+    return continuous_corner_sdf(corner_to_point, half_size, corner_radius);
+}
+
+// Apple-style continuous corners. A circular corner meets the straight edge with
+// a jump in curvature, which reads as a kink, most of all in a glass rim's
+// highlight. Here each corner is the curve (x/Rx)^nx + (y/Ry)^ny = 1 in a box
+// Rx by Ry, up to CONTINUOUS_CORNER_REACH times the radius, so the curve starts
+// further along the edge. Where an edge has room for that, its exponent rises
+// to CONTINUOUS_CORNER_EXPONENT, and the curve leaves the edge with no curvature
+// at all; where it doesn't (the ends of a capsule, a circle), the exponent stays
+// 2, so circles stay circles and capsule ends stay round.
+constant float CONTINUOUS_CORNER_REACH = 1.7;
+constant float CONTINUOUS_CORNER_EXPONENT = 2.8;
+
+float2 continuous_corner_box(float2 half_size, float corner_radius) {
+    float r = min(corner_radius, min(half_size.x, half_size.y));
+    return min(float2(r * CONTINUOUS_CORNER_REACH), half_size);
+}
+
+float continuous_corner_sdf(float2 corner_to_point, float2 half_size, float corner_radius) {
+    float r = min(corner_radius, min(half_size.x, half_size.y));
+    if (r <= 0.0) {
+        return max(corner_to_point.x, corner_to_point.y);
+    }
+    float2 box = continuous_corner_box(half_size, r);
+    float2 q = corner_to_point + box;
+    if (q.x <= 0.0 || q.y <= 0.0) {
+        // Along a straight edge.
+        return max(corner_to_point.x, corner_to_point.y);
+    }
+    float2 room = saturate((box - r) / (r * (CONTINUOUS_CORNER_REACH - 1.0)));
+    // The exponent along x shapes where the curve meets the top or bottom edge,
+    // so it depends on how far that edge reaches.
+    float2 n = 2.0 + (CONTINUOUS_CORNER_EXPONENT - 2.0) * room;
+    float2 u = q / box;
+    float2 term = pow(u, n);
+    float f = term.x + term.y - 1.0;
+    float2 gradient = n * term / max(q, float2(1e-4));
+    // First-order distance to the curve: exact enough for the pixel or two of
+    // antialiasing and borders that use it.
+    return f / max(length(gradient), 1e-4);
 }
 
 // Implementation of quad signed distance field
