@@ -38,30 +38,50 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 
 ## Getting started
 
-### Requirements
+Encore runs on macOS 13 or later. The native player needs macOS 14, and its volume control needs 14.2. The design targets macOS 26 Tahoe.
 
-- macOS 13 or later. The native player needs macOS 14, and its volume control needs 14.2. The design targets macOS 26 Tahoe.
-- [Rust](https://rustup.rs) 1.88 or later.
-- Xcode Command Line Tools: `xcode-select --install`.
-
-### Run it
+### Install from source
 
 ```sh
 git clone https://github.com/cpreston321/encore.git
 cd encore
+./scripts/install.sh
+```
+
+The script checks for the Xcode Command Line Tools and [Rust](https://rustup.rs) 1.88 or later and offers to install what's missing. It then builds `Encore.app` and installs it to `~/Applications`. An app built on your own Mac isn't quarantined, so macOS opens it without asking. To update, run `git pull && ./scripts/install.sh`.
+
+### Install a release
+
+Each [release](https://github.com/cpreston321/encore/releases) has a zip of `Encore.app` for Apple silicon Macs, signed ad hoc rather than with a Developer ID.
+
+1. Download and unzip it, and move `Encore.app` to Applications.
+2. Open it. macOS says it can't check the app for malicious software.
+3. Open **System Settings → Privacy & Security**, scroll down to the message about Encore, and click **Open Anyway**. On macOS 15 and later, right-clicking the app and choosing **Open** no longer skips this.
+
+Alternatively, sign the downloaded app with your own certificate. That also stops macOS asking about it, and keeps the Keychain's **Always Allow** in effect across updates:
+
+```sh
+./scripts/sign.sh /Applications/Encore.app
+```
+
+### Signing
+
+`scripts/sign.sh` signs with, in order:
+
+1. `ENCORE_SIGN_IDENTITY` (a certificate's name, or `-` for ad hoc);
+2. your Apple Development certificate;
+3. your Developer ID Application certificate;
+4. ad hoc.
+
+`scripts/build.sh` signs every build with it. macOS remembers Keychain access per code signature, so with a certificate the Keychain stops asking after each build. Ad hoc signatures change with every build, so the prompt comes back.
+
+### Run it while developing
+
+```sh
 cargo run --release
 ```
 
-Encore works without any setup. It uses Apple's public charts and the iTunes Search API, and plays 30-second previews.
-
-### Build the app bundle
-
-```sh
-./scripts/build.sh
-open ~/Applications/Encore.app
-```
-
-The script builds `Encore.app` with its icon and Info.plist and installs it to `~/Applications`. If you have an Apple Development certificate, the script signs the app with it. That keeps the app's identity stable between builds, so the Keychain's **Always Allow** stays in effect. Without a certificate, the bundle is signed ad hoc.
+Encore works without any setup. It uses Apple's public charts and the iTunes Search API, and plays 30-second previews. `./scripts/build.sh` builds and installs the app bundle, with its icon and Info.plist.
 
 ### Sign in to Apple Music
 
@@ -119,6 +139,8 @@ cargo clippy --all-targets
 cargo fmt
 ENCORE_PERF=1 cargo run --release   # frame times, request durations and startup milestones on stderr
 ```
+
+To release, bump `version` in `Cargo.toml` and push a matching tag (`v0.2.0`). The [release workflow](.github/workflows/release.yml) builds the app and attaches it to a draft release, which stays unpublished until you publish it.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the debug tools, and [docs/architecture.md](docs/architecture.md) explains how the code is laid out.
 

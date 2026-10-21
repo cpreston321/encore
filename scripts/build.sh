@@ -1,10 +1,6 @@
 #!/bin/bash
-# Builds Encore.app: release binary, Info.plist, icon, signed with your Apple
-# Development certificate (ad hoc without one), and installs it to ~/Applications.
-#
-# macOS remembers "Always Allow" for Keychain access per code signature. Unsigned builds
-# get a new identity every time they're compiled, so the prompt comes back after each
-# build; signing with the same certificate and identifier keeps the identity stable.
+# Builds Encore.app: release binary, Info.plist, icon, signed with your certificate (see
+# scripts/sign.sh; ad hoc without one), and installs it to ~/Applications.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -47,21 +43,10 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-identity=$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)
-if [ -n "$identity" ]; then
-  for lib in "$app"/Contents/Frameworks/*.dylib; do
-    [ -e "$lib" ] && codesign --force --sign "$identity" "$lib"
-  done
-  codesign --force --sign "$identity" --identifier io.github.cpreston321.encore "$app"
-  codesign --verify --verbose=1 "$app"
-else
-  echo "No Apple Development certificate found; signing ad hoc (Keychain will ask again after each build)." >&2
-  for lib in "$app"/Contents/Frameworks/*.dylib; do
-    [ -e "$lib" ] && codesign --force --sign - "$lib"
-  done
-  codesign --force --sign - --identifier io.github.cpreston321.encore "$app"
-fi
+./scripts/sign.sh "$app"
 
+# ENCORE_NO_INSTALL=1 leaves the app in target/, for packaging a release.
+[ "${ENCORE_NO_INSTALL:-}" = 1 ] && exit 0
 mkdir -p "$HOME/Applications"
 rm -rf "$HOME/Applications/Encore.app"
 cp -R "$app" "$HOME/Applications/Encore.app"
