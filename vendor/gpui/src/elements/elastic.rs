@@ -203,6 +203,10 @@ impl ElasticAxis {
     fn release(&mut self) {
         self.stretch = 0.;
         if self.overscroll != 0. && self.spring.is_none() {
+            // The momentum that follows this gesture has had its bounce: without this,
+            // once the spring settled, the momentum still pushing at the edge would
+            // bounce the view a second time.
+            self.bounced = true;
             self.edge = self.overscroll.signum();
             self.spring = Some(Spring {
                 position: self.overscroll,
@@ -413,6 +417,41 @@ mod tests {
             "still {} of {stretched} past the edge",
             elastic.y.overscroll
         );
+    }
+
+    #[test]
+    fn momentum_after_a_released_stretch_doesnt_bounce_again() {
+        let mut elastic = Elastic::default();
+        let mut offset = 0.;
+        let mut now = Instant::now();
+        feed(&mut elastic, &mut offset, touch(TouchPhase::Started, 0.), 1000., now);
+        for _ in 0..10 {
+            now += Duration::from_millis(8);
+            feed(&mut elastic, &mut offset, touch(TouchPhase::Moved, 30.), 1000., now);
+        }
+        now += Duration::from_millis(8);
+        feed(&mut elastic, &mut offset, touch(TouchPhase::Ended, 0.), 1000., now);
+        // Momentum keeps pushing at the edge for two seconds, long after the spring settles.
+        let mut settled = false;
+        for frame in 0..250 {
+            now += Duration::from_millis(8);
+            feed(&mut elastic, &mut offset, momentum(TouchPhase::Moved, 6.), 1000., now);
+            elastic.tick(now);
+            if frame > 60 {
+                settled = true;
+                assert_eq!(elastic.y.overscroll, 0., "bounced again at frame {frame}");
+            }
+        }
+        assert!(settled);
+        // The next gesture's momentum can bounce again.
+        now += Duration::from_millis(8);
+        feed(&mut elastic, &mut offset, momentum(TouchPhase::Ended, 0.), 1000., now);
+        feed(&mut elastic, &mut offset, touch(TouchPhase::Started, 0.), 1000., now);
+        feed(&mut elastic, &mut offset, touch(TouchPhase::Ended, 0.), 1000., now);
+        now += Duration::from_millis(8);
+        feed(&mut elastic, &mut offset, momentum(TouchPhase::Moved, 40.), 1000., now);
+        elastic.tick(now + Duration::from_millis(8));
+        assert!(elastic.y.overscroll > 0.);
     }
 
     #[test]
