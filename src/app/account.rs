@@ -124,7 +124,7 @@ impl MusicApp {
 
     pub(crate) fn sign_in(&mut self, cx: &mut Context<Self>) {
         let Some(developer_token) = self.catalog.developer_token().map(str::to_string) else {
-            self.show_key_help = true;
+            self.show_welcome = true;
             cx.notify();
             return;
         };

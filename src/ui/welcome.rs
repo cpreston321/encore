@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use gpui::{GlassStyle, Image, ImageFormat, Transformation, percentage};
+use gpui::{GlassStyle, Image, ImageFormat, Transformation, Window, percentage};
 
 use super::*;
 
@@ -16,7 +16,7 @@ fn app_icon() -> Arc<Image> {
 
 /// The sign-in button while it waits: a tinted capsule with a spinning ring that breathes,
 /// so it reads as busy rather than pressable.
-fn connecting(t: &Theme, label: &'static str) -> impl IntoElement {
+pub(crate) fn connecting(t: &Theme, label: &'static str) -> impl IntoElement {
     let ring = icon("spinner", 13., t.accent).with_animation(
         "welcome-spin",
         Animation::new(Duration::from_millis(900)).repeat(),
@@ -41,14 +41,14 @@ fn connecting(t: &Theme, label: &'static str) -> impl IntoElement {
         .text_color(t.accent)
         .child(ring)
         .child(label)
-        .with_animation(
-            "welcome-breathe",
-            Animation::new(Duration::from_millis(1600)).repeat(),
-            |d, delta| d.opacity(0.75 + 0.25 * (delta * std::f32::consts::TAU).cos()),
-        )
+        .with_animation("welcome-breathe", Animation::new(Duration::from_millis(1600)).repeat(), |d, delta| {
+            d.opacity(0.75 + 0.25 * (delta * std::f32::consts::TAU).cos())
+        })
 }
 
 enum WelcomeStep {
+    /// No MusicKit key, so signing in can't work yet.
+    Setup,
     Intro,
     Waiting,
     Loading,
@@ -60,13 +60,14 @@ const TILE: f32 = 150.;
 const TILE_GAP: f32 = 14.;
 
 impl MusicApp {
-    pub(crate) fn render_welcome(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_welcome(&self, t: &Theme, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let presence = self.fx.borrow().welcome;
         if !presence.visible() {
             return None;
         }
         let p = presence.value();
         let step = self.welcome_step();
+        let setup = matches!(step, WelcomeStep::Setup);
 
         let covers: Vec<Artwork> = self
             .browse
@@ -141,45 +142,43 @@ impl MusicApp {
             .opacity(p)
             .mt(px((1. - p) * 18.))
             .child(div().size(px(92.)).rounded(px(22.)).shadow_lg().child(img(app_icon()).size(px(92.))))
-            .child(
-                div()
-                    .pt_5()
-                    .text_size(px(30.))
-                    .line_height(px(36.))
-                    .font_weight(FontWeight::BOLD)
-                    .child("Welcome to Encore"),
-            )
-            .child(
-                div()
-                    .pt_1p5()
-                    .text_center()
-                    .text_color(t.text_secondary)
-                    .child("Apple Music, made into a fast, native Mac app."),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .pt_7()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .child(feature(
-                        "playlists",
-                        "All of your music",
-                        "Your library, playlists and favorites from Apple Music, with new music every week.",
-                    ))
-                    .child(feature(
-                        "speaker-loud",
-                        "At home on your Mac",
-                        "Media keys, Control Center, VoiceOver and trackpad gestures, all working as you'd expect.",
-                    ))
-                    .child(feature(
-                        "new",
-                        "Light and quick",
-                        "Opens in a quarter of a second and barely touches the processor while it plays.",
-                    )),
-            )
-            .child(self.welcome_actions(t, step, cx));
+            .child(div().pt_5().text_size(px(30.)).line_height(px(36.)).font_weight(FontWeight::BOLD).child(if setup {
+                "Connect to Apple Music"
+            } else {
+                "Welcome to Encore"
+            }))
+            .child(div().pt_1p5().text_center().text_color(t.text_secondary).child(if setup {
+                "Encore signs in with a MusicKit key from your Apple Developer account."
+            } else {
+                "Apple Music, made into a fast, native Mac app."
+            }))
+            .when(setup, |d| d.child(self.render_key_setup(t, window, cx)).child(self.key_setup_actions(t, cx)))
+            .when(!setup, |d| {
+                d.child(
+                    div()
+                        .w_full()
+                        .pt_7()
+                        .flex()
+                        .flex_col()
+                        .gap_4()
+                        .child(feature(
+                            "playlists",
+                            "All of your music",
+                            "Your library, playlists and favorites from Apple Music, with new music every week.",
+                        ))
+                        .child(feature(
+                            "speaker-loud",
+                            "At home on your Mac",
+                            "Media keys, Control Center, VoiceOver and trackpad gestures, all working as you'd expect.",
+                        ))
+                        .child(feature(
+                            "new",
+                            "Light and quick",
+                            "Opens in a quarter of a second and barely touches the processor while it plays.",
+                        )),
+                )
+                .child(self.welcome_actions(t, step, cx))
+            });
 
         Some(
             div()
@@ -213,6 +212,9 @@ impl MusicApp {
     }
 
     fn welcome_step(&self) -> WelcomeStep {
+        if !self.catalog.is_musickit() {
+            return WelcomeStep::Setup;
+        }
         match self.account {
             Account::SigningIn => WelcomeStep::Waiting,
             Account::SignedIn if self.welcome_signing => WelcomeStep::Loading,
@@ -244,16 +246,11 @@ impl MusicApp {
                 .child(label)
         };
         let status = |text: String| {
-            div()
-                .pb_1()
-                .text_center()
-                .text_size(px(12.5))
-                .line_height(px(17.))
-                .text_color(t.text_secondary)
-                .child(text)
+            div().pb_1().text_center().text_size(px(12.5)).line_height(px(17.)).text_color(t.text_secondary).child(text)
         };
         let column = div().w_full().pt_8().flex().flex_col().gap_2();
         match step {
+            WelcomeStep::Setup => column,
             WelcomeStep::Intro => column
                 .child(
                     primary("welcome-sign-in", "person", "Sign In to Apple Music")
@@ -290,18 +287,13 @@ impl MusicApp {
             // The empty row keeps the card the same height as the step before.
             WelcomeStep::Loading => column.child(connecting(t, "Loading Your Library…")).child(div().h(px(32.))),
             WelcomeStep::Ready => column.child(
-                primary("welcome-start", "play", "Get Started").on_click(cx.listener(|this, _, _, cx| this.finish_welcome(cx))),
+                primary("welcome-start", "play", "Get Started")
+                    .on_click(cx.listener(|this, _, _, cx| this.finish_welcome(cx))),
             ),
         }
     }
 
     fn welcome_sign_in(&mut self, cx: &mut Context<Self>) {
-        // Without MusicKit set up, sign-in explains what's missing in a sheet this screen
-        // would cover.
-        if self.catalog.developer_token().is_none() {
-            self.finish_welcome(cx);
-            return self.sign_in(cx);
-        }
         self.welcome_signing = true;
         self.sign_in(cx);
     }

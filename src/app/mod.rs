@@ -240,7 +240,6 @@ pub struct Fx {
     pub account: crate::anim::Presence,
     pub volume: crate::anim::Presence,
     pub notice: crate::anim::Presence,
-    pub key_help: crate::anim::Presence,
     pub welcome: crate::anim::Presence,
     pub now_playing: crate::anim::Presence,
     pub palette: crate::anim::Presence,
@@ -266,7 +265,6 @@ impl Fx {
             account: Presence::new(quick),
             volume: Presence::new(quick),
             notice: Presence::new(Duration::from_millis(220)),
-            key_help: Presence::new(quick),
             welcome: Presence::new(Duration::from_millis(420)),
             now_playing: Presence::new(Duration::from_millis(320)),
             palette: Presence::new(Duration::from_millis(160)),
@@ -297,7 +295,6 @@ impl Fx {
             || self.account.animating()
             || self.volume.animating()
             || self.notice.animating()
-            || self.key_help.animating()
             || self.welcome.animating()
             || self.now_playing.animating()
             || self.palette.animating()
@@ -383,7 +380,7 @@ pub struct MusicApp {
     pub(crate) welcome_signing: bool,
     /// Why the last sign-in from the welcome screen didn't finish.
     pub(crate) sign_in_error: Option<String>,
-    pub(crate) show_key_help: bool,
+    pub(crate) key_setup: crate::ui::key_setup::KeySetup,
     pub(crate) route: Route,
     pub(crate) history: Vec<Route>,
     /// Scroll offset of each page in `history`, restored on back.
@@ -440,7 +437,7 @@ pub struct MusicApp {
     /// MusicKit's native player, once the user has allowed Apple Music access.
     pub(crate) native_player: Option<Rc<crate::native::NativePlayer>>,
     /// The native player can't work here (macOS 13, no app bundle, access denied).
-    native_unavailable: bool,
+    pub(crate) native_unavailable: bool,
     pub(crate) native_volume_allowed: bool,
     pub(crate) animate_artwork: bool,
     pub(crate) session_saved_at: Option<std::time::Instant>,
@@ -507,6 +504,8 @@ impl MusicApp {
         if let Some(note) = &catalog_note {
             eprintln!("{note}");
         }
+        // A key that was set up and has stopped working: start on the screen that fixes it.
+        let broken_key = catalog_note.is_some();
         let mut this = Self {
             catalog,
             catalog_note,
@@ -527,7 +526,7 @@ impl MusicApp {
             palette_open: false,
             palette_index: 0,
             show_shortcuts: false,
-            show_welcome: !Settings::load().welcomed || std::env::var_os("ENCORE_WELCOME").is_some(),
+            show_welcome: !Settings::load().welcomed || broken_key || std::env::var_os("ENCORE_WELCOME").is_some(),
             welcomed: Settings::load().welcomed,
             recent_searches: Settings::load().recent_searches,
             song_list_scroll: gpui::UniformListScrollHandle::new(),
@@ -548,7 +547,7 @@ impl MusicApp {
             sign_in_stop: None,
             welcome_signing: false,
             sign_in_error: None,
-            show_key_help: false,
+            key_setup: crate::ui::key_setup::KeySetup::new(cx),
             route: Route::New,
             history: Vec::new(),
             scroll_history: Vec::new(),
@@ -756,6 +755,12 @@ impl MusicApp {
             }
             return;
         }
+        if self.setup_focused(window) {
+            if self.setup_key(k, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         if self.new_playlist_focus.is_focused(window) {
             if self.new_playlist_key(k, window, cx) {
                 cx.stop_propagation();
@@ -800,7 +805,6 @@ impl Render for MusicApp {
             fx.queue.set(self.show_queue);
             fx.account.set(self.show_account && self.account == Account::SignedIn);
             fx.volume.set(self.show_volume);
-            fx.key_help.set(self.show_key_help);
             fx.welcome.set(self.show_welcome);
             fx.now_playing.set(self.show_now_playing && self.queue.current().is_some());
             fx.palette.set(self.palette_open);
@@ -814,7 +818,6 @@ impl Render for MusicApp {
             fx.hovers.retain(|_, h| h.visible() || h.animating());
         }
         let regions = self.regions.get_or_insert_with(|| crate::ui::regions::Regions::new(cx)).views();
-        let key_help = self.fx.borrow().key_help;
         // Under a fully open Now Playing nothing else shows, so the rest isn't drawn at all.
         let now_playing = self.fx.borrow().now_playing;
         let covered = now_playing.value() >= 1. && !now_playing.animating();
@@ -872,14 +875,13 @@ impl Render for MusicApp {
             .text_size(px(13.))
             .text_color(t.text)
             .when(!covered, |d| d.children(regions))
-            .when(key_help.visible(), |d| d.child(self.render_key_help(&t, cx).opacity(key_help.value())))
             .children(self.render_menu(&t, cx))
             .children(self.render_account_popover(&t, cx))
             .children(self.render_now_playing(&t, window, cx))
             .children(self.render_palette(&t, cx))
             .children(self.render_new_playlist(&t, cx))
             .children(self.render_shortcuts(&t, cx))
-            .children(self.render_welcome(&t, cx))
+            .children(self.render_welcome(&t, window, cx))
             // Last, so it sees transitions started anywhere above.
             .child(gpui::canvas(|_, _, _| {}, {
                 // Keep drawing frames only while something is mid-transition.

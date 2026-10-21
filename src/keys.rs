@@ -77,6 +77,8 @@ pub enum TextFieldId {
     /// A library list's filter, by list key.
     Filter(&'static str),
     NewPlaylistName,
+    SetupTeamId,
+    SetupKeyId,
 }
 
 impl tahoe::TextFieldHost for MusicApp {
@@ -87,6 +89,8 @@ impl tahoe::TextFieldHost for MusicApp {
             TextFieldId::Search => Some(edit(&mut self.search)),
             TextFieldId::Filter(key) => Some(edit(&mut self.list_view(key).filter)),
             TextFieldId::NewPlaylistName => self.new_playlist.as_mut().map(|sheet| edit(&mut sheet.name)),
+            TextFieldId::SetupTeamId => Some(edit(&mut self.key_setup.team_id)),
+            TextFieldId::SetupKeyId => Some(edit(&mut self.key_setup.key_id)),
         }
     }
 
@@ -224,10 +228,9 @@ impl MusicApp {
             true
         } else if self.menu.take().is_some() {
             true
-        } else if self.show_account || self.show_volume || self.show_key_help {
+        } else if self.show_account || self.show_volume {
             self.show_account = false;
             self.show_volume = false;
-            self.show_key_help = false;
             true
         } else if self.show_queue {
             self.show_queue = false;

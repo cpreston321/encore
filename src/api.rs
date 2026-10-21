@@ -8,7 +8,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use anyhow::{Context as _, Result, anyhow};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::model::{
@@ -1056,7 +1056,7 @@ mod musickit {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct MusicKitConfig {
     team_id: String,
     key_id: String,
@@ -1078,7 +1078,7 @@ fn musickit_token() -> Result<Option<String>> {
     ) {
         (Ok(team_id), Ok(key_id), Ok(path)) => MusicKitConfig { team_id, key_id, private_key_path: path.into() },
         _ => {
-            let path = data_dir().join("musickit.json");
+            let path = musickit_config_path();
             if !path.exists() {
                 return Ok(None);
             }
@@ -1088,6 +1088,55 @@ fn musickit_token() -> Result<Option<String>> {
     let pem = std::fs::read(&config.private_key_path)
         .with_context(|| format!("reading {}", config.private_key_path.display()))?;
     sign_developer_token(&config.team_id, &config.key_id, &pem).map(Some)
+}
+
+fn musickit_config_path() -> PathBuf {
+    data_dir().join("musickit.json")
+}
+
+/// The Team ID from a saved MusicKit setup, even one whose key has gone missing.
+pub fn saved_team_id() -> Option<String> {
+    let config: MusicKitConfig = serde_json::from_slice(&std::fs::read(musickit_config_path()).ok()?).ok()?;
+    Some(config.team_id).filter(|id| !id.is_empty())
+}
+
+/// The Key ID in Apple's download name for a key, `AuthKey_<Key ID>.p8`.
+pub fn key_id_from_file_name(path: &std::path::Path) -> Option<String> {
+    let id = path.file_stem()?.to_str()?.strip_prefix("AuthKey_")?;
+    (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric())).then(|| id.to_string())
+}
+
+/// Checks a MusicKit key with Apple, then keeps a copy in Encore's data folder, so moving or
+/// deleting the download doesn't break it, and saves the setup. Returns the developer token.
+pub fn connect_musickit(team_id: &str, key_id: &str, key_file: &std::path::Path) -> Result<String> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    let pem = std::fs::read(key_file).with_context(|| format!("reading {}", key_file.display()))?;
+    let token = sign_developer_token(team_id, key_id, &pem)
+        .map_err(|_| anyhow!("That file isn't a MusicKit key. Choose the .p8 file you downloaded from Apple."))?;
+    let auth = Auth { developer: token.clone(), user: None };
+    match request(
+        "GET",
+        &format!("https://api.music.apple.com/v1/catalog/{STOREFRONT}/genres?limit=1"),
+        Some(&auth),
+        None,
+    ) {
+        Ok(_) => {}
+        Err(e) if matches!(e.downcast_ref::<ureq::Error>(), Some(ureq::Error::StatusCode(401 | 403))) => {
+            return Err(anyhow!(
+                "Apple didn't accept this key. Check the Team ID and Key ID, and that the key has Media Services enabled."
+            ));
+        }
+        Err(e) => return Err(e.context("couldn't reach Apple Music to check the key")),
+    }
+    std::fs::create_dir_all(data_dir())?;
+    let copy = data_dir().join(format!("AuthKey_{key_id}.p8"));
+    if copy != key_file {
+        std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&copy)?.write_all(&pem)?;
+    }
+    let config = MusicKitConfig { team_id: team_id.to_string(), key_id: key_id.to_string(), private_key_path: copy };
+    std::fs::write(musickit_config_path(), serde_json::to_vec_pretty(&config)?)?;
+    Ok(token)
 }
 
 /// ES256 JWT as described in "Generating Developer Tokens" (Apple Music API docs).
@@ -1120,6 +1169,16 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn reads_key_id_from_apples_file_name() {
+        assert_eq!(
+            key_id_from_file_name(std::path::Path::new("/x/AuthKey_AB12CD34EF.p8")).as_deref(),
+            Some("AB12CD34EF")
+        );
+        assert_eq!(key_id_from_file_name(std::path::Path::new("/x/key.p8")), None);
+        assert_eq!(key_id_from_file_name(std::path::Path::new("/x/AuthKey_.p8")), None);
+    }
 
     #[test]
     fn escapes_search_terms() {

@@ -3,10 +3,10 @@
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyWindowHandle, App, Role, Bounds, Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, ObjectFit, Pixels, ScrollWheelEvent, Subscription, Task, TitlebarOptions, Window, WindowBounds,
-    WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point, prelude::*, px, relative, size,
-    white,
+    AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, ObjectFit, Pixels, Role, ScrollWheelEvent, Subscription, Task, TitlebarOptions, Window,
+    WindowBounds, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
+    relative, size, white,
 };
 
 use crate::{
@@ -298,9 +298,8 @@ impl Render for MiniPlayer {
                 ),
             )
             .when_some(song.clone(), |d, s| {
-                d.child(div().truncate().font_weight(FontWeight::SEMIBOLD).child(s.title)).child(
-                    div().truncate().text_size(px(12.)).text_color(white().opacity(0.75)).child(s.artist),
-                )
+                d.child(div().truncate().font_weight(FontWeight::SEMIBOLD).child(s.title))
+                    .child(div().truncate().text_size(px(12.)).text_color(white().opacity(0.75)).child(s.artist))
             })
             .child(div().pt_1().child(scrubber))
             .child(
@@ -326,10 +325,19 @@ impl Render for MiniPlayer {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(control("mini-prev", "Previous", "prev", 18., true).on_click(act(|a, cx| a.previous(cx))))
                             .child(
-                                control("mini-play", if playing { "Pause" } else { "Play" }, if playing { "pause" } else { "play" }, 24., true)
-                                    .on_click(act(|a, cx| a.toggle_play(cx))),
+                                control("mini-prev", "Previous", "prev", 18., true)
+                                    .on_click(act(|a, cx| a.previous(cx))),
+                            )
+                            .child(
+                                control(
+                                    "mini-play",
+                                    if playing { "Pause" } else { "Play" },
+                                    if playing { "pause" } else { "play" },
+                                    24.,
+                                    true,
+                                )
+                                .on_click(act(|a, cx| a.toggle_play(cx))),
                             )
                             .child(control("mini-next", "Next", "next", 18., true).on_click(act(|a, cx| a.next(cx)))),
                     )

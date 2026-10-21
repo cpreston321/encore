@@ -186,7 +186,6 @@ impl crate::app::MusicApp {
             || self.menu.is_some()
             || self.palette_open
             || self.show_shortcuts
-            || self.show_key_help
             || self.new_playlist.is_some();
         let undisturbed = hover == 0.
             && !hover_moving

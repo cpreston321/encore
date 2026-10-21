@@ -38,6 +38,7 @@ pub(crate) fn panel_glass() -> GlassStyle {
 pub(crate) mod components;
 pub(crate) mod detail;
 pub(crate) mod gestures;
+pub(crate) mod key_setup;
 pub(crate) mod library;
 pub(crate) mod list_tools;
 pub(crate) mod mini;
