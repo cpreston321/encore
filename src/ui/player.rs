@@ -241,32 +241,42 @@ impl MusicApp {
                         cx.notify();
                     })),
             );
-        // The volume control opens in place of the tools, as in the Music app; its speaker
-        // mutes and unmutes.
-        let tools = if self.show_volume {
-            div()
-                .id("volume-control")
-                .flex_none()
-                .h(px(36.))
-                .pl_3()
-                .pr_0p5()
-                .rounded_full()
-                .bg(t.text.opacity(0.08))
-                .flex()
-                .items_center()
-                .gap_1p5()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_scroll_wheel(cx.listener(|this, e: &gpui::ScrollWheelEvent, _, cx| this.volume_scrolled(e, cx)))
-                .child(self.volume_slider(self.volume, px(118.), t, cx))
-                .child(
-                    icon_button(t, "mute", volume_icon, 17., t.icon)
-                        .accessibility_label(if self.volume < 0.01 { "Unmute" } else { "Mute" })
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx))),
+        // The volume control opens over the tools, as in the Music app, reaching left over the
+        // end of the song's row. The tools keep their place underneath, so nothing else in the
+        // bar moves. Its speaker mutes and unmutes.
+        let tools = div().flex_none().relative().child(tools.when(self.show_volume, |d| d.invisible())).when(
+            self.show_volume,
+            |d| {
+                d.child(
+                    div()
+                        .id("volume-control")
+                        .occlude()
+                        .absolute()
+                        .right_0()
+                        .top(px(-3.))
+                        .h(px(36.))
+                        .pl_3()
+                        .pr_0p5()
+                        .rounded_full()
+                        .glass_style(GlassStyle { blur: px(18.), ..GlassStyle::default() })
+                        .bg(t.pill)
+                        .flex()
+                        .items_center()
+                        .gap_1p5()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_scroll_wheel(
+                            cx.listener(|this, e: &gpui::ScrollWheelEvent, _, cx| this.volume_scrolled(e, cx)),
+                        )
+                        .child(div().absolute().inset_0().rounded_full().bg(t.text.opacity(0.08)))
+                        .child(self.volume_slider(self.volume, px(118.), t, cx))
+                        .child(
+                            icon_button(t, "mute", volume_icon, 17., t.icon)
+                                .accessibility_label(if self.volume < 0.01 { "Unmute" } else { "Mute" })
+                                .on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx))),
+                        ),
                 )
-                .into_any_element()
-        } else {
-            tools.into_any_element()
-        };
+            },
+        );
 
         div()
             .id("player")
