@@ -75,11 +75,17 @@ impl MusicApp {
                     let image = image::DynamicImage::from_decoder(decoder)?.thumbnail(256, 256).into_rgba8();
                     std::fs::create_dir_all(api::data_dir())?;
                     let path = api::data_dir().join("profile-photo.png");
-                    let mut encoder = image::codecs::png::PngEncoder::new(std::io::BufWriter::new(std::fs::File::create(&path)?));
+                    let mut encoder =
+                        image::codecs::png::PngEncoder::new(std::io::BufWriter::new(std::fs::File::create(&path)?));
                     if let Some(icc_profile) = icc_profile {
                         encoder.set_icc_profile(icc_profile).ok();
                     }
-                    encoder.write_image(image.as_raw(), image.width(), image.height(), image::ExtendedColorType::Rgba8)?;
+                    encoder.write_image(
+                        image.as_raw(),
+                        image.width(),
+                        image.height(),
+                        image::ExtendedColorType::Rgba8,
+                    )?;
                     anyhow::Ok(path)
                 })
                 .await;
