@@ -43,12 +43,43 @@ impl Artwork {
     }
 }
 
+/// One credited artist of a song: the name, its artist id if known, and the separator that
+/// follows it in the credit (", ", " & ", or "" for the last).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Credit {
+    pub name: String,
+    pub id: Option<String>,
+    pub separator: &'static str,
+}
+
+/// Splits Apple's "A, B & C" credits, keeping the separators.
+fn split_credit(credit: &str) -> Vec<(String, &'static str)> {
+    let mut out = Vec::new();
+    let mut rest = credit;
+    loop {
+        let next = [", ", " & "].into_iter().filter_map(|sep| rest.find(sep).map(|i| (i, sep))).min_by_key(|(i, _)| *i);
+        match next {
+            Some((i, sep)) => {
+                out.push((rest[..i].to_string(), sep));
+                rest = &rest[i + sep.len()..];
+            }
+            None => {
+                out.push((rest.to_string(), ""));
+                return out;
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Song {
     pub id: String,
     pub title: String,
     pub artist: String,
     pub artist_id: Option<String>,
+    /// Every credited artist's id, in credit order, when the API lists them (MusicKit).
+    #[serde(default)]
+    pub artist_ids: Vec<String>,
     pub album: String,
     pub album_id: Option<String>,
     pub artwork: Artwork,
@@ -58,6 +89,40 @@ pub struct Song {
     pub release_date: String,
     pub track_number: u32,
     pub url: String,
+}
+
+impl Song {
+    /// The credited artists, so each can link to its own page. With one id per name the names
+    /// get those ids; a single artist id means one artist whose name happens to contain "&" or
+    /// "," ("Simon & Garfunkel"); without ids, `is_artist` names a credit known to be one
+    /// artist. Otherwise the first name gets the song's artist id and the rest are looked up
+    /// by name.
+    pub fn credits(&self, is_artist: impl Fn(&str) -> bool) -> Vec<Credit> {
+        let whole = || vec![Credit { name: self.artist.clone(), id: self.artist_id.clone(), separator: "" }];
+        let names = split_credit(&self.artist);
+        if names.len() < 2 || self.artist_ids.len() == 1 {
+            return whole();
+        }
+        if self.artist_ids.len() == names.len() {
+            return names
+                .into_iter()
+                .zip(&self.artist_ids)
+                .map(|((name, separator), id)| Credit { name, id: Some(id.clone()), separator })
+                .collect();
+        }
+        if is_artist(&self.artist) {
+            return whole();
+        }
+        names
+            .into_iter()
+            .enumerate()
+            .map(|(i, (name, separator))| Credit {
+                name,
+                id: if i == 0 { self.artist_id.clone() } else { None },
+                separator,
+            })
+            .collect()
+    }
 }
 
 /// Colors Apple picks for a piece of artwork: a background and four text colors that read on it.
@@ -257,6 +322,39 @@ pub fn format_ms(ms: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn credited(artist: &str, ids: &[&str]) -> Song {
+        let mut song: Song = serde_json::from_str(
+            r#"{"id":"1","title":"t","artist":"","artist_id":null,"album":"","album_id":null,"artwork":"","preview_url":null,"duration_ms":0,"explicit":false,"release_date":"","track_number":0,"url":""}"#,
+        )
+        .unwrap();
+        song.artist = artist.into();
+        song.artist_id = ids.first().map(|s| s.to_string());
+        song.artist_ids = ids.iter().map(|s| s.to_string()).collect();
+        song
+    }
+
+    #[test]
+    fn credits_split_by_artist_ids() {
+        let credits = credited("Drake, Don Toliver & Yebba", &["1", "2", "3"]).credits(|_| false);
+        let names: Vec<_> = credits.iter().map(|c| (c.name.as_str(), c.id.as_deref(), c.separator)).collect();
+        assert_eq!(names, [("Drake", Some("1"), ", "), ("Don Toliver", Some("2"), " & "), ("Yebba", Some("3"), "")]);
+    }
+
+    #[test]
+    fn one_artist_id_keeps_the_credit_whole() {
+        let credits = credited("Simon & Garfunkel", &["9"]).credits(|_| false);
+        assert_eq!(credits.len(), 1);
+        assert_eq!(credits[0].id.as_deref(), Some("9"));
+    }
+
+    #[test]
+    fn without_ids_known_artists_stay_whole_and_others_split() {
+        let song = credited("Simon & Garfunkel", &[]);
+        assert_eq!(song.credits(|name| name == "Simon & Garfunkel").len(), 1);
+        let credits = credited("Zach Bryan & Lana Del Rey", &[]).credits(|_| false);
+        assert_eq!(credits.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Zach Bryan", "Lana Del Rey"]);
+    }
 
     #[test]
     fn cropped_artwork_urls() {

@@ -368,6 +368,7 @@ mod public {
             title: s(v, "trackName"),
             artist: s(v, "artistName"),
             artist_id: opt(v, "artistId"),
+            artist_ids: Vec::new(),
             album: s(v, "collectionName"),
             album_id: opt(v, "collectionId"),
             artwork: Artwork::from_sized(&s(v, "artworkUrl100")),
@@ -622,6 +623,13 @@ mod musickit {
         v["relationships"][rel]["data"][0]["id"].as_str().map(str::to_string)
     }
 
+    fn rel_ids(v: &Value, rel: &str) -> Vec<String> {
+        v["relationships"][rel]["data"]
+            .as_array()
+            .map(|items| items.iter().filter_map(|i| i["id"].as_str().map(str::to_string)).collect())
+            .unwrap_or_default()
+    }
+
     fn song(v: &Value) -> Song {
         let a = &v["attributes"];
         let url = s(a, "url");
@@ -630,6 +638,7 @@ mod musickit {
             title: s(a, "name"),
             artist: s(a, "artistName"),
             artist_id: rel_id(v, "artists"),
+            artist_ids: rel_ids(v, "artists"),
             album: s(a, "albumName"),
             album_id: rel_id(v, "albums").or_else(|| album_id_from_url(&url)),
             artwork: artwork(a),

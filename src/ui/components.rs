@@ -490,22 +490,11 @@ impl MusicApp {
                             )
                             .when(song.explicit, |d| d.child(explicit_badge(t))),
                     )
-                    .child(
-                        div().flex().min_w_0().child(
-                            self.song_link(
-                                song,
-                                by_album,
-                                ElementId::from((SharedString::from(format!("{prefix}-by")), ix)),
-                                group.clone(),
-                                t.text,
-                                cx,
-                            )
-                            .truncate()
-                            .text_size(px(12.5))
-                            .text_color(t.text_secondary)
-                            .child(subtitle),
-                        ),
-                    ),
+                    .child(div().flex().min_w_0().text_size(px(12.5)).child(if by_album {
+                        self.album_link(song, subtitle, group.clone(), t.text_secondary, t.text, cx)
+                    } else {
+                        self.artist_links(song, group.clone(), t.text_secondary, t.text, cx)
+                    })),
             )
             .child(self.more_button(
                 t,
@@ -604,36 +593,21 @@ impl MusicApp {
                     )
                     .when(song.explicit, |d| d.child(explicit_badge(t))),
             )
-            .child(
-                div().w(relative(0.22)).min_w_0().flex().child(
-                    self.song_link(
-                        song,
-                        false,
-                        ElementId::from((SharedString::from(format!("{id}-artist")), ix)),
-                        row_key.clone(),
-                        fg1,
-                        cx,
-                    )
-                    .truncate()
-                    .text_color(fg2)
-                    .child(song.artist.clone()),
-                ),
-            )
-            .child(
-                div().w(relative(0.22)).min_w_0().flex().child(
-                    self.song_link(
-                        song,
-                        true,
-                        ElementId::from((SharedString::from(format!("{id}-album")), ix)),
-                        row_key.clone(),
-                        fg1,
-                        cx,
-                    )
-                    .truncate()
-                    .text_color(fg2)
-                    .child(song.album.clone()),
-                ),
-            )
+            .child(div().w(relative(0.22)).min_w_0().flex().child(self.artist_links(
+                song,
+                row_key.clone(),
+                fg2,
+                fg1,
+                cx,
+            )))
+            .child(div().w(relative(0.22)).min_w_0().flex().child(self.album_link(
+                song,
+                song.album.clone(),
+                row_key.clone(),
+                fg2,
+                fg1,
+                cx,
+            )))
             .child(div().w(px(44.)).flex().justify_end().text_color(fg2).child(format_ms(song.duration_ms)))
             .child(self.more_button(
                 t,
@@ -654,44 +628,104 @@ impl MusicApp {
     }
 
     /// "⋯" button that opens the song menu. With a `hover_group`, it only shows on row hover.
-    /// A song's artist (or, with `album`, its album) as a link: underlined and brightened to
-    /// `hover_color` on hover, while its row (`row`) stops highlighting, and a click opens that
-    /// page instead of playing the song.
-    pub(crate) fn song_link(
+    /// A song's credited artists as links, one per artist ("Drake & Don Toliver" is two), with
+    /// the separators as plain text. Each opens its artist's page instead of playing the song.
+    pub(crate) fn artist_links(
         &self,
         song: &Song,
-        album: bool,
-        id: ElementId,
         row: SharedString,
+        color: Hsla,
         hover_color: Hsla,
         cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let credits = song.credits(|name| self.is_library_artist(name));
+        let last = credits.len().saturating_sub(1);
+        let mut links = div().flex().min_w_0().overflow_hidden().text_color(color);
+        for (i, credit) in credits.into_iter().enumerate() {
+            let (name, id) = (credit.name.clone(), credit.id.clone());
+            let link = self
+                .link(row.clone(), i as u8 + 1, credit.name, color, hover_color, cx, move |this, cx| {
+                    this.open_artist(name.clone(), id.clone(), cx)
+                })
+                .when(i == last, |d| d.min_w_0().truncate())
+                .when(i != last, |d| d.flex_none().whitespace_nowrap());
+            links = links.child(link);
+            if !credit.separator.is_empty() {
+                links = links.child(div().flex_none().whitespace_nowrap().child(credit.separator));
+            }
+        }
+        links.into_any_element()
+    }
+
+    /// The song's album as a link (`text` is what to show).
+    pub(crate) fn album_link(
+        &self,
+        song: &Song,
+        text: String,
+        row: SharedString,
+        color: Hsla,
+        hover_color: Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match song.album_id.clone() {
+            Some(album_id) => self
+                .link(row, 0, text, color, hover_color, cx, move |this, cx| {
+                    this.push(Route::Album(album_id.clone()), cx)
+                })
+                .min_w_0()
+                .truncate()
+                .into_any_element(),
+            None => div().min_w_0().truncate().text_color(color).child(text).into_any_element(),
+        }
+    }
+
+    /// One link in a song row: underlined and brightened to `hover_color` while hovered, when
+    /// its row (`row`) stops highlighting. `slot` tells a row's links apart.
+    ///
+    /// The hover look comes from `hovered_link` at render time: gpui applies `.hover()` styles
+    /// at paint, after text has been laid out, so an underline or text color set there never
+    /// reaches the glyphs.
+    #[allow(clippy::too_many_arguments)]
+    fn link(
+        &self,
+        row: SharedString,
+        slot: u8,
+        text: String,
+        color: Hsla,
+        hover_color: Hsla,
+        cx: &mut Context<Self>,
+        on_click: impl Fn(&mut MusicApp, &mut Context<MusicApp>) + 'static,
     ) -> Stateful<Div> {
-        let (artist, artist_id, album_id) = (song.artist.clone(), song.artist_id.clone(), song.album_id.clone());
-        let target = if album { album_id.is_some() } else { !artist.is_empty() };
-        div().id(id).min_w_0().when(target, |d| {
-            d.cursor_pointer()
-                .hover(move |s| s.underline().text_color(hover_color))
-                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                    let mut link = this.hovered_link.borrow_mut();
-                    if *hovered {
-                        *link = Some(row.clone());
-                    } else if link.as_ref() == Some(&row) {
-                        *link = None;
-                    }
-                    cx.notify();
-                }))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    match (&album_id, album) {
-                        (Some(album_id), true) => this.push(Route::Album(album_id.clone()), cx),
-                        _ => this.open_artist(artist.clone(), artist_id.clone(), cx),
-                    }
-                }))
-        })
+        let hovered = self.hovered_link.borrow().as_ref().is_some_and(|(r, s)| *r == row && *s == slot);
+        div()
+            .id(ElementId::from((SharedString::from(format!("{row}-link")), slot as usize)))
+            .cursor_pointer()
+            .text_color(if hovered { hover_color } else { color })
+            .when(hovered, |d| d.underline())
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                let mut link = this.hovered_link.borrow_mut();
+                if *hovered {
+                    *link = Some((row.clone(), slot));
+                } else if link.as_ref().is_some_and(|(r, s)| *r == row && *s == slot) {
+                    *link = None;
+                }
+                cx.notify();
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                on_click(this, cx);
+            }))
+            .child(text)
+    }
+
+    /// An artist in the user's library with exactly this name, so a credit like "Simon &
+    /// Garfunkel" isn't split into two.
+    fn is_library_artist(&self, name: &str) -> bool {
+        self.remote().is_some_and(|r| r.artists.iter().any(|a| a.name.eq_ignore_ascii_case(name)))
     }
 
     pub(crate) fn link_hovered(&self, row: &str) -> bool {
-        self.hovered_link.borrow().as_ref().is_some_and(|link| link.as_ref() == row)
+        self.hovered_link.borrow().as_ref().is_some_and(|(link, _)| link.as_ref() == row)
     }
 
     pub(crate) fn more_button(

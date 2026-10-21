@@ -445,6 +445,7 @@ mod tests {
             title: title.into(),
             artist: artist.into(),
             artist_id: None,
+            artist_ids: Vec::new(),
             album: "A".into(),
             album_id: None,
             artwork: Default::default(),
