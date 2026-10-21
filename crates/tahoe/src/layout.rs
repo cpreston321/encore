@@ -2,13 +2,28 @@
 
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{Bounds, IntoElement, Pixels, Styled, canvas};
+use gpui::{
+    App, Bounds, Edges, ElasticScrolling, InteractiveElement, IntoElement, OverlayScrollbar, Pixels, Styled, canvas,
+};
+
+use crate::Theme;
 
 /// Without this, gpui maps a horizontal swipe onto a vertical-only container (and vice versa),
 /// so swiping a carousel sideways would also scroll the page.
 pub fn lock_scroll_axis<E: Styled>(mut element: E) -> E {
     element.style().restrict_scroll_to_axis = Some(true);
     element
+}
+
+/// Gives a scroll view a macOS overlay scrollbar in the theme's colors, kept `insets` clear of
+/// bars floating over its edges.
+pub fn overlay_scrollbar<E: InteractiveElement>(element: E, theme: &Theme, insets: Edges<Pixels>) -> E {
+    element.overlay_scrollbar_style(OverlayScrollbar { color: Some(theme.scrollbar_thumb()), insets })
+}
+
+/// Rubber-band overscroll, off when Reduce Motion is on. Call once at startup.
+pub fn init_scrolling(cx: &mut App) {
+    cx.set_global(ElasticScrolling(!crate::anim::reduce_motion()));
 }
 
 /// Records an element's laid-out bounds so mouse positions can be mapped onto it. Add it as
@@ -48,6 +63,30 @@ mod tests {
         assert_eq!(group_digits(7), "7");
         assert_eq!(group_digits(1395), "1,395");
         assert_eq!(group_digits(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn overscroll_stretches_like_appkit() {
+        let d = 600.;
+        for x in [1., 50., 300., 2000.] {
+            let expected = (1. - 1. / (x * 0.55 / d + 1.)) * d;
+            assert!((gpui::rubber_band(x, d) - expected).abs() < 1e-3);
+            assert!((gpui::rubber_band(-x, d) + expected).abs() < 1e-3);
+            assert!((gpui::rubber_band_inverse(expected, d) - x).abs() < 0.01 * x);
+        }
+        assert!(gpui::rubber_band(1e6, d) < d);
+    }
+
+    #[test]
+    fn overscroll_springs_back_in_about_half_a_second() {
+        let mut spring = gpui::Spring { position: 90., velocity: 0. };
+        let mut frames = 0;
+        while !spring.is_settled() {
+            spring.step(1. / 120.);
+            assert!(spring.position >= 0., "overshot the edge");
+            frames += 1;
+        }
+        assert!((30..100).contains(&frames), "{frames} frames");
     }
 
     #[test]

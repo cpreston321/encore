@@ -211,6 +211,13 @@ pub(crate) fn art_overlay(size: f32, child: Svg) -> Div {
         .child(child)
 }
 
+/// An overlay scrollbar clear of the window's rounded bottom corner and, for views that reach
+/// the top of the window, of its toolbar area.
+pub(crate) fn overlay_scrollbar<E: InteractiveElement>(element: E, t: &Theme, reaches_top: bool) -> E {
+    let insets = gpui::Edges { top: px(if reaches_top { 52. } else { 0. }), bottom: px(18.), ..Default::default() };
+    tahoe::layout::overlay_scrollbar(element, t, insets)
+}
+
 pub(crate) fn scroll_row(id: &'static str) -> Stateful<Div> {
     div().id(id).px(px(PAD)).pb_2().flex().gap(px(GAP)).overflow_x_scroll().map(lock_scroll_axis)
 }

@@ -55,7 +55,8 @@ impl MusicApp {
                     }),
                 )
                 .flex_1()
-                .map(lock_scroll_axis),
+                .map(lock_scroll_axis)
+                .map(|list| overlay_scrollbar(list, t, false)),
             )
             .into_any_element()
     }
@@ -136,7 +137,8 @@ impl MusicApp {
         .w(px(LIST_W))
         .h_full()
         .px_2()
-        .map(lock_scroll_axis);
+        .map(lock_scroll_axis)
+        .map(|list| overlay_scrollbar(list, t, true));
 
         let lower = name.to_lowercase();
         let by_artist = |artist: &str| {
@@ -162,6 +164,7 @@ impl MusicApp {
             .overflow_y_scroll()
             .map(lock_scroll_axis)
             .track_scroll(&self.artist_pane_scroll)
+            .map(|d| overlay_scrollbar(d, t, true))
             .child(self.library_artist_hero(
                 t,
                 &name,
@@ -315,7 +318,8 @@ impl MusicApp {
                 .flex_1()
                 .px(px(PAD - 8.))
                 .track_scroll(self.song_list_scroll.clone())
-                .map(lock_scroll_axis),
+                .map(lock_scroll_axis)
+                .map(|list| overlay_scrollbar(list, t, false)),
             )
             .into_any_element()
     }

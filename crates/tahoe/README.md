@@ -18,6 +18,7 @@ TAHOE_APPEARANCE=light cargo run -p tahoe --example gallery
 | `anim` | `Presence` (open/close transitions that reverse mid-way), `ColorBlend`, and `reduce_motion()` |
 | `icons` | The embedded icon set as an `AssetSource` (`tahoe::Assets`) and `icon(name, size, color)` |
 | `chrome` | `use_tahoe_corners`: Tahoe's larger window corner radius, which macOS only gives windows with a toolbar |
+| `layout` | Tile grids, `lock_scroll_axis`, `overlay_scrollbar` in theme colors, and `init_scrolling` (rubber-banding off under Reduce Motion) |
 
 ## Using it
 

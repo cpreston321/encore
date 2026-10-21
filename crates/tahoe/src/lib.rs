@@ -13,7 +13,7 @@
 //! - [`primitives`]: the same looks as plain, chainable gpui elements.
 //! - [`anim`]: reversible open/close transitions, color blends and Reduce Motion.
 //! - [`icons`]: the embedded icon set; register [`Assets`] with your `Application`.
-//! - [`layout`]: tile grids, scroll axis locking and bounds capture.
+//! - [`layout`]: tile grids, scroll axis locking, overlay scrollbars and bounds capture.
 //! - [`chrome`]: native window tweaks, such as Tahoe's larger window corners.
 //!
 //! ```ignore

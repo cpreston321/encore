@@ -39,6 +39,7 @@ fn main() {
     api::migrate_legacy_dirs();
     Application::new().with_assets(tahoe::Assets).run(|cx: &mut App| {
         keys::bind(cx);
+        tahoe::layout::init_scrolling(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.set_menus(vec![
             Menu { name: "Encore".into(), items: vec![MenuItem::action("Quit Encore", Quit)] },

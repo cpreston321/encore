@@ -565,6 +565,7 @@ impl MusicApp {
                     .overflow_y_scroll()
                     .map(lock_scroll_axis)
                     .track_scroll(&self.scroll)
+                    .map(|d| overlay_scrollbar(d, page_t, true))
                     .child(page_transition(
                         self.route_generation,
                         direction,

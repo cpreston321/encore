@@ -71,6 +71,12 @@ impl Theme {
         readable_on(self.accent, rgb(0xffffff).into())
     }
 
+    /// An overlay scrollbar's thumb: the text color, translucent, so it reads on light, dark
+    /// and artwork-tinted pages alike.
+    pub fn scrollbar_thumb(&self) -> Hsla {
+        Hsla { a: 0.42, ..self.text }
+    }
+
     pub fn dark() -> Self {
         Self {
             window: rgb(0x1e1e1e).into(),
@@ -274,6 +280,18 @@ mod tests {
         // A near-white accent from light artwork gets a dark icon instead.
         let light: Hsla = rgb(0xe8e8e8).into();
         assert!(luminance(readable_on(light, white)) < 0.1);
+    }
+
+    #[test]
+    fn scrollbar_thumbs_stand_out_from_the_page() {
+        let tinted = [0x101010, 0xf4e9d0, 0x2b4d7a, 0xc0392b]
+            .map(|bg| Theme::light().tinted(Palette::from_art_colors(bg, [0xffffff, 0xeeeeee, 0x111111, 0x222222])));
+        for t in [Theme::light(), Theme::dark()].into_iter().chain(tinted) {
+            let thumb = t.scrollbar_thumb();
+            assert!(thumb.a > 0.3 && thumb.a < 0.6);
+            let solid = Hsla { a: 1., ..thumb };
+            assert!(contrast(solid, Hsla { a: 1., ..t.window }) >= 4.5, "{:?} on {:?}", thumb, t.window);
+        }
     }
 
     #[test]

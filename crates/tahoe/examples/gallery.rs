@@ -60,6 +60,7 @@ impl Render for Gallery {
             .id("gallery")
             .size_full()
             .overflow_y_scroll()
+            .map(|d| tahoe::layout::overlay_scrollbar(d, &t, gpui::Edges::default()))
             .bg(t.window)
             .text_color(t.text)
             .font_family(".SystemUIFont")
@@ -248,6 +249,7 @@ fn main() {
         _ => {}
     }
     Application::new().with_assets(tahoe::Assets).run(|cx: &mut App| {
+        tahoe::layout::init_scrolling(cx);
         let bounds = Bounds::centered(None, size(px(820.), px(1000.)), cx);
         cx.open_window(
             WindowOptions {
