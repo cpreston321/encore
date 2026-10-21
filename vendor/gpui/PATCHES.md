@@ -1,6 +1,6 @@
 # Changes from gpui 0.2.2
 
-This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus fifteen changes. `git log vendor/gpui` shows when each one landed.
+This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus seventeen changes. `git log vendor/gpui` shows when each one landed.
 
 ## The display link sleeps when there's nothing to draw
 
