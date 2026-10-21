@@ -3,9 +3,11 @@ mod animation;
 mod canvas;
 mod deferred;
 mod div;
+mod elastic;
 mod image_cache;
 mod img;
 mod list;
+mod overlay_scrollbar;
 mod surface;
 mod svg;
 mod text;
@@ -16,9 +18,14 @@ pub use animation::*;
 pub use canvas::*;
 pub use deferred::*;
 pub use div::*;
+pub use elastic::{
+    ElasticScrolling, RUBBER_BAND_COEFFICIENT, SPRING_BACK_OMEGA, Spring, rubber_band,
+    rubber_band_inverse,
+};
 pub use image_cache::*;
 pub use img::*;
 pub use list::*;
+pub use overlay_scrollbar::OverlayScrollbar;
 pub use surface::*;
 pub use svg::*;
 pub use text::*;

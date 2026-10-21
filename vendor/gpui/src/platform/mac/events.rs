@@ -100,6 +100,19 @@ unsafe fn read_modifiers(native_event: id) -> Modifiers {
     }
 }
 
+unsafe fn read_momentum_phase(native_event: id) -> Option<TouchPhase> {
+    match unsafe { native_event.momentumPhase() } {
+        NSEventPhase::NSEventPhaseNone => None,
+        NSEventPhase::NSEventPhaseMayBegin | NSEventPhase::NSEventPhaseBegan => {
+            Some(TouchPhase::Started)
+        }
+        NSEventPhase::NSEventPhaseEnded | NSEventPhase::NSEventPhaseCancelled => {
+            Some(TouchPhase::Ended)
+        }
+        _ => Some(TouchPhase::Moved),
+    }
+}
+
 impl PlatformInput {
     pub(crate) unsafe fn from_native(
         native_event: id,
@@ -219,8 +232,10 @@ impl PlatformInput {
                             TouchPhase::Started
                         }
                         NSEventPhase::NSEventPhaseEnded => TouchPhase::Ended,
+                        NSEventPhase::NSEventPhaseCancelled => TouchPhase::Ended,
                         _ => TouchPhase::Moved,
                     };
+                    let momentum_phase = read_momentum_phase(native_event);
 
                     let raw_data = point(
                         native_event.scrollingDeltaX() as f32,
@@ -240,6 +255,7 @@ impl PlatformInput {
                         ),
                         delta,
                         touch_phase: phase,
+                        momentum_phase,
                         modifiers: read_modifiers(native_event),
                     })
                 }),

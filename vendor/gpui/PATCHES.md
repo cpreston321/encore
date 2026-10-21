@@ -57,3 +57,22 @@ GPUI sampled every image at full resolution with no mipmaps, so artwork drawn at
 - **Freeing tiles.** After each frame, the window frees the atlas tiles of images that frame doesn't draw: at once if it draws another copy of the same image, otherwise after `IMAGE_TILE_GRACE` (2 s). A full-size texture goes as soon as its copy is on screen. Only tiles missing from the rendered scene are freed, because that scene is the one that's presented, re-presented for motion, and replayed by cached views. An image that comes back is uploaded again from the CPU copy.
 - **The Metal atlas** now frees a removed tile's space and drops the key every time. Before, it kept the key until the whole texture was empty, and removing the same key twice could free a texture that other tiles still used.
 - **Other paths.** `drop_image` also removes the copies. `paint_image` and `paint_image_cropped` always draw the full image, though their tiles are freed the same way. Animated images (more than one frame) always draw their full frames, and their tiles stay until `drop_image`.
+
+## Rubber-band overscroll
+
+With a trackpad, scrolling past either end of a scroll view stretches it with resistance and springs back when the gesture or its momentum ends, as in AppKit. Wheels with line deltas still stop at the edges.
+- **Events.** `ScrollWheelEvent` gains `momentum_phase`, `None` unless the event is momentum after the fingers lift. On macOS it comes from `NSEvent.momentumPhase`, and a cancelled touch (fingers resting and lifting without moving) now ends with `TouchPhase::Ended` rather than `Moved`. The other platforms always send `None`.
+- **The stretch.** Past an edge, the content is drawn `(1 - 1 / (x * 0.55 / d + 1)) * d` beyond it, where `x` is how far the fingers have moved past the edge and `d` is the view's length (`rubber_band`). Scrolling back takes up the stretch before the content moves.
+- **Momentum** that reaches an edge bounces: its velocity starts the spring from the edge, capped so it goes at most a tenth of the view past it, and the rest of that fling is ignored.
+- **The spring** is critically damped (`Spring`, ω = 15) and stepped exactly, so it settles in about half a second at any frame rate and never crosses the edge. Touching the trackpad mid-spring catches the content where it is. Wheels with precise deltas but no phases are released 100 ms after their last event.
+- **Where.** Divs with `overflow_*_scroll` (and so `uniform_list`) keep the state beside their scroll offset, in the element state or the `ScrollHandle`; `list` keeps its own. The offset stays clamped, so `ScrollHandle::offset` and everything that reads it are unchanged; the stretch is added when the children are positioned, and `ScrollHandle::overscroll` reports it. `ScrollHandle::set_offset` cancels it. Only axes that scroll and have somewhere to scroll stretch, after `restrict_scroll_to_axis` has picked the axis. A view that's stretched lets go when a gesture begins or ends over another view.
+- **Frames.** The spring asks for the next frame from prepaint only while it moves, so the display link still sleeps once it settles.
+- **Turning it off.** `cx.set_global(ElasticScrolling(false))` restores hard stops; Tahoe's `layout::init_scrolling` does that when Reduce Motion is on.
+
+## Overlay scrollbars
+
+`InteractiveElement::overlay_scrollbar()` (or `overlay_scrollbar_style(OverlayScrollbar { color, insets })`) draws a macOS-style scrollbar over a scroll view's edge, like "Show scroll bars: When scrolling". It's opt-in per element.
+- **Showing.** A thin rounded thumb appears when the user scrolls, stays for a second after the last scroll, then fades over a quarter second. Programmatic `set_offset` doesn't show it. Moving the mouse onto the edge shows it too, and the thumb widens from 6 to 10 px with a faint track behind it. Overscroll shrinks the thumb against its end.
+- **Dragging** the thumb scrolls; clicking the track jumps the thumb there and keeps dragging. While it's showing, a `BlockMouseExceptScroll` hitbox over the track keeps clicks from reaching the content underneath.
+- **Colors.** By default, translucent black in light windows and white in dark ones, with a faint opposite border. `insets` keep it clear of toolbars and rounded window corners.
+- **Frames.** It waits for the fade with a timer rather than drawing frames, and draws frames only while fading or widening.

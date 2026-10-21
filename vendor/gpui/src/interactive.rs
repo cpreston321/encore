@@ -372,6 +372,10 @@ pub struct ScrollWheelEvent {
 
     /// The phase of the touch event.
     pub touch_phase: TouchPhase,
+
+    /// The phase of the momentum (inertial) scrolling that follows a trackpad swipe, or `None`
+    /// if the fingers are still on the trackpad or the event came from a wheel.
+    pub momentum_phase: Option<TouchPhase>,
 }
 
 impl Sealed for ScrollWheelEvent {}

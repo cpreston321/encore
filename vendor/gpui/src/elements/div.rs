@@ -21,9 +21,9 @@ use crate::{
     Hitbox, HitboxBehavior, HitboxId, InspectorElementId, IntoElement, IsZero, KeyContext,
     KeyDownEvent, KeyUpEvent, KeyboardButton, KeyboardClickEvent, LayoutId, ModifiersChangedEvent,
     MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Overflow,
-    ParentElement, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size, Style,
-    StyleRefinement, Styled, Task, TooltipId, Visibility, Window, WindowControlArea, point, px,
-    size,
+    OverlayScrollbar, ParentElement, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size,
+    Style, StyleRefinement, Styled, Task, TooltipId, TouchPhase, Visibility, Window,
+    WindowControlArea, point, px, size,
 };
 use collections::HashMap;
 use refineable::Refineable;
@@ -38,11 +38,15 @@ use std::{
     mem,
     rc::Rc,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use util::ResultExt;
 
-use super::ImageCacheProvider;
+use super::{
+    ImageCacheProvider,
+    elastic::{Elastic, elastic_scrolling_enabled},
+    overlay_scrollbar::{ScrollbarState, paint_overlay_scrollbars},
+};
 
 const DRAG_THRESHOLD: f64 = 2.;
 const TOOLTIP_SHOW_DELAY: Duration = Duration::from_millis(500);
@@ -596,6 +600,18 @@ impl Interactivity {
 pub trait InteractiveElement: Sized {
     /// Retrieve the interactivity state associated with this element
     fn interactivity(&mut self) -> &mut Interactivity;
+
+    /// Draws a macOS-style overlay scrollbar over a scrolling element's edge while it scrolls.
+    /// See [`OverlayScrollbar`] for the defaults.
+    fn overlay_scrollbar(self) -> Self {
+        self.overlay_scrollbar_style(OverlayScrollbar::default())
+    }
+
+    /// Draws an overlay scrollbar with the given color and insets.
+    fn overlay_scrollbar_style(mut self, style: OverlayScrollbar) -> Self {
+        self.interactivity().overlay_scrollbar = Some(style);
+        self
+    }
 
     /// Assign this element to a group of elements that can be styled together
     fn group(mut self, group: impl Into<SharedString>) -> Self {
@@ -1491,6 +1507,8 @@ pub struct Interactivity {
     pub(crate) tracked_scroll_handle: Option<ScrollHandle>,
     pub(crate) scroll_anchor: Option<ScrollAnchor>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
+    pub(crate) scroll_physics: Option<Rc<RefCell<ScrollPhysics>>>,
+    pub(crate) overlay_scrollbar: Option<OverlayScrollbar>,
     pub(crate) group: Option<SharedString>,
     /// The base style of the element, before any modifications are applied
     /// by focus, active, etc.
@@ -1599,7 +1617,9 @@ impl Interactivity {
                 }
 
                 if let Some(scroll_handle) = self.tracked_scroll_handle.as_ref() {
-                    self.scroll_offset = Some(scroll_handle.0.borrow().offset.clone());
+                    let state = scroll_handle.0.borrow();
+                    self.scroll_offset = Some(state.offset.clone());
+                    self.scroll_physics = Some(state.physics.clone());
                 } else if (self.base_style.overflow.x == Some(Overflow::Scroll)
                     || self.base_style.overflow.y == Some(Overflow::Scroll))
                     && let Some(element_state) = element_state.as_mut()
@@ -1607,6 +1627,12 @@ impl Interactivity {
                     self.scroll_offset = Some(
                         element_state
                             .scroll_offset
+                            .get_or_insert_with(Rc::default)
+                            .clone(),
+                    );
+                    self.scroll_physics = Some(
+                        element_state
+                            .scroll_physics
                             .get_or_insert_with(Rc::default)
                             .clone(),
                     );
@@ -1681,7 +1707,15 @@ impl Interactivity {
 
                             let scroll_offset =
                                 self.clamp_scroll_position(bounds, &style, window, cx);
-                            let result = f(&style, scroll_offset, hitbox, window, cx);
+                            let overscroll = self.tick_overscroll(window);
+                            let result = f(&style, scroll_offset + overscroll, hitbox, window, cx);
+                            self.prepaint_overlay_scrollbar(
+                                bounds,
+                                &style,
+                                scroll_offset,
+                                overscroll,
+                                window,
+                            );
                             (result, element_state)
                         },
                     )
@@ -1762,10 +1796,62 @@ impl Interactivity {
                 scroll_handle_state.max_offset = scroll_max;
                 scroll_handle_state.bounds = bounds;
             }
+            if let Some(physics) = self.scroll_physics.as_ref() {
+                let mut physics = physics.borrow_mut();
+                physics.max = scroll_max;
+                physics.viewport = bounds.size;
+            }
 
             *scroll_offset
         } else {
             Point::default()
+        }
+    }
+
+    /// Advances the spring-back of an overscrolled view, asking for another frame only while it
+    /// moves. Returns how far past its edges to draw the content.
+    fn tick_overscroll(&self, window: &mut Window) -> Point<Pixels> {
+        let Some(physics) = self.scroll_physics.as_ref() else {
+            return Point::default();
+        };
+        let mut physics = physics.borrow_mut();
+        if physics.elastic.tick(Instant::now()) {
+            window.request_animation_frame();
+        }
+        physics.overscroll()
+    }
+
+    /// How far past its edges a scrolling element's content is stretched by rubber-banding.
+    pub fn overscroll(&self) -> Point<Pixels> {
+        self.scroll_physics
+            .as_ref()
+            .map(|physics| physics.borrow().overscroll())
+            .unwrap_or_default()
+    }
+
+    fn prepaint_overlay_scrollbar(
+        &self,
+        bounds: Bounds<Pixels>,
+        style: &Style,
+        scroll_offset: Point<Pixels>,
+        overscroll: Point<Pixels>,
+        window: &mut Window,
+    ) {
+        if let (Some(scrollbar), Some(physics)) = (
+            self.overlay_scrollbar.as_ref(),
+            self.scroll_physics.as_ref(),
+        ) {
+            let mut physics = physics.borrow_mut();
+            let max = physics.max;
+            physics.scrollbar.prepaint(
+                scrollbar,
+                bounds,
+                style.overflow,
+                scroll_offset,
+                overscroll.map(|p| p.0),
+                max,
+                window,
+            );
         }
     }
 
@@ -1863,6 +1949,27 @@ impl Interactivity {
 
                                         self.paint_keyboard_listeners(window, cx);
                                         f(&style, window, cx);
+
+                                        if let (
+                                            Some(scrollbar),
+                                            Some(physics),
+                                            Some(scroll_offset),
+                                            Some(hitbox),
+                                        ) = (
+                                            self.overlay_scrollbar.as_ref(),
+                                            self.scroll_physics.as_ref(),
+                                            self.scroll_offset.as_ref(),
+                                            hitbox,
+                                        ) {
+                                            paint_overlay_scrollbars(
+                                                physics,
+                                                scroll_offset,
+                                                scrollbar,
+                                                hitbox,
+                                                window,
+                                                cx,
+                                            );
+                                        }
 
                                         if let Some(_hitbox) = hitbox {
                                             #[cfg(any(feature = "inspector", debug_assertions))]
@@ -2408,6 +2515,7 @@ impl Interactivity {
         _cx: &mut App,
     ) {
         if let Some(scroll_offset) = self.scroll_offset.clone() {
+            let physics = self.scroll_physics.clone();
             let overflow = style.overflow;
             let allow_concurrent_scroll = style.allow_concurrent_scroll;
             let restrict_scroll_to_axis = style.restrict_scroll_to_axis;
@@ -2415,39 +2523,105 @@ impl Interactivity {
             let hitbox = hitbox.clone();
             let current_view = window.current_view();
             window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-                if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window) {
-                    let mut scroll_offset = scroll_offset.borrow_mut();
-                    let old_scroll_offset = *scroll_offset;
-                    let delta = event.delta.pixel_delta(line_height);
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                let elastic = physics
+                    .as_ref()
+                    .filter(|_| event.delta.precise() && elastic_scrolling_enabled(cx));
+                if !hitbox.should_handle_scroll(window) {
+                    // The gesture that stretched this view can end over another one.
+                    if let Some(physics) = elastic {
+                        let mut physics = physics.borrow_mut();
+                        let phase_change = event.momentum_phase.is_none()
+                            && !matches!(event.touch_phase, TouchPhase::Moved);
+                        if phase_change && physics.elastic.is_stretched() {
+                            physics.elastic.release();
+                            cx.notify(current_view);
+                        }
+                    }
+                    return;
+                }
 
-                    let mut delta_x = Pixels::ZERO;
-                    if overflow.x == Overflow::Scroll {
-                        if !delta.x.is_zero() {
-                            delta_x = delta.x;
-                        } else if !restrict_scroll_to_axis && overflow.y != Overflow::Scroll {
-                            delta_x = delta.y;
-                        }
+                let mut scroll_offset = scroll_offset.borrow_mut();
+                let old_scroll_offset = *scroll_offset;
+                let delta = event.delta.pixel_delta(line_height);
+
+                let mut delta_x = Pixels::ZERO;
+                if overflow.x == Overflow::Scroll {
+                    if !delta.x.is_zero() {
+                        delta_x = delta.x;
+                    } else if !restrict_scroll_to_axis && overflow.y != Overflow::Scroll {
+                        delta_x = delta.y;
                     }
-                    let mut delta_y = Pixels::ZERO;
-                    if overflow.y == Overflow::Scroll {
-                        if !delta.y.is_zero() {
-                            delta_y = delta.y;
-                        } else if !restrict_scroll_to_axis && overflow.x != Overflow::Scroll {
-                            delta_y = delta.x;
-                        }
+                }
+                let mut delta_y = Pixels::ZERO;
+                if overflow.y == Overflow::Scroll {
+                    if !delta.y.is_zero() {
+                        delta_y = delta.y;
+                    } else if !restrict_scroll_to_axis && overflow.x != Overflow::Scroll {
+                        delta_y = delta.x;
                     }
-                    if !allow_concurrent_scroll && !delta_x.is_zero() && !delta_y.is_zero() {
-                        if delta_x.abs() > delta_y.abs() {
-                            delta_y = Pixels::ZERO;
-                        } else {
-                            delta_x = Pixels::ZERO;
-                        }
+                }
+                if !allow_concurrent_scroll && !delta_x.is_zero() && !delta_y.is_zero() {
+                    if delta_x.abs() > delta_y.abs() {
+                        delta_y = Pixels::ZERO;
+                    } else {
+                        delta_x = Pixels::ZERO;
                     }
+                }
+
+                let Some(physics) = elastic else {
                     scroll_offset.y += delta_y;
                     scroll_offset.x += delta_x;
                     if *scroll_offset != old_scroll_offset {
+                        if let Some(physics) = physics.as_ref() {
+                            physics.borrow_mut().scrollbar.mark_activity(Instant::now());
+                        }
                         cx.notify(current_view);
                     }
+                    return;
+                };
+
+                let mut physics = physics.borrow_mut();
+                let physics = &mut *physics;
+                let now = Instant::now();
+                let old_overscroll = physics.overscroll();
+                let viewport = physics.viewport;
+                let max = physics.max;
+                let (input, dt) =
+                    physics
+                        .elastic
+                        .begin(event, (viewport.width.0, viewport.height.0), now);
+                let mut x = scroll_offset.x.0;
+                if overflow.x == Overflow::Scroll && max.width > Pixels::ZERO {
+                    let (max, len) = (max.width.0, viewport.width.0);
+                    physics
+                        .elastic
+                        .x
+                        .scroll(input, &mut x, delta_x.0, max, len, dt);
+                } else {
+                    x += delta_x.0;
+                }
+                let mut y = scroll_offset.y.0;
+                if overflow.y == Overflow::Scroll && max.height > Pixels::ZERO {
+                    let (max, len) = (max.height.0, viewport.height.0);
+                    physics
+                        .elastic
+                        .y
+                        .scroll(input, &mut y, delta_y.0, max, len, dt);
+                } else {
+                    y += delta_y.0;
+                }
+                *scroll_offset = point(px(x), px(y));
+                physics.elastic.end(event);
+
+                if *scroll_offset != old_scroll_offset || physics.overscroll() != old_overscroll {
+                    physics.scrollbar.mark_activity(now);
+                    cx.notify(current_view);
+                } else if physics.elastic.is_stretched() {
+                    // A phase change, such as lifting the fingers, starts the spring-back.
+                    cx.notify(current_view);
                 }
             });
         }
@@ -2571,7 +2745,23 @@ pub struct InteractiveElementState {
     pub(crate) hover_state: Option<Rc<RefCell<bool>>>,
     pub(crate) pending_mouse_down: Option<Rc<RefCell<Option<MouseDownEvent>>>>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
+    pub(crate) scroll_physics: Option<Rc<RefCell<ScrollPhysics>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
+}
+
+/// Rubber-band overscroll and overlay scrollbar state for a scrolling element.
+#[derive(Debug, Default)]
+pub(crate) struct ScrollPhysics {
+    pub(crate) elastic: Elastic,
+    pub(crate) max: Size<Pixels>,
+    pub(crate) viewport: Size<Pixels>,
+    pub(crate) scrollbar: ScrollbarState,
+}
+
+impl ScrollPhysics {
+    pub(crate) fn overscroll(&self) -> Point<Pixels> {
+        point(px(self.elastic.x.overscroll), px(self.elastic.y.overscroll))
+    }
 }
 
 /// Whether or not the element or a group that contains it is clicked by the mouse.
@@ -3040,6 +3230,7 @@ impl ScrollAnchor {
 #[derive(Default, Debug)]
 struct ScrollHandleState {
     offset: Rc<RefCell<Point<Pixels>>>,
+    physics: Rc<RefCell<ScrollPhysics>>,
     bounds: Bounds<Pixels>,
     max_offset: Size<Pixels>,
     child_bounds: Vec<Bounds<Pixels>>,
@@ -3211,6 +3402,13 @@ impl ScrollHandle {
     pub fn set_offset(&self, mut position: Point<Pixels>) {
         let state = self.0.borrow();
         *state.offset.borrow_mut() = position;
+        state.physics.borrow_mut().elastic.reset();
+    }
+
+    /// How far past its edges the content is stretched by rubber-banding, which
+    /// [`ScrollHandle::offset`] doesn't include.
+    pub fn overscroll(&self) -> Point<Pixels> {
+        self.0.borrow().physics.borrow().overscroll()
     }
 
     /// Get the logical scroll top, based on a child index and a pixel offset.

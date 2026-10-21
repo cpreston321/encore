@@ -364,7 +364,9 @@ impl Element for UniformList {
             content_size,
             window,
             cx,
-            |_style, mut scroll_offset, hitbox, window, cx| {
+            |_style, drawn_offset, hitbox, window, cx| {
+                let mut scroll_offset = *shared_scroll_offset.borrow();
+                let overscroll = drawn_offset - scroll_offset;
                 let y_flipped = if let Some(scroll_handle) = &self.scroll_handle {
                     let scroll_state = scroll_handle.0.borrow();
                     scroll_state.y_flipped
@@ -455,6 +457,7 @@ impl Element for UniformList {
 
                     let visible_range = first_visible_element_ix
                         ..cmp::min(last_visible_element_ix, self.item_count);
+                    let drawn = scroll_offset + overscroll;
 
                     let items = if y_flipped {
                         let flipped_range = self.item_count.saturating_sub(visible_range.end)
@@ -472,11 +475,11 @@ impl Element for UniformList {
                             let item_origin = padded_bounds.origin
                                 + point(
                                     if can_scroll_horizontally {
-                                        scroll_offset.x + padding.left
+                                        drawn.x + padding.left
                                     } else {
-                                        scroll_offset.x
+                                        drawn.x
                                     },
-                                    item_height * ix + scroll_offset.y + padding.top,
+                                    item_height * ix + drawn.y + padding.top,
                                 );
                             let available_width = if can_scroll_horizontally {
                                 padded_bounds.size.width + scroll_offset.x.abs()
@@ -496,11 +499,11 @@ impl Element for UniformList {
                             padded_bounds.origin
                                 + point(
                                     if can_scroll_horizontally {
-                                        scroll_offset.x + padding.left
+                                        drawn.x + padding.left
                                     } else {
-                                        scroll_offset.x
+                                        drawn.x
                                     },
-                                    scroll_offset.y + padding.top,
+                                    drawn.y + padding.top,
                                 ),
                             padded_bounds.size,
                         );
@@ -508,7 +511,7 @@ impl Element for UniformList {
                             let mut decoration = decoration.as_ref().compute(
                                 visible_range.clone(),
                                 bounds,
-                                scroll_offset,
+                                drawn,
                                 item_height,
                                 self.item_count,
                                 window,

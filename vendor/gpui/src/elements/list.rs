@@ -11,11 +11,13 @@ use crate::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, EntityId,
     FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, IntoElement,
     Overflow, Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Style, StyleRefinement, Styled,
-    Window, point, px, size,
+    TouchPhase, Window, point, px, size,
 };
 use collections::VecDeque;
 use refineable::Refineable as _;
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use std::{cell::RefCell, ops::Range, rc::Rc, time::Instant};
+
+use super::elastic::{Elastic, elastic_scrolling_enabled};
 use sum_tree::{Bias, Dimensions, SumTree};
 
 type RenderItemFn = dyn FnMut(usize, &mut Window, &mut App) -> AnyElement + 'static;
@@ -71,6 +73,7 @@ struct StateInner {
     scroll_handler: Option<Box<dyn FnMut(&ListScrollEvent, &mut Window, &mut App)>>,
     scrollbar_drag_start_height: Option<Pixels>,
     measuring_behavior: ListMeasuringBehavior,
+    elastic: Elastic,
 }
 
 /// Whether the list is scrolling from top to bottom or bottom to top.
@@ -225,6 +228,7 @@ impl ListState {
             reset: false,
             scrollbar_drag_start_height: None,
             measuring_behavior: ListMeasuringBehavior::default(),
+            elastic: Elastic::default(),
         })));
         this.splice(0..0, item_count);
         this
@@ -484,11 +488,13 @@ impl StateInner {
         scroll_top.item_ix..cursor.start().count + 1
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scroll(
         &mut self,
         scroll_top: &ListOffset,
         height: Pixels,
         delta: Point<Pixels>,
+        elastic_event: Option<&ScrollWheelEvent>,
         current_view: EntityId,
         window: &mut Window,
         cx: &mut App,
@@ -502,9 +508,31 @@ impl StateInner {
         let padding = self.last_padding.unwrap_or_default();
         let scroll_max =
             (self.items.summary().height + padding.top + padding.bottom - height).max(px(0.));
-        let new_scroll_top = (self.scroll_top(scroll_top) - delta.y)
-            .max(px(0.))
-            .min(scroll_max);
+        let new_scroll_top = if let Some(event) = elastic_event {
+            let current = self.scroll_top(&self.logical_scroll_top());
+            let old_overscroll = self.elastic.y.overscroll;
+            let (input, dt) = self.elastic.begin(event, (0., height.0), Instant::now());
+            let mut offset = -current.0;
+            if scroll_max > px(0.) {
+                let delta = event.delta.pixel_delta(px(20.)).y.0;
+                self.elastic
+                    .y
+                    .scroll(input, &mut offset, delta, scroll_max.0, height.0, dt);
+            }
+            self.elastic.end(event);
+            let new_scroll_top = px(-offset).max(px(0.)).min(scroll_max);
+            if new_scroll_top == current {
+                if self.elastic.y.overscroll != old_overscroll || self.elastic.is_stretched() {
+                    cx.notify(current_view);
+                }
+                return;
+            }
+            new_scroll_top
+        } else {
+            (self.scroll_top(scroll_top) - delta.y)
+                .max(px(0.))
+                .min(scroll_max)
+        };
 
         if self.alignment == ListAlignment::Bottom && new_scroll_top == scroll_max {
             self.logical_scroll_top = None;
@@ -811,6 +839,7 @@ impl StateInner {
             if bounds.size.height > padding.top + padding.bottom {
                 let mut item_origin = bounds.origin + Point::new(px(0.), padding.top);
                 item_origin.y -= layout_response.scroll_top.offset_in_item;
+                item_origin.y += px(self.elastic.y.overscroll);
                 for item in &mut layout_response.item_layouts {
                     window.with_content_mask(Some(ContentMask::new(bounds)), |window| {
                         item.element.prepaint_at(item_origin, window, cx);
@@ -1016,6 +1045,9 @@ impl Element for List {
     ) -> ListPrepaintState {
         let state = &mut *self.state.0.borrow_mut();
         state.reset = false;
+        if state.elastic.tick(Instant::now()) {
+            window.request_animation_frame();
+        }
 
         let mut style = Style::default();
         style.refine(&self.style);
@@ -1079,18 +1111,35 @@ impl Element for List {
         let hitbox_id = prepaint.hitbox.id;
         let mut accumulated_scroll_delta = ScrollDelta::default();
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-            if phase == DispatchPhase::Bubble && hitbox_id.should_handle_scroll(window) {
-                accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
-                let pixel_delta = accumulated_scroll_delta.pixel_delta(px(20.));
-                list_state.0.borrow_mut().scroll(
-                    &scroll_top,
-                    height,
-                    pixel_delta,
-                    current_view,
-                    window,
-                    cx,
-                )
+            if phase != DispatchPhase::Bubble {
+                return;
             }
+            let elastic = event.delta.precise() && elastic_scrolling_enabled(cx);
+            if !hitbox_id.should_handle_scroll(window) {
+                let mut state = list_state.0.borrow_mut();
+                let phase_change = event.momentum_phase.is_none()
+                    && !matches!(event.touch_phase, TouchPhase::Moved);
+                if elastic && phase_change && state.elastic.is_stretched() {
+                    state.elastic.release();
+                    cx.notify(current_view);
+                }
+                return;
+            }
+            let pixel_delta = if elastic {
+                Point::default()
+            } else {
+                accumulated_scroll_delta = accumulated_scroll_delta.coalesce(event.delta);
+                accumulated_scroll_delta.pixel_delta(px(20.))
+            };
+            list_state.0.borrow_mut().scroll(
+                &scroll_top,
+                height,
+                pixel_delta,
+                elastic.then_some(event),
+                current_view,
+                window,
+                cx,
+            )
         });
     }
 }
