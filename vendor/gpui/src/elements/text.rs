@@ -471,6 +471,10 @@ impl TextLayout {
             .with_context(|| format!("prepaint has not been performed on {text}"))
             .unwrap();
 
+        if window.accessibility_enabled() {
+            window.accessibility_text(text, bounds);
+        }
+
         let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();

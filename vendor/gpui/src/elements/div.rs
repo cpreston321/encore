@@ -626,6 +626,44 @@ pub trait InteractiveElement: Sized {
         Stateful { element: self }
     }
 
+    /// What assistive technologies such as VoiceOver call this element. Text inside it is
+    /// no longer read separately.
+    fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.interactivity().accessibility_props().label = Some(label.into());
+        self
+    }
+
+    /// What kind of element this is for assistive technologies. Elements with `on_click`
+    /// are buttons unless this says otherwise.
+    fn accessibility_role(mut self, role: crate::Role) -> Self {
+        self.interactivity().accessibility_props().role = Some(role);
+        self
+    }
+
+    /// The element's current value, such as a slider's position or a field's text.
+    fn accessibility_value(mut self, value: impl Into<SharedString>) -> Self {
+        self.interactivity().accessibility_props().value = Some(value.into());
+        self
+    }
+
+    /// Whether a toggle button or check box is on.
+    fn accessibility_toggled(mut self, on: bool) -> Self {
+        self.interactivity().accessibility_props().toggled = Some(on);
+        self
+    }
+
+    /// Whether this is the selected one of its kind, such as the current tab or a chosen row.
+    fn accessibility_selected(mut self, selected: bool) -> Self {
+        self.interactivity().accessibility_props().selected = Some(selected);
+        self
+    }
+
+    /// Hides this element and everything inside it from assistive technologies.
+    fn accessibility_hidden(mut self) -> Self {
+        self.interactivity().accessibility_props().hidden = true;
+        self
+    }
+
     /// Track the focus state of the given focus handle on this element.
     /// If the focus handle is focused by the application, this element will
     /// apply its focused styles.
@@ -1543,6 +1581,7 @@ pub struct Interactivity {
     pub(crate) tab_index: Option<isize>,
     pub(crate) tab_group: bool,
     pub(crate) tab_stop: bool,
+    pub(crate) accessibility: Option<Box<crate::AccessibilityProps>>,
 
     #[cfg(any(feature = "inspector", debug_assertions))]
     pub(crate) source_location: Option<&'static core::panic::Location<'static>>,
@@ -1722,6 +1761,10 @@ impl Interactivity {
                 })
             },
         )
+    }
+
+    pub(crate) fn accessibility_props(&mut self) -> &mut crate::AccessibilityProps {
+        self.accessibility.get_or_insert_with(Default::default)
     }
 
     fn should_insert_hitbox(&self, style: &Style, window: &Window, cx: &App) -> bool {
@@ -1904,6 +1947,16 @@ impl Interactivity {
                     window.next_frame.tab_stops.insert(focus_handle);
                 }
 
+                let accessible = window.accessibility_enabled()
+                    && window.begin_accessibility_node(
+                        global_id,
+                        self.accessibility.as_deref(),
+                        bounds,
+                        &self.click_listeners,
+                        self.tracked_focus_handle.as_ref(),
+                        window.element_opacity() * style.opacity.unwrap_or(1.),
+                    );
+
                 window.with_element_opacity(style.opacity, |window| {
                     style.paint(bounds, window, cx, |window: &mut Window, cx: &mut App| {
                         window.with_text_style(style.text_style().cloned(), |window| {
@@ -1989,6 +2042,10 @@ impl Interactivity {
                         });
                     });
                 });
+
+                if accessible {
+                    window.end_accessibility_node();
+                }
 
                 ((), element_state)
             },

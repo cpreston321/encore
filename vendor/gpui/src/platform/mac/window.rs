@@ -52,6 +52,8 @@ use std::{
 };
 use util::ResultExt;
 
+mod accessibility;
+
 const WINDOW_STATE_IVAR: &str = "windowState";
 
 static mut WINDOW_CLASS: *const Class = ptr::null();
@@ -249,9 +251,12 @@ unsafe fn build_classes() {
                     sel!(characterIndexForPoint:),
                     character_index_for_point as extern "C" fn(&Object, Sel, NSPoint) -> u64,
                 );
+
+                accessibility::add_view_methods(&mut decl);
             }
             decl.register()
         };
+        accessibility::build_element_class();
         BLURRED_VIEW_CLASS = {
             let mut decl = ClassDecl::new("BlurredView", class!(NSVisualEffectView)).unwrap();
             unsafe {
@@ -420,6 +425,7 @@ struct MacWindowState {
     select_previous_tab_callback: Option<Box<dyn FnMut()>>,
     toggle_tab_bar_callback: Option<Box<dyn FnMut()>>,
     activated_least_once: bool,
+    accessibility: accessibility::AccessibilityState,
 }
 
 impl MacWindowState {
@@ -752,6 +758,7 @@ impl MacWindow {
                 select_previous_tab_callback: None,
                 toggle_tab_bar_callback: None,
                 activated_least_once: false,
+                accessibility: Default::default(),
             })));
 
             (*native_window).set_ivar(
@@ -1511,6 +1518,14 @@ impl PlatformWindow for MacWindow {
 
     fn pause_frame_requests(&self) {
         self.0.lock().pause_frame_requests();
+    }
+
+    fn on_accessibility_request(&self, callback: Box<dyn FnMut(crate::AccessibilityRequest)>) {
+        self.set_accessibility_request_callback(callback);
+    }
+
+    fn update_accessibility(&self, nodes: &[crate::AccessibilityNode]) {
+        self.update_accessibility_nodes(nodes);
     }
 
     fn frame_request_waker(&self) -> Option<std::rc::Rc<dyn Fn()>> {

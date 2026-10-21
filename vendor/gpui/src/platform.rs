@@ -502,6 +502,11 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     /// Stops frame requests while the window has nothing to draw, until the callback from
     /// `frame_request_waker` runs. Platforms without this keep requesting every frame.
     fn pause_frame_requests(&self) {}
+    /// Registers what to call when an assistive technology asks something of the window.
+    fn on_accessibility_request(&self, _callback: Box<dyn FnMut(crate::AccessibilityRequest)>) {}
+    /// The accessible elements of the frame just drawn, in paint order. Only called once an
+    /// [`crate::AccessibilityRequest::Activate`] has come in.
+    fn update_accessibility(&self, _nodes: &[crate::AccessibilityNode]) {}
     fn frame_request_waker(&self) -> Option<Rc<dyn Fn()>> {
         None
     }

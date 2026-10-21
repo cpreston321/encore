@@ -7,6 +7,7 @@
 extern crate self as gpui;
 
 #[macro_use]
+mod accessibility;
 mod action;
 mod app;
 
@@ -65,6 +66,7 @@ mod seal {
     pub trait Sealed {}
 }
 
+pub use accessibility::*;
 pub use action::*;
 pub use anyhow::Result;
 pub use app::*;

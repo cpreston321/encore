@@ -722,6 +722,7 @@ pub(crate) struct Frame {
     #[cfg(any(feature = "inspector", debug_assertions))]
     pub(crate) inspector_hitboxes: FxHashMap<HitboxId, crate::InspectorElementId>,
     pub(crate) tab_stops: TabStopMap,
+    pub(crate) accessibility: Vec<crate::AccessibilityEntry>,
 }
 
 #[derive(Clone, Default)]
@@ -742,6 +743,7 @@ pub(crate) struct PaintIndex {
     cursor_styles_index: usize,
     accessed_element_states_index: usize,
     tab_handle_index: usize,
+    accessibility_index: usize,
     line_layout_index: LineLayoutIndex,
 }
 
@@ -771,6 +773,7 @@ impl Frame {
             #[cfg(any(feature = "inspector", debug_assertions))]
             inspector_hitboxes: FxHashMap::default(),
             tab_stops: TabStopMap::default(),
+            accessibility: Vec::new(),
         }
     }
 
@@ -787,6 +790,7 @@ impl Frame {
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
         self.tab_stops.clear();
+        self.accessibility.clear();
         self.focus = None;
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -904,6 +908,9 @@ pub struct Window {
     motion_clock: Cell<f32>,
     last_motion_present: Cell<Option<Instant>>,
     pub(crate) refreshing: bool,
+    pub(crate) accessibility_enabled: bool,
+    pub(crate) accessibility_builder: crate::AccessibilityBuilder,
+    pub(crate) accessibility_sent: Vec<crate::AccessibilityNode>,
     pub(crate) activation_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) focus: Option<FocusId>,
     focus_enabled: bool,
@@ -1177,6 +1184,19 @@ impl Window {
                     .log_err();
             }
         }));
+        platform_window.on_accessibility_request(Box::new({
+            let cx = cx.to_async();
+            move |request| {
+                cx.spawn(async move |cx| {
+                    handle
+                        .update(cx, |_, window, cx| {
+                            window.handle_accessibility_request(request, cx)
+                        })
+                        .log_err();
+                })
+                .detach();
+            }
+        }));
         platform_window.on_appearance_changed(Box::new({
             let mut cx = cx.to_async();
             move || {
@@ -1346,6 +1366,9 @@ impl Window {
             motion_clock: Cell::new(0.),
             last_motion_present: Cell::new(None),
             refreshing: false,
+            accessibility_enabled: false,
+            accessibility_builder: Default::default(),
+            accessibility_sent: Vec::new(),
             activation_observers: SubscriberSet::new(),
             focus: None,
             focus_enabled: true,
@@ -2087,6 +2110,7 @@ impl Window {
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
         self.release_undrawn_image_tiles();
+        self.sync_accessibility();
         let current_focus_path = self.rendered_frame.focus_path();
         let current_window_active = self.rendered_frame.window_active;
 
@@ -2444,6 +2468,7 @@ impl Window {
             cursor_styles_index: self.next_frame.cursor_styles.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             tab_handle_index: self.next_frame.tab_stops.paint_index(),
+            accessibility_index: self.next_frame.accessibility.len(),
             line_layout_index: self.text_system.layout_index(),
         }
     }
@@ -2477,6 +2502,12 @@ impl Window {
             &self.rendered_frame.tab_stops.insertion_history
                 [range.start.tab_handle_index..range.end.tab_handle_index],
         );
+        let reused = &self.rendered_frame.accessibility
+            [range.start.accessibility_index..range.end.accessibility_index];
+        self.accessibility_builder
+            .ids
+            .extend(reused.iter().map(|e| e.node.id.0));
+        self.next_frame.accessibility.extend(reused.iter().cloned());
 
         self.text_system
             .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
