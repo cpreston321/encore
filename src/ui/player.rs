@@ -7,7 +7,7 @@ const PILL_ALPHA: f32 = 0.62;
 /// The player's colors: a deep shade of the cover, or the theme's pill before anything plays,
 /// as glass over the page like the Music app's bar. The pill is as translucent as it can be
 /// while its text reads over any page.
-fn player_theme(t: &Theme, tint: Option<crate::theme::Palette>) -> Theme {
+pub(crate) fn player_theme(t: &Theme, tint: Option<crate::theme::Palette>) -> Theme {
     let pt = match tint {
         Some(p) => {
             let ink = |a: f32| Hsla { h: 0., s: 0., l: 1., a };

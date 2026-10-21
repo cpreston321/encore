@@ -1,25 +1,31 @@
-//! Mini Player: a small floating window with the cover, and controls on hover.
+//! Mini Player: a small floating window with the cover, and on hover the player bar's glass,
+//! scrubber and controls floating over it.
 
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, ObjectFit, Pixels, Role, ScrollWheelEvent, Subscription, Task, TitlebarOptions, Window,
-    WindowBounds, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient, point, prelude::*, px,
-    relative, size, white,
+    AnyWindowHandle, App, Bounds, Context, Entity, FocusHandle, FontWeight, GlassStyle, Hsla, KeyDownEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, ScrollWheelEvent, Subscription, Task,
+    TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, div, img, linear_color_stop, linear_gradient,
+    point, prelude::*, px, relative, size,
 };
+use tahoe::primitives::icon_button;
 
 use crate::{
     api,
     app::{MusicApp, PlayState},
     queue::Repeat,
-    theme::Theme,
-    ui::icon,
+    theme::{Palette, Theme},
+    ui::{icon, player::player_theme},
 };
 
 const DEFAULT: f32 = 300.;
 const MIN: f32 = 220.;
-const PAD: f32 = 16.;
+/// The glass card's gap from the window's edges, and its padding.
+const CARD_INSET: f32 = 8.;
+const CARD_PAD: f32 = 14.;
+/// Where the scrubber starts and stops, from either side of the window.
+const SCRUB_INSET: f32 = CARD_INSET + CARD_PAD;
 const FADE: Duration = Duration::from_millis(180);
 
 pub struct MiniPlayer {
@@ -29,6 +35,10 @@ pub struct MiniPlayer {
     hover_changed: Instant,
     /// Where a drag on the scrubber would seek to, as a fraction of the song.
     scrub: Option<f32>,
+    /// Where the pointer is over the scrubber, which thickens and previews the jump.
+    pointer: Option<f32>,
+    /// The cover's color, which tints the glass as it does the player bar.
+    tint: Option<Palette>,
     /// What was last drawn, so changes elsewhere in the app don't redraw the window.
     drawn: Option<Drawn>,
     _observe: Subscription,
@@ -40,6 +50,7 @@ struct Drawn {
     song: Option<String>,
     playing: bool,
     art: bool,
+    tint: bool,
     shuffle: bool,
     repeat: Repeat,
 }
@@ -144,12 +155,14 @@ fn toggle_now(app: Entity<MusicApp>, cx: &mut App) {
                         cx.notify();
                     }
                 });
-                let mini = MiniPlayer {
+                let mut mini = MiniPlayer {
                     app,
                     focus: cx.focus_handle(),
                     hovered: false,
                     hover_changed: Instant::now() - FADE,
                     scrub: None,
+                    pointer: None,
+                    tint: None,
                     drawn: None,
                     _observe: observe,
                     _ticker: ticker,
@@ -180,17 +193,23 @@ impl MiniPlayer {
             song: app.queue.current().map(|s| s.id.clone()),
             playing: matches!(app.state, PlayState::Playing | PlayState::Loading),
             art: art_url(app).is_some_and(|u| app.cached_image(&u).is_some()),
+            tint: self.tint.is_some(),
             shuffle: app.queue.shuffle,
             repeat: app.queue.repeat,
         }
     }
 
-    fn load_art(&self, cx: &mut Context<Self>) {
-        if let Some(url) = art_url(self.app.read(cx)) {
-            self.app.update(cx, |app, cx| {
-                app.image(&url, cx);
-            });
-        }
+    fn load_art(&mut self, cx: &mut Context<Self>) {
+        let Some(artwork) = self.app.read(cx).queue.current().map(|s| s.artwork.clone()) else {
+            self.tint = None;
+            return;
+        };
+        let url = artwork.url(600);
+        let color = self.app.update(cx, |app, cx| {
+            app.image(&url, cx);
+            app.art_color(&artwork, cx)
+        });
+        self.tint = color.map(Palette::from_average);
     }
 
     /// 0 (hidden) to 1 (shown) for the controls, which fade with the pointer.
@@ -212,8 +231,8 @@ impl MiniPlayer {
     }
 
     fn scrub_fraction(position: gpui::Point<Pixels>, window: &Window) -> f32 {
-        let width = f32::from(window.viewport_size().width) - PAD * 2.;
-        ((f32::from(position.x) - PAD) / width.max(1.)).clamp(0., 1.)
+        let width = f32::from(window.viewport_size().width) - SCRUB_INSET * 2.;
+        ((f32::from(position.x) - SCRUB_INSET) / width.max(1.)).clamp(0., 1.)
     }
 
     fn show_main_window(&mut self, cx: &mut Context<Self>) {
@@ -242,7 +261,9 @@ impl Render for MiniPlayer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.drawn = Some(self.snapshot(cx));
         let shown = self.overlay(window);
-        let t = Theme::for_appearance(window.appearance());
+        let base = Theme::for_appearance(window.appearance());
+        // The player bar's colors: glass in a deep shade of the cover, with light ink.
+        let t = player_theme(&base, self.tint);
         let app = self.app.read(cx);
         let song = app.queue.current().cloned();
         let playing = matches!(app.state, PlayState::Playing | PlayState::Loading);
@@ -253,32 +274,37 @@ impl Render for MiniPlayer {
         let fraction = self.scrub.unwrap_or(if duration > 0. { (position / duration).clamp(0., 1.) } else { 0. });
         let shown_position = if self.scrub.is_some() { fraction * duration } else { position };
 
-        let control = |id: &'static str, label: &'static str, name: &'static str, size: f32, on: bool| {
-            div()
-                .id(id)
-                .accessibility_role(Role::Button)
+        let toggle_color = |on: bool| if on { t.accent } else { t.text_secondary };
+        let control = |id: &'static str, label: &'static str, name: &'static str, size: f32, color: Hsla| {
+            icon_button(&t, id, name, size, color)
                 .accessibility_label(label)
-                .size(px(size + 16.))
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| s.bg(white().opacity(0.15)))
-                .active(|s| s.opacity(0.6))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(icon(name, size, if on { white() } else { white().opacity(0.6) }))
         };
         let act = |f: fn(&mut MusicApp, &mut Context<MusicApp>)| {
             let app = self.app.clone();
             move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| app.update(cx, f)
         };
 
+        // The player bar's scrubber: thin, thickening under the pointer, with the stretch a
+        // click would skip shown lighter and the part it would undo dimmed.
+        let pointer = self.pointer.filter(|_| self.scrub.is_none());
+        let thickness = if pointer.is_some() || self.scrub.is_some() { 7. } else { 3. };
+        let (solid, preview) = match pointer {
+            Some(at) if at > fraction => (fraction, Some((fraction, at - fraction, 0.45))),
+            Some(at) => (at, Some((at, fraction - at, 0.5))),
+            None => (fraction, None),
+        };
         let scrubber = div()
             .id("mini-scrubber")
-            .h(px(14.))
+            .h(px(12.))
             .flex()
             .items_center()
             .cursor_pointer()
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered && this.pointer.take().is_some() {
+                    cx.notify();
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
@@ -287,66 +313,101 @@ impl Render for MiniPlayer {
                     cx.notify();
                 }),
             )
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
+                if e.pressed_button.is_none() {
+                    this.pointer = Some(Self::scrub_fraction(e.position, window));
+                    cx.notify();
+                }
+            }))
             .child(
                 div()
+                    .relative()
                     .w_full()
-                    .h(px(if self.scrub.is_some() { 6. } else { 4. }))
+                    .h(px(thickness))
                     .rounded_full()
-                    .bg(white().opacity(0.25))
-                    .child(div().h_full().rounded_full().w(relative(fraction)).bg(white())),
+                    .bg(t.track_bg)
+                    .overflow_hidden()
+                    .when_some(preview, |d, (start, width, alpha)| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .left(relative(start))
+                                .w(relative(width))
+                                .bg(t.track_fill.opacity(alpha)),
+                        )
+                    })
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left_0()
+                            .w(relative(solid))
+                            .when(preview.is_none(), |d| d.rounded_full())
+                            .bg(t.track_fill),
+                    ),
             );
 
-        let overlay = div()
+        let time = |text: String| div().text_size(px(10.5)).text_color(t.text_secondary).child(text);
+        let card = div()
+            .id("mini-card")
             .absolute()
-            .inset_0()
+            .left(px(CARD_INSET))
+            .right(px(CARD_INSET))
+            // Rises into place as it fades in.
+            .bottom(px(CARD_INSET - (1. - shown) * 10.))
+            .px(px(CARD_PAD))
+            .pt_3()
+            .pb_1p5()
+            .rounded(px(22.))
+            .glass_style(GlassStyle { blur: px(22.), ..GlassStyle::default() })
+            .bg(t.pill)
+            .border_1()
+            .border_color(t.panel_border)
+            .shadow_lg()
             .opacity(shown)
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(gpui::black().opacity(0.3), 0.),
-                linear_color_stop(gpui::black().opacity(0.82), 1.),
-            ))
             .flex()
             .flex_col()
-            .justify_end()
-            .px(px(PAD))
-            .pb_3()
             .gap_1()
-            .child(
-                div().absolute().top(px(6.)).right(px(6.)).child(
-                    control("mini-expand", "Show Main Window", "open", 14., true)
-                        .on_click(cx.listener(|this, _, _, cx| this.show_main_window(cx))),
-                ),
-            )
             .when_some(song.clone(), |d, s| {
-                d.child(div().truncate().font_weight(FontWeight::SEMIBOLD).child(s.title))
-                    .child(div().truncate().text_size(px(12.)).text_color(white().opacity(0.75)).child(s.artist))
+                d.child(
+                    div()
+                        .truncate()
+                        .text_size(px(13.5))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(t.text)
+                        .child(s.title),
+                )
+                .child(div().truncate().text_size(px(12.)).text_color(t.text_secondary).child(s.artist))
             })
             .child(div().pt_1().child(scrubber))
             .child(
                 div()
                     .flex()
                     .justify_between()
-                    .text_size(px(10.5))
-                    .text_color(white().opacity(0.7))
-                    .child(format_secs(shown_position))
-                    .child(format!("-{}", format_secs(duration - shown_position))),
+                    .child(time(format_secs(shown_position)))
+                    .child(time(format!("-{}", format_secs(duration - shown_position)))),
             )
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(control("mini-shuffle", "Shuffle", "shuffle", 13., shuffle).on_click(act(|a, cx| {
-                        a.queue.toggle_shuffle();
-                        cx.notify();
-                    })))
+                    .child(control("mini-shuffle", "Shuffle", "shuffle", 13., toggle_color(shuffle)).on_click(act(
+                        |a, cx| {
+                            a.queue.toggle_shuffle();
+                            cx.notify();
+                        },
+                    )))
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap_1()
                             .child(
-                                control("mini-prev", "Previous", "prev", 18., true)
+                                control("mini-prev", "Previous", "prev", 18., t.icon)
                                     .on_click(act(|a, cx| a.previous(cx))),
                             )
                             .child(
@@ -354,12 +415,13 @@ impl Render for MiniPlayer {
                                     "mini-play",
                                     if playing { "Pause" } else { "Play" },
                                     if playing { "pause" } else { "play" },
-                                    24.,
-                                    true,
+                                    22.,
+                                    t.icon,
                                 )
+                                .size(px(40.))
                                 .on_click(act(|a, cx| a.toggle_play(cx))),
                             )
-                            .child(control("mini-next", "Next", "next", 18., true).on_click(act(|a, cx| a.next(cx)))),
+                            .child(control("mini-next", "Next", "next", 18., t.icon).on_click(act(|a, cx| a.next(cx)))),
                     )
                     .child(
                         control(
@@ -367,7 +429,7 @@ impl Render for MiniPlayer {
                             "Repeat",
                             if repeat == Repeat::One { "repeat-one" } else { "repeat" },
                             13.,
-                            repeat != Repeat::Off,
+                            toggle_color(repeat != Repeat::Off),
                         )
                         .on_click(act(|a, cx| {
                             a.queue.cycle_repeat();
@@ -376,15 +438,40 @@ impl Render for MiniPlayer {
                     ),
             );
 
+        // A soft shade under the window buttons and the expand button, so they read on bright
+        // covers.
+        let top = div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(56.))
+            .opacity(shown)
+            .bg(linear_gradient(
+                180.,
+                linear_color_stop(gpui::black().opacity(0.35), 0.),
+                linear_color_stop(gpui::black().opacity(0.), 1.),
+            ))
+            .child(
+                div().absolute().top(px(7.)).right(px(7.)).child(
+                    icon_button(&t, "mini-expand", "open", 13., t.icon)
+                        .accessibility_label("Show Main Window")
+                        .bg(t.pill)
+                        .glass_style(GlassStyle { blur: px(16.), ..GlassStyle::default() })
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(|this, _, _, cx| this.show_main_window(cx))),
+                ),
+            );
+
         div()
             .id("mini")
             .track_focus(&self.focus)
             .size_full()
             .relative()
             .overflow_hidden()
-            .bg(t.window)
+            .bg(base.window)
             .font_family(".SystemUIFont")
-            .text_color(white())
+            .text_color(t.text)
             .on_key_down(cx.listener(Self::key_down))
             .on_hover(cx.listener(|this, hovered: &bool, _, cx| this.set_hovered(*hovered, cx)))
             // The cover is the window's handle: drag anywhere that isn't a control to move it.
@@ -421,8 +508,8 @@ impl Render for MiniPlayer {
                         .items_center()
                         .justify_center()
                         .gap_2()
-                        .text_color(t.text_tertiary)
-                        .child(icon("note", 40., t.text_tertiary))
+                        .text_color(base.text_tertiary)
+                        .child(icon("note", 40., base.text_tertiary))
                         .child(div().text_size(px(12.)).child("Not Playing")),
                 )
             })
@@ -430,9 +517,10 @@ impl Render for MiniPlayer {
                 d.child(div().absolute().inset_0().flex().items_center().justify_center().child(icon(
                     "note",
                     48.,
-                    t.text_tertiary,
+                    base.text_tertiary,
                 )))
             })
-            .when(shown > 0. && song.is_some(), |d| d.child(overlay))
+            .when(shown > 0., |d| d.child(top))
+            .when(shown > 0. && song.is_some(), |d| d.child(card))
     }
 }
