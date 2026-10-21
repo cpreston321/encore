@@ -73,6 +73,13 @@ impl<T: Clone> Queue<T> {
         true
     }
 
+    /// Empties the queue, keeping the shuffle and repeat settings.
+    pub fn clear(&mut self) {
+        self.source.clear();
+        self.order.clear();
+        self.cursor = None;
+    }
+
     pub fn current(&self) -> Option<&T> {
         self.cursor.map(|c| &self.source[self.order[c]])
     }

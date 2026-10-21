@@ -243,14 +243,19 @@ impl MusicApp {
     }
 
     pub(crate) fn sign_out(&mut self, cx: &mut Context<Self>) {
-        if self.audio.borrow().as_ref().is_some_and(Audio::is_full) {
-            if let Some(audio) = self.audio.borrow_mut().as_mut() {
-                audio.stop();
-            }
-            *self.audio.borrow_mut() = None;
-            self.state = PlayState::Idle;
-        }
         self.cancel_fade();
+        self.load_generation += 1;
+        if let Some(mut audio) = self.audio.borrow_mut().take() {
+            audio.stop();
+        }
+        self.state = PlayState::Idle;
+        self.queue.clear();
+        self.clear_session();
+        self.progress.read(cx).set_resume(None);
+        self.show_now_playing = false;
+        self.menu = None;
+        self.show_welcome = true;
+        self.update_now_playing(cx);
         self.web_players.clear();
         self.native_player = None;
         self.native_unavailable = false;
