@@ -47,6 +47,7 @@ pub const ICONS: &[(&str, &[u8])] = icons![
     "shuffle",
     "speaker-loud",
     "speaker",
+    "spinner",
     "star-square",
     "xmark",
 ];

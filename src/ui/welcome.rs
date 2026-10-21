@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use gpui::{GlassStyle, Image, ImageFormat};
+use gpui::{GlassStyle, Image, ImageFormat, Transformation, percentage};
 
 use super::*;
 
@@ -12,6 +12,40 @@ static ICON: OnceLock<Arc<Image>> = OnceLock::new();
 fn app_icon() -> Arc<Image> {
     ICON.get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Png, include_bytes!("../../docs/icon.png").to_vec())))
         .clone()
+}
+
+/// The sign-in button while it waits: a tinted capsule with a spinning ring that breathes,
+/// so it reads as busy rather than pressable.
+fn connecting(t: &Theme, label: &'static str) -> impl IntoElement {
+    let ring = icon("spinner", 13., t.accent).with_animation(
+        "welcome-spin",
+        Animation::new(Duration::from_millis(900)).repeat(),
+        |ring, delta| ring.with_transformation(Transformation::rotate(percentage(delta))),
+    );
+    div()
+        .id("welcome-connecting")
+        .accessibility_role(Role::Button)
+        .accessibility_label(label)
+        .w_full()
+        .h(px(40.))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .bg(t.accent.opacity(0.16))
+        .border_1()
+        .border_color(t.accent.opacity(0.35))
+        .text_size(px(14.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(t.accent)
+        .child(ring)
+        .child(label)
+        .with_animation(
+            "welcome-breathe",
+            Animation::new(Duration::from_millis(1600)).repeat(),
+            |d, delta| d.opacity(0.75 + 0.25 * (delta * std::f32::consts::TAU).cos()),
+        )
 }
 
 enum WelcomeStep {
@@ -239,14 +273,22 @@ impl MusicApp {
                     secondary("welcome-browse", "Browse Without Signing In")
                         .on_click(cx.listener(|this, _, _, cx| this.finish_welcome(cx))),
                 ),
-            WelcomeStep::Waiting => column
-                .child(status("Finish signing in in your browser. Encore opens as soon as you're done.".into()))
-                .child(
-                    primary("welcome-reopen", "person", "Open the Sign-In Page Again")
-                        .on_click(cx.listener(|this, _, _, cx| this.welcome_sign_in(cx))),
-                )
-                .child(secondary("welcome-cancel", "Cancel").on_click(cx.listener(|this, _, _, cx| this.cancel_sign_in(cx)))),
-            WelcomeStep::Loading => column.child(status("Signed in. Loading your library…".into())),
+            WelcomeStep::Waiting => column.child(connecting(t, "Connecting to Apple Music…")).child(
+                div()
+                    .flex()
+                    .justify_center()
+                    .gap_4()
+                    .child(
+                        secondary("welcome-reopen", "Reopen Sign-In Page")
+                            .on_click(cx.listener(|this, _, _, cx| this.welcome_sign_in(cx))),
+                    )
+                    .child(
+                        secondary("welcome-cancel", "Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| this.cancel_sign_in(cx))),
+                    ),
+            ),
+            // The empty row keeps the card the same height as the step before.
+            WelcomeStep::Loading => column.child(connecting(t, "Loading Your Library…")).child(div().h(px(32.))),
             WelcomeStep::Ready => column.child(
                 primary("welcome-start", "play", "Get Started").on_click(cx.listener(|this, _, _, cx| this.finish_welcome(cx))),
             ),
