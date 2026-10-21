@@ -36,6 +36,8 @@ final class Bridge {
     var player: ApplicationMusicPlayer { .shared }
     var requestedSeq: UInt64 = 0
     var loadedSeq: UInt64 = 0
+    /// The next song, already in MusicKit's queue so it follows gaplessly (`queueNext`).
+    var queued: (id: String, seq: UInt64, duration: Double)?
     var errorSeq: UInt64 = 0
     var error = ""
     var duration: Double = 0
@@ -47,6 +49,7 @@ final class Bridge {
 
     func load(id: String, seq: UInt64) {
         requestedSeq = seq
+        queued = nil
         Task { @MainActor in
             do {
                 let song = try await self.song(id: id)
@@ -63,6 +66,32 @@ final class Bridge {
                 self.errorSeq = seq
             }
         }
+    }
+
+    /// Adds the song after the current one, so MusicKit moves into it without a gap.
+    func queueNext(id: String, seq: UInt64) {
+        let current = requestedSeq
+        Task { @MainActor in
+            guard let song = try? await self.song(id: id), self.requestedSeq == current else { return }
+            do {
+                try await self.player.queue.insert(song, position: .afterCurrentEntry)
+                guard self.requestedSeq == current else { return }
+                self.queued = (song.id.rawValue, seq, song.duration ?? 0)
+            } catch {
+                NSLog("Encore: couldn't queue the next song: %@", "\(error)")
+            }
+        }
+    }
+
+    /// Once MusicKit has moved on to the queued song, it becomes the loaded one.
+    func checkAdvance() {
+        guard let next = queued, let entry = player.queue.currentEntry, case .song(let song)? = entry.item,
+            song.id.rawValue == next.id
+        else { return }
+        requestedSeq = next.seq
+        loadedSeq = next.seq
+        duration = next.duration
+        queued = nil
     }
 
     func song(id: String) async throws -> Song {
@@ -158,6 +187,7 @@ final class Bridge {
 
     /// 0 stopped, 1 playing, 2 paused, 3 interrupted, 4 seeking.
     var status: Int32 {
+        checkAdvance()
         switch player.state.playbackStatus {
         case .stopped: return 0
         case .playing: return 1
@@ -202,6 +232,13 @@ public func encoreNativeLoad(_ id: UnsafePointer<CChar>, _ seq: UInt64) {
     guard #available(macOS 14.0, *) else { return }
     let id = String(cString: id)
     MainActor.assumeIsolated { Bridge.shared.load(id: id, seq: seq) }
+}
+
+@_cdecl("encore_native_queue_next")
+public func encoreNativeQueueNext(_ id: UnsafePointer<CChar>, _ seq: UInt64) {
+    guard #available(macOS 14.0, *) else { return }
+    let id = String(cString: id)
+    MainActor.assumeIsolated { Bridge.shared.queueNext(id: id, seq: seq) }
 }
 
 @_cdecl("encore_native_play")
@@ -301,7 +338,10 @@ public func encoreNativeDuration() -> Double {
 @_cdecl("encore_native_loaded_seq")
 public func encoreNativeLoadedSeq() -> UInt64 {
     guard #available(macOS 14.0, *) else { return 0 }
-    return MainActor.assumeIsolated { Bridge.shared.loadedSeq }
+    return MainActor.assumeIsolated {
+        Bridge.shared.checkAdvance()
+        return Bridge.shared.loadedSeq
+    }
 }
 
 @_cdecl("encore_native_error_seq")

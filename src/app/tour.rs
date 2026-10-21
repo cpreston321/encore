@@ -30,9 +30,16 @@ impl MusicApp {
                     this.show_queue = std::env::var_os("ENCORE_TOUR_QUEUE").is_some();
                     this.show_account = std::env::var_os("ENCORE_TOUR_ACCOUNT").is_some();
                     this.set_volume(0., cx);
+                    // ENCORE_TOUR_PLAY=album plays the top new album, for consecutive tracks.
+                    let album = std::env::var("ENCORE_TOUR_PLAY").as_deref() == Ok("album");
                     if let Some(browse) = this.browse.ready() {
-                        let songs = browse.top_songs.clone();
-                        this.play(songs, 1, false, cx);
+                        if album && let Some(first) = browse.top_albums.first() {
+                            let id = first.id.clone();
+                            this.play_album(id, cx);
+                        } else {
+                            let songs = browse.top_songs.clone();
+                            this.play(songs, 1, false, cx);
+                        }
                     }
                 })
                 .ok();

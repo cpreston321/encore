@@ -47,6 +47,12 @@ On macOS 14+, full songs play through MusicKit's native player instead of MusicK
 
 Memory totals varied between the two runs: idle Encore was 280 MB in the first and 542 MB in the second, and Music varied as much. That's down to how much artwork each app had loaded, so this table shows how much playback added. A crossfade still starts a web player for the incoming song, so these numbers apply to the time between crossfades, or to all of it with crossfade off.
 
+## Memory over a session
+
+Encore used to keep every cover it had shown in memory until it quit. Touring 15 pages took the process to **934 MB**. It now frees artwork that hasn't been drawn for two minutes, and the same tour, with that interval shortened for the test, ends at **471 MB**, with 513 images freed. Revisiting a page decodes its artwork again from the disk cache.
+
+Album playback no longer starts a web player for every track change. On the native player, consecutive tracks play from MusicKit's own queue, so WebKit isn't running at all during an album.
+
 ## Idle
 
 GPUI keeps the macOS display link running for as long as a window is visible, which wakes the app 120 times a second even when nothing changes. Encore carries a small patch to GPUI ([vendor/gpui/PATCHES.md](../vendor/gpui/PATCHES.md)) that lets the link sleep until something needs drawing. Encore's own timers also run only while a song is playing. Measured on its own after settling, Encore's idle CPU went from **0.64%** to **0.02%**, against Music's 0.2%. The table above was recorded before this change.

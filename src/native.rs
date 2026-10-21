@@ -18,6 +18,7 @@ struct Lib {
     authorization: unsafe extern "C" fn() -> i32,
     request_authorization: unsafe extern "C" fn(),
     load: unsafe extern "C" fn(*const c_char, u64),
+    queue_next: unsafe extern "C" fn(*const c_char, u64),
     play: unsafe extern "C" fn(),
     pause: unsafe extern "C" fn(),
     stop: unsafe extern "C" fn(),
@@ -72,6 +73,7 @@ fn library() -> Option<&'static Lib> {
             authorization: sym!("encore_native_authorization"),
             request_authorization: sym!("encore_native_request_authorization"),
             load: sym!("encore_native_load"),
+            queue_next: sym!("encore_native_queue_next"),
             play: sym!("encore_native_play"),
             pause: sym!("encore_native_pause"),
             stop: sym!("encore_native_stop"),
@@ -120,7 +122,12 @@ struct Track {
 /// MusicKit has one player per app, so there's at most one of these.
 pub struct NativePlayer {
     lib: &'static Lib,
+    /// The load whose song is current.
     seq: Cell<u64>,
+    /// The last sequence number handed out, to loads and queued songs alike.
+    last_seq: Cell<u64>,
+    /// The next song queued in MusicKit (`queue_next`) and its sequence number.
+    queued: std::cell::RefCell<Option<(String, u64)>>,
     track: Cell<Track>,
 }
 
@@ -133,7 +140,13 @@ impl NativePlayer {
             return Open::Unavailable;
         }
         match unsafe { (lib.authorization)() } {
-            3 => Open::Ready(Self { lib, seq: Cell::new(0), track: Cell::new(Track::default()) }),
+            3 => Open::Ready(Self {
+                lib,
+                seq: Cell::new(0),
+                last_seq: Cell::new(0),
+                queued: std::cell::RefCell::new(None),
+                track: Cell::new(Track::default()),
+            }),
             0 => {
                 unsafe { (lib.request_authorization)() };
                 Open::Waiting
@@ -143,7 +156,9 @@ impl NativePlayer {
     }
 
     fn loaded(&self) -> bool {
-        self.seq.get() != 0 && unsafe { (self.lib.loaded_seq)() } == self.seq.get()
+        let loaded = unsafe { (self.lib.loaded_seq)() };
+        self.seq.get() != 0
+            && (loaded == self.seq.get() || self.queued.borrow().as_ref().is_some_and(|q| q.1 == loaded))
     }
 
     fn status(&self) -> i32 {
@@ -152,11 +167,37 @@ impl NativePlayer {
 
     pub fn load(&self, song_id: &str, volume: f32) {
         let Ok(id) = CString::new(song_id) else { return };
-        let seq = self.seq.get() + 1;
+        let seq = self.last_seq.get() + 1;
+        self.last_seq.set(seq);
         self.seq.set(seq);
+        self.queued.replace(None);
         self.track.set(Track::default());
         self.set_volume(volume);
         unsafe { (self.lib.load)(id.as_ptr(), seq) };
+    }
+
+    /// Puts the next song in MusicKit's own queue so it follows without a gap. Returns false if
+    /// that song is already queued.
+    pub fn queue_next(&self, song_id: &str) -> bool {
+        if self.queued.borrow().as_ref().is_some_and(|(id, _)| id == song_id) {
+            return false;
+        }
+        let Ok(id) = CString::new(song_id) else { return false };
+        let seq = self.last_seq.get() + 1;
+        self.last_seq.set(seq);
+        self.queued.replace(Some((song_id.to_string(), seq)));
+        unsafe { (self.lib.queue_next)(id.as_ptr(), seq) };
+        true
+    }
+
+    /// The queued song's id, once MusicKit has moved on to it; it's then the current song.
+    pub fn take_advance(&self) -> Option<String> {
+        let loaded = unsafe { (self.lib.loaded_seq)() };
+        let (id, seq) = self.queued.borrow().clone().filter(|q| q.1 == loaded)?;
+        self.seq.set(seq);
+        self.queued.replace(None);
+        self.track.set(Track { started: true, ..Track::default() });
+        Some(id)
     }
 
     pub fn play(&self) {

@@ -268,6 +268,7 @@ impl MusicApp {
         if self.show_now_playing && self.state == PlayState::Playing {
             cx.notify();
         }
+        self.native_gapless(cx);
         match self.state {
             // A full song has started streaming, or failed to.
             PlayState::Loading if self.loading_since.is_some() => {
@@ -398,13 +399,63 @@ impl MusicApp {
 
     /// Seconds of overlap with the next song: the crossfade setting, or a near-instant
     /// handoff between consecutive album tracks, which should play gaplessly.
-    pub(crate) fn transition_secs(&self) -> Option<f32> {
+    /// The next song if it's the following track on the same album, which should play gaplessly.
+    fn consecutive_next(&self) -> Option<&Song> {
         let next = self.queue.peek_next()?;
         let current = self.queue.current()?;
-        let consecutive = current.album_id.is_some()
+        (current.album_id.is_some()
             && current.album_id == next.album_id
-            && next.track_number == current.track_number + 1;
-        if consecutive {
+            && next.track_number == current.track_number + 1)
+            .then_some(next)
+    }
+
+    fn native_playing(&self) -> Option<Rc<crate::native::NativePlayer>> {
+        match self.audio.borrow().as_ref() {
+            Some(Audio::Full(FullPlayer::Native(p))) => Some(p.clone()),
+            _ => None,
+        }
+    }
+
+    /// The native player plays album tracks back to back itself: the next one goes in MusicKit's
+    /// queue shortly before the end (no second engine), and Encore follows when it moves on.
+    fn native_gapless(&mut self, cx: &mut Context<Self>) {
+        let Some(native) = self.native_playing().filter(|_| self.state == PlayState::Playing) else { return };
+        if let Some(id) = native.take_advance() {
+            match self.queue.track_ended() {
+                Advance::Play if self.queue.current().is_some_and(|s| s.id == id) => {
+                    let Some(song) = self.queue.current().cloned() else { return };
+                    eprintln!("gapless handoff on the native player");
+                    self.playback_error = None;
+                    self.ensure_lyrics(&song, cx);
+                    self.load_spectrum(&song, cx);
+                    self.save_session();
+                    cx.notify();
+                }
+                // The queue changed after the next song was queued: play what it says now.
+                Advance::Play => self.start_current(cx),
+                Advance::Stop => {
+                    native.stop();
+                    self.state = PlayState::Idle;
+                    self.clear_session();
+                    cx.notify();
+                }
+            }
+            return;
+        }
+        let remaining = self.duration() - self.position();
+        if remaining < 20.
+            && let Some(next) = self.consecutive_next().map(|s| s.id.clone())
+        {
+            native.queue_next(&next);
+        }
+    }
+
+    pub(crate) fn transition_secs(&self) -> Option<f32> {
+        if self.consecutive_next().is_some() {
+            if self.native_playing().is_some() {
+                // MusicKit hands off to the queued next track itself.
+                return None;
+            }
             // Starts the next track just before this one ends; streams need a moment to
             // begin, so this lands close to seamless.
             Some(GAPLESS_LEAD)
