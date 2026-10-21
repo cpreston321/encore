@@ -3795,11 +3795,19 @@ impl Window {
         if self.image_tiles.is_empty() {
             return;
         }
-        let drawn: FxHashSet<(AtlasTextureId, TileId)> = self
-            .rendered_frame
-            .scene
+        // Content a scroll replay holds just outside the view isn't drawn, but it's recorded
+        // to be moved into view without painting again, so its tiles are in use too.
+        let scene = &self.rendered_frame.scene;
+        let recorded = scene.paint_operations.iter().filter_map(|operation| match operation {
+            crate::scene::PaintOperation::Primitive(crate::scene::Primitive::PolychromeSprite(sprite)) => {
+                Some(sprite)
+            }
+            _ => None,
+        });
+        let drawn: FxHashSet<(AtlasTextureId, TileId)> = scene
             .polychrome_sprites
             .iter()
+            .chain(recorded)
             .map(|sprite| (sprite.tile.texture_id, sprite.tile.tile_id))
             .collect();
         let now = Instant::now();

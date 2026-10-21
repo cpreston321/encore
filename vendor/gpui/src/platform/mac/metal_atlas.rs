@@ -22,8 +22,15 @@ impl MetalAtlas {
         }))
     }
 
-    pub(crate) fn metal_texture(&self, id: AtlasTextureId) -> metal::Texture {
-        self.0.lock().texture(id).metal_texture.clone()
+    /// None if the texture has since been freed; drawing skips the sprites rather than crash.
+    pub(crate) fn metal_texture(&self, id: AtlasTextureId) -> Option<metal::Texture> {
+        let lock = self.0.lock();
+        let textures = match id.kind {
+            AtlasTextureKind::Monochrome => &lock.monochrome_textures,
+            AtlasTextureKind::Polychrome => &lock.polychrome_textures,
+        };
+        let texture = textures.textures.get(id.index as usize)?.as_ref()?;
+        Some(texture.metal_texture.clone())
     }
 }
 

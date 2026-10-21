@@ -2,17 +2,19 @@
 
 How Encore compares with Apple's Music app on the same Mac. Both apps were signed in to the same Apple Music account, and both streamed full songs during the playing measurements.
 
-Apple M4 Max, 64 GB, macOS 26.5.2 · Encore 0.1.0 · Music 1.6.5 · 2026-10-20
+Apple M4 Max, 64 GB, macOS 26.5.2 · Encore 0.1.0 · Music 1.6.5 · 2026-10-21
 
 | | Encore | Music |
 | --- | ---: | ---: |
-| Launch to first window (warm, median of 5) | **267 ms** | 809 ms |
-| Memory, idle | **280 MB** | 366 MB |
-| Memory, playing | **390 MB** | 402 MB |
-| CPU, idle (30 s average) | 1.3% | **0.2%** |
-| CPU, playing (30 s average) | **5.5%** | 8.4% |
-| Processes while playing | 6 | 6 |
-| Size on disk | **21 MB** | 67 MB |
+| Launch to first window (warm, median of 5) | **267 ms** | 717 ms |
+| Memory, idle | **223 MB** | 618 MB |
+| Memory, playing | 657 MB | **393 MB** |
+| CPU, idle (30 s average) | **0.0%** | 5.2% |
+| CPU, playing (30 s average) | **3.9%** | 14.4% |
+| Processes while playing | **3** | 6 |
+| Size on disk | **18 MB** | 67 MB |
+
+Playing, about 390 MB of Encore's total is buffers macOS keeps for a window while it presents frames (the progress bar redraws a few times a second). They're charged to Encore but aren't its allocations: its renderer holds about 75 MB of GPU memory. They go as soon as the window stops drawing (paused, minimized, or idle), and builds from before this session's changes show them too. Music's idle CPU includes it still settling after launch.
 
 How each number is measured:
 - **Memory and CPU** cover the app plus every helper process macOS holds it responsible for, the same grouping Activity Monitor uses. For Encore, that includes WebKit's content, network and GPU processes, which run MusicKit JS. For Music, it includes its XPC services.
@@ -22,18 +24,15 @@ How each number is measured:
 
 ## Frame rate
 
-The built-in Liquid Retina XDR display refreshes at up to 120 Hz, which leaves 8.3 ms per frame. These numbers come from scrolling each page smoothly down and back with `ENCORE_TOUR_SCROLL=1` and `ENCORE_PERF=1`:
+The built-in Liquid Retina XDR display refreshes at up to 120 Hz, which leaves 8.3 ms per frame. These numbers come from scrolling each page continuously with `ENCORE_TOUR_SCROLL=1 ENCORE_TOUR_SCROLL_SECS=8` and `ENCORE_PERF=1`, after the first seconds of loading:
 
-| Page | Frame rate | Average frame | p95 frame |
-| --- | ---: | ---: | ---: |
-| New | 120 fps | 2.5 ms | 3.7 ms |
-| Home | 120 fps | 4.8 ms | 5.2 ms |
-| Radio | 120 fps | 2.4 ms | 3.6 ms |
-| Album | 120 fps | 2.0 ms | 3.2 ms |
-| Artist | 120 fps | 3.8 ms | 7.7 ms |
-| Playlist | 120 fps | 4.3 ms | 7.6 ms |
+| Page | Frame rate | Average frame | p95 frame | Before scroll replay | Page content moved, not drawn | CPU while scrolling |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| New | 120 fps | 0.7 ms | 0.9 ms | 2.5 ms | 99% | 25% |
+| Home | 120 fps | 1.1 ms | 1.9 ms | 4.8 ms | 99% | 33% |
+| Radio | 120 fps | 1.0 ms | 2.0 ms | 2.4 ms | 83% | |
 
-A few frames on the artist and playlist pages go over budget, about 3% of them. Those are most likely moments when newly downloaded artwork arrives mid-scroll and redraws the whole window. Apple's Music app doesn't expose frame timings, so it has no column here.
+While a page only scrolls, its last frame is moved rather than drawn again ([PATCHES.md](../vendor/gpui/PATCHES.md#scrolling-moves-the-last-frame)), so layout and paint nearly disappear from scroll frames. What remains is mostly encoding GPU commands, 2.5–4 ms a frame, most of it for the sidebar's and player's glass, which has to be blurred again while the page moves under it. Frames over budget, about 1%, are pages loading or artwork arriving. Apple's Music app doesn't expose frame timings, so it has no column here.
 
 ## Native player
 
@@ -49,7 +48,7 @@ Memory totals varied between the two runs: idle Encore was 280 MB in the first a
 
 ## Memory over a session
 
-Encore used to keep every cover it had shown in memory until it quit. Touring 15 pages took the process to **934 MB**. It now frees artwork that hasn't been drawn for two minutes, and the same tour, with that interval shortened for the test, ends at **471 MB**, with 513 images freed. Revisiting a page decodes its artwork again from the disk cache.
+Encore used to keep every cover it had shown in memory until it quit. Touring 15 pages took the process to **934 MB**. It now frees artwork that hasn't been drawn for two minutes, and GPUI frees an image's GPU copy two seconds after it's last drawn and draws small artwork from a downscaled copy. The full 17-page tour (`ENCORE_TOUR=1`) now ends at **485 MB** and settles to **417 MB** 40 seconds later. Revisiting a page decodes its artwork again from the disk cache.
 
 Album playback no longer starts a web player for every track change. On the native player, consecutive tracks play from MusicKit's own queue, so WebKit isn't running at all during an album.
 
