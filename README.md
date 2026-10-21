@@ -8,7 +8,7 @@
 
 Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-length playback for subscribers.
 
-[Features](#features) · [Screenshots](#screenshots) · [Benchmarks](#benchmarks) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
+[Features](#features) · [Screenshots](#screenshots) · [Benchmarks](#benchmarks) · [Install](#install) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -67,64 +67,32 @@ Against Apple's Music app on the same Mac, both signed in and streaming full son
 
 <sub>Apple M4 Max, macOS 26.5.2, Encore 0.1.0 and Music 1.6.5. Memory and CPU include each app's helper processes; CPU is a 30-second average of one core. [Full results and how they're measured →](docs/benchmarks.md)</sub>
 
-## Getting started
+## Install
 
-Encore runs on macOS 13 or later. The native player needs macOS 14, and its volume control needs 14.2. The design targets macOS 26 Tahoe.
+Encore needs macOS 13 or later. Full songs need macOS 14 and an Apple Music subscription.
 
-### Install from source
+**Download a release** (Apple silicon)
 
-```sh
-git clone https://github.com/cpreston321/encore.git
-cd encore
-./scripts/install.sh
-```
+1. Get the zip from the [latest release](https://github.com/cpreston321/encore/releases/latest), unzip it, and move `Encore.app` to Applications.
+2. Open it. This build isn't signed with a Developer ID, so macOS blocks it the first time.
+3. In **System Settings → Privacy & Security**, click **Open Anyway** next to the message about Encore.
 
-The script checks for the Xcode Command Line Tools and [Rust](https://rustup.rs) 1.88 or later and offers to install what's missing. It then builds `Encore.app` and installs it to `~/Applications`. An app built on your own Mac isn't quarantined, so macOS opens it without asking. To update, run `git pull && ./scripts/install.sh`.
-
-### Install a release
-
-Each [release](https://github.com/cpreston321/encore/releases) has a zip of `Encore.app` for Apple silicon Macs, signed ad hoc rather than with a Developer ID. Releases can sign in to Apple Music without any setup (see [Sign in to Apple Music](#sign-in-to-apple-music)).
-
-1. Download and unzip it, and move `Encore.app` to Applications.
-2. Open it. macOS says it can't check the app for malicious software.
-3. Open **System Settings → Privacy & Security**, scroll down to the message about Encore, and click **Open Anyway**. On macOS 15 and later, right-clicking the app and choosing **Open** no longer skips this.
-
-Alternatively, sign the downloaded app with your own certificate. That also stops macOS asking about it, and keeps the Keychain's **Always Allow** in effect across updates:
+**Or build it yourself**
 
 ```sh
-./scripts/sign.sh /Applications/Encore.app
+git clone https://github.com/cpreston321/encore.git && cd encore && ./scripts/install.sh
 ```
 
-### Signing
+The script installs anything missing (the Xcode Command Line Tools and Rust), then builds Encore into `~/Applications`. Apps you build yourself open without the warning. To update, run `git pull && ./scripts/install.sh`.
 
-`scripts/sign.sh` signs with, in order:
+## Signing in
 
-1. `ENCORE_SIGN_IDENTITY` (a certificate's name, or `-` for ad hoc);
-2. your Apple Development certificate;
-3. your Developer ID Application certificate;
-4. ad hoc.
+Releases are ready to sign in: click **Sign In to Apple Music** and finish in your browser. Your Apple ID password only goes to Apple, and Encore keeps the sign-in in your Keychain.
 
-`scripts/build.sh` signs every build with it. macOS remembers Keychain access per code signature, so with a certificate the Keychain stops asking after each build. Ad hoc signatures change with every build, so the prompt comes back.
+Builds from source need a MusicKit key from an Apple Developer account. The welcome screen walks you through adding one, and [docs/musickit.md](docs/musickit.md) explains it step by step. Without a key, Encore still browses the charts and plays 30-second previews.
 
-### Run it while developing
-
-```sh
-cargo run --release
-```
-
-Encore works without any setup. It uses Apple's public charts and the iTunes Search API, and plays 30-second previews. `./scripts/build.sh` builds and installs the app bundle, with its icon and Info.plist.
-
-### Sign in to Apple Music
-
-Releases come with a MusicKit developer token built in, so you can sign in straight away. Apple limits a token to six months, so each release's token lasts 180 days; after that, update to a newer release or connect a key of your own.
-
-Builds from source need a MusicKit key from an Apple Developer account. [docs/musickit.md](docs/musickit.md) walks through creating one and pointing Encore at it, and the app's welcome screen does the same. A key of your own always takes the place of a release's token. Then:
-
-1. Click **Sign In** at the bottom of the sidebar.
-2. Encore opens a one-page sign-in site on `localhost` in your browser. Your Apple ID password only goes to Apple.
-3. The page hands the Music User Token back to Encore, which stores it in your Keychain.
-
-## Keyboard shortcuts
+<details>
+<summary><b>Keyboard shortcuts</b></summary>
 
 | Shortcut | Action |
 | --- | --- |
@@ -144,16 +112,10 @@ Builds from source need a MusicKit key from an Apple Developer account. [docs/mu
 | <kbd>↑</kbd> <kbd>↓</kbd> <kbd>Return</kbd> | Move through a list and play |
 | <kbd>⌘</kbd> <kbd>/</kbd> | Show all shortcuts |
 
-## Limitations
+</details>
 
-These limits come from Apple's APIs, not from Encore:
-
-- **Full-length playback needs a MusicKit key and an Apple Music subscription.** Apple only streams complete songs to its own players: MusicKit's native player, or MusicKit JS in a hidden web view.
-- **Volume control for the native player needs System Audio Recording permission.** MusicKit has no volume control on macOS. So the first time you change the volume or crossfade setting, Encore asks to route the player's audio through itself using a Core Audio process tap. Nothing is recorded. If you decline, the slider changes the Mac's volume instead, and track changes don't crossfade.
-- **Playlists can be added to, but not edited.** The API can add songs and create playlists. It can't remove or reorder songs, and it can't delete anything from your library.
-- **Lyrics come from LRCLIB.** Apple doesn't share its own lyrics with third-party apps, so some songs have none.
-
-## Where things are stored
+<details>
+<summary><b>Where things are stored</b></summary>
 
 | What | Where |
 | --- | --- |
@@ -163,30 +125,32 @@ These limits come from Apple's APIs, not from Encore:
 
 To sign out, click your name in the sidebar. To reset everything, delete the two folders and the Keychain item.
 
+</details>
+
+## Limitations
+
+These come from Apple's APIs, not from Encore:
+
+- **Full songs need a subscription.** Apple only streams complete songs to its own players, so Encore plays them through MusicKit.
+- **Volume control asks for System Audio Recording.** MusicKit has no volume control on macOS, so Encore routes the player's audio through itself. Nothing is recorded; decline, and the slider changes the Mac's volume instead.
+- **Playlists can be added to, but not edited.** The API can't remove or reorder songs.
+- **Lyrics come from LRCLIB.** Apple doesn't share its lyrics, so some songs have none.
+
 ## Development
 
 ```sh
-cargo test                    # unit tests
-cargo test -- --ignored       # also hits the live public endpoints
-cargo clippy --all-targets
-cargo fmt
-ENCORE_PERF=1 cargo run --release   # frame times, request durations and startup milestones on stderr
+cargo run --release                 # run without installing
+./scripts/build.sh                  # build and install Encore.app, signed with your certificate
+cargo test && cargo clippy --all-targets
 ```
 
-To release, bump `version` in `Cargo.toml` and push a matching tag (`v0.2.0`). The [release workflow](.github/workflows/release.yml) builds the app and attaches it to a draft release, which stays unpublished until you publish it. It needs the `MUSICKIT_TEAM_ID`, `MUSICKIT_KEY_ID` and `MUSICKIT_PRIVATE_KEY` (the `.p8` file's contents) repository secrets: it signs a 180-day developer token with them and builds it into the app, and the key itself goes no further. Release at least every six months, or sign-in stops working for people without a key of their own.
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the debug tools, and [docs/architecture.md](docs/architecture.md) explains how the code is laid out.
-
-## Tahoe components
-
-Encore's buttons, links, headers, cards, theme and motion live in a reusable library, [`crates/tahoe`](crates/tahoe/README.md), for other GPUI apps that want to look at home on macOS Tahoe. `cargo run -p tahoe --example gallery` shows them all.
+- [CONTRIBUTING.md](CONTRIBUTING.md): debugging tools, signing and releasing.
+- [docs/architecture.md](docs/architecture.md): how the code is laid out.
+- [`crates/tahoe`](crates/tahoe/README.md): Encore's buttons, headers, cards, theme and motion as a reusable library for GPUI apps. `cargo run -p tahoe --example gallery` shows them all.
 
 ## Acknowledgements
 
-- [GPUI](https://www.gpui.rs), the UI framework from [Zed](https://zed.dev).
-- [LRCLIB](https://lrclib.net) for synced lyrics.
-- [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia) for preview playback.
-- [objc2](https://github.com/madsmtm/objc2) for the AppKit, WebKit and MediaPlayer bindings.
+[GPUI](https://www.gpui.rs) from [Zed](https://zed.dev) · [LRCLIB](https://lrclib.net) for lyrics · [rodio](https://github.com/RustAudio/rodio) and [Symphonia](https://github.com/pdeljanov/Symphonia) for previews · [objc2](https://github.com/madsmtm/objc2) for the macOS bindings
 
 ## License
 

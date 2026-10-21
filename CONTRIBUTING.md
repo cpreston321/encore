@@ -77,6 +77,19 @@ CARGO_PROFILE_RELEASE_STRIP=false ENCORE_PERF=1 ENCORE_TOUR=1 cargo run --releas
 
 Encore targets 120 Hz on ProMotion displays: a page that renders smoothly shows a 95th percentile frame time under 8.3 ms and animates at about 120 fps.
 
+## Signing and releasing
+
+`scripts/sign.sh` signs a built or downloaded `Encore.app` with, in order:
+
+1. `ENCORE_SIGN_IDENTITY` (a certificate's name, or `-` for ad hoc);
+2. your Apple Development certificate;
+3. your Developer ID Application certificate;
+4. ad hoc.
+
+It also clears a download's quarantine, so macOS stops asking about it. `scripts/build.sh` signs every build with it. macOS remembers Keychain access per code signature, so with a certificate the Keychain stops asking after each build; ad hoc signatures change with every build, so the prompt comes back.
+
+To release, bump `version` in `Cargo.toml` and push a matching tag (`v0.2.0`). The [release workflow](.github/workflows/release.yml) builds the app and attaches it to a draft release, which stays unpublished until you publish it. It needs the `MUSICKIT_TEAM_ID`, `MUSICKIT_KEY_ID` and `MUSICKIT_PRIVATE_KEY` (the `.p8` file's contents) repository secrets: it signs a 180-day developer token with them and builds it into the app, and the key itself goes no further. Apple caps a token at six months, so release at least that often, or sign-in stops working for people without a key of their own.
+
 ## Code style
 
 - `rustfmt.toml` sets a 120-column width. Let `cargo fmt` handle formatting.
