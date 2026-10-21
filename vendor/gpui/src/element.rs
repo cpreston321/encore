@@ -492,6 +492,15 @@ impl<E: Element> Drawable<E> {
         window: &mut Window,
         cx: &mut App,
     ) -> Size<Pixels> {
+        window.timed(crate::FramePhase::Layout, |window| self.layout_as_root_untimed(available_space, window, cx))
+    }
+
+    fn layout_as_root_untimed(
+        &mut self,
+        available_space: Size<AvailableSpace>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Size<Pixels> {
         if matches!(&self.phase, ElementDrawPhase::Start) {
             self.request_layout(window, cx);
         }

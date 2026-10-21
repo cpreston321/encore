@@ -44,7 +44,9 @@ impl<V: Render> Element for Entity<V> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut element = self.update(cx, |view, cx| view.render(window, cx).into_any_element());
+        let mut element = window.timed(crate::FramePhase::Render, |window| {
+            self.update(cx, |view, cx| view.render(window, cx).into_any_element())
+        });
         let layout_id = window.with_rendered_view(self.entity_id(), |window| {
             element.request_layout(window, cx)
         });
@@ -359,7 +361,9 @@ mod any_view {
         cx: &mut App,
     ) -> AnyElement {
         let view = view.clone().downcast::<V>().unwrap();
-        view.update(cx, |view, cx| view.render(window, cx).into_any_element())
+        window.timed(crate::FramePhase::Render, |window| {
+            view.update(cx, |view, cx| view.render(window, cx).into_any_element())
+        })
     }
 }
 

@@ -381,6 +381,7 @@ pub struct MusicApp {
     first_frame_logged: Cell<bool>,
     #[cfg(any(debug_assertions, feature = "tour"))]
     pub(crate) tour_scroll: Cell<Option<std::time::Instant>>,
+    pub(crate) tour_scroll_cpu: Cell<Duration>,
     pub(crate) queue: Queue<Song>,
     pub(crate) state: PlayState,
     pub(crate) playback_error: Option<String>,
@@ -503,6 +504,7 @@ impl MusicApp {
             first_frame_logged: Cell::new(false),
             #[cfg(any(debug_assertions, feature = "tour"))]
             tour_scroll: Cell::new(None),
+            tour_scroll_cpu: Cell::new(Duration::ZERO),
             show_now_playing: false,
             artist_ids: RefCell::default(),
             spectra: HashMap::new(),
@@ -732,7 +734,7 @@ impl MusicApp {
 
 impl Render for MusicApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        crate::perf::frame_start(self.route_name());
+        crate::perf::frame_start(self.route_name(), window.frame_timings());
         if !self.first_frame_logged.replace(true) {
             crate::perf::milestone("first frame");
         }

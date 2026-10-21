@@ -159,14 +159,19 @@ impl MusicApp {
                     this.set_route(route, cx);
                 })
                 .ok();
-                // ENCORE_TOUR_SCROLL=1: once the page loads, scroll it smoothly down and back.
+                // ENCORE_TOUR_SCROLL=1: once the page loads, scroll it smoothly down and back,
+                // repeatedly for ENCORE_TOUR_SCROLL_SECS seconds if that's set.
                 if std::env::var_os("ENCORE_TOUR_SCROLL").is_some() {
                     pause(2).await;
                     this.update(cx, |this, cx| {
                         this.tour_scroll.set(Some(std::time::Instant::now()));
+                        this.tour_scroll_cpu.set(process_cpu_time());
                         cx.notify();
                     })
                     .ok();
+                    if let Some(secs) = tour_scroll_secs() {
+                        executor.timer(Duration::from_secs_f32(secs)).await;
+                    }
                 }
                 if let Some(y) = scroll {
                     // Let the page load and lay out before scrolling it.
@@ -210,11 +215,14 @@ impl MusicApp {
         let Some(start) = self.tour_scroll.get() else {
             return;
         };
-        let t = start.elapsed().as_secs_f32() / LENGTH;
-        if t >= 1. {
+        let elapsed = start.elapsed().as_secs_f32();
+        if elapsed >= tour_scroll_secs().unwrap_or(LENGTH) {
             self.tour_scroll.set(None);
+            let cpu = (process_cpu_time() - self.tour_scroll_cpu.get()).as_secs_f32();
+            eprintln!("TOUR scrolled {elapsed:.1}s, cpu {:.1}% of a core", cpu / elapsed * 100.);
             return;
         }
+        let t = elapsed / LENGTH;
         let max = f32::from(self.scroll.max_offset().height).min(2400.);
         let y = max * (1. - (t * std::f32::consts::TAU).cos()) / 2.;
         self.scroll.set_offset(point(px(0.), px(-y)));
@@ -316,6 +324,36 @@ impl MusicApp {
         }
         steps
     }
+}
+
+fn tour_scroll_secs() -> Option<f32> {
+    std::env::var("ENCORE_TOUR_SCROLL_SECS").ok()?.parse().ok()
+}
+
+/// User plus system CPU time of this process so far.
+fn process_cpu_time() -> Duration {
+    #[repr(C)]
+    struct Timeval {
+        sec: i64,
+        usec: i32,
+    }
+    #[repr(C)]
+    struct Rusage {
+        utime: Timeval,
+        stime: Timeval,
+        rest: [i64; 14],
+    }
+    unsafe extern "C" {
+        fn getrusage(who: i32, usage: *mut Rusage) -> i32;
+    }
+    let mut usage = std::mem::MaybeUninit::<Rusage>::zeroed();
+    // SAFETY: RUSAGE_SELF (0) fills the struct, whose layout matches macOS's `struct rusage`.
+    if unsafe { getrusage(0, usage.as_mut_ptr()) } != 0 {
+        return Duration::ZERO;
+    }
+    let usage = unsafe { usage.assume_init() };
+    let micros = |t: &Timeval| t.sec as u64 * 1_000_000 + t.usec as u64;
+    Duration::from_micros(micros(&usage.utime) + micros(&usage.stime))
 }
 
 /// Stand-in artwork (`ENCORE_TOUR_PLACEHOLDER_ART=1`) so published screenshots don't carry

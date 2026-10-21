@@ -4,7 +4,7 @@ use crate::SpriteMotion;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AtlasTextureId, AtlasTile, TileId, level_for, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
-    Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
+    Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener, FramePhase,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
     KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId,
@@ -907,6 +907,8 @@ pub struct Window {
     pub(crate) last_input_timestamp: Rc<Cell<Instant>>,
     motion_clock: Cell<f32>,
     last_motion_present: Cell<Option<Instant>>,
+    phase_clock: crate::frame_timings::PhaseClock,
+    frame_timings: Cell<crate::FrameTimings>,
     pub(crate) refreshing: bool,
     pub(crate) accessibility_enabled: bool,
     pub(crate) accessibility_builder: crate::AccessibilityBuilder,
@@ -1365,6 +1367,8 @@ impl Window {
             last_input_timestamp,
             motion_clock: Cell::new(0.),
             last_motion_present: Cell::new(None),
+            phase_clock: Default::default(),
+            frame_timings: Cell::new(Default::default()),
             refreshing: false,
             accessibility_enabled: false,
             accessibility_builder: Default::default(),
@@ -2072,6 +2076,21 @@ impl Window {
         self.capslock
     }
 
+    /// Where the last frame spent its time, for profiling.
+    pub fn frame_timings(&self) -> crate::FrameTimings {
+        crate::FrameTimings {
+            gpu: crate::frame_timings::last_gpu_time(),
+            ..self.frame_timings.get()
+        }
+    }
+
+    pub(crate) fn timed<R>(&mut self, phase: FramePhase, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.phase_clock.enter(phase);
+        let result = f(self);
+        self.phase_clock.exit();
+        result
+    }
+
     fn complete_frame(&self) {
         self.platform_window.completed_frame();
     }
@@ -2080,6 +2099,8 @@ impl Window {
     /// the contents of the new [`Scene`], use [`Self::present`].
     #[profiling::function]
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
+        let draw_start = Instant::now();
+        self.phase_clock.totals = Default::default();
         self.invalidate_entities();
         cx.entities.clear_accessed();
         debug_assert!(self.rendered_entity_stack.is_empty());
@@ -2146,6 +2167,10 @@ impl Window {
         self.refreshing = false;
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
+        self.frame_timings.set(crate::FrameTimings {
+            draw: draw_start.elapsed(),
+            ..self.phase_clock.totals
+        });
 
         ArenaClearNeeded
     }
@@ -2187,12 +2212,22 @@ impl Window {
             self.last_motion_present.set(None);
         }
         scene.motion_time.set(self.motion_clock.get());
+        let present_start = Instant::now();
         self.platform_window.draw(scene);
+        let mut timings = self.frame_timings.get();
+        timings.present = present_start.elapsed();
+        self.frame_timings.set(timings);
         self.needs_present.set(false);
         profiling::finish_frame!();
     }
 
     fn draw_roots(&mut self, cx: &mut App) {
+        self.phase_clock.enter(FramePhase::Prepaint);
+        self.draw_roots_timed(cx);
+        self.phase_clock.exit();
+    }
+
+    fn draw_roots_timed(&mut self, cx: &mut App) {
         self.invalidator.set_phase(DrawPhase::Prepaint);
         self.tooltip_bounds.take();
 
@@ -2248,6 +2283,8 @@ impl Window {
 
         // Now actually paint the elements.
         self.invalidator.set_phase(DrawPhase::Paint);
+        self.phase_clock.exit();
+        self.phase_clock.enter(FramePhase::Paint);
         root_element.paint(self, cx);
 
         #[cfg(any(feature = "inspector", debug_assertions))]

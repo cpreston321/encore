@@ -55,14 +55,16 @@ struct Frames {
     window_start: Option<Instant>,
     last_start: Option<Instant>,
     intervals: Vec<Duration>,
+    phases: Vec<gpui::FrameTimings>,
 }
 
 thread_local! {
     static FRAMES: RefCell<Frames> = RefCell::default();
 }
 
-/// Marks the start of a frame (top of the root view's render).
-pub fn frame_start(route: &str) {
+/// Marks the start of a frame (top of the root view's render). `previous` is where gpui
+/// says the last frame spent its time.
+pub fn frame_start(route: &str, previous: gpui::FrameTimings) {
     if !enabled() {
         return;
     }
@@ -71,6 +73,7 @@ pub fn frame_start(route: &str) {
         let now = Instant::now();
         if let Some(gap) = f.last_start.map(|t| now - t).filter(|gap| *gap < CONTINUOUS) {
             f.intervals.push(gap);
+            f.phases.push(previous);
         }
         f.last_start = Some(now);
         f.started = Some(now);
@@ -79,6 +82,7 @@ pub fn frame_start(route: &str) {
             f.route = route.to_string();
             f.samples.clear();
             f.intervals.clear();
+            f.phases.clear();
             f.window_start = None;
         }
     });
@@ -115,8 +119,26 @@ pub fn frame_end() {
                 .get(intervals.len() / 2)
                 .map(|d| format!(", animating at {:.0}fps", 1. / d.as_secs_f64()))
                 .unwrap_or_default();
+            let phases = std::mem::take(&mut f.phases);
+            let breakdown = if phases.is_empty() {
+                String::new()
+            } else {
+                let mean = |pick: fn(&gpui::FrameTimings) -> Duration| {
+                    ms(phases.iter().map(pick).sum::<Duration>() / phases.len() as u32)
+                };
+                format!(
+                    "; while animating: render {:.2}, layout {:.2}, prepaint {:.2}, paint {:.2}, draw {:.2}, encode {:.2}, gpu {:.2} ms",
+                    mean(|p| p.render),
+                    mean(|p| p.layout),
+                    mean(|p| p.prepaint),
+                    mean(|p| p.paint),
+                    mean(|p| p.draw),
+                    mean(|p| p.present),
+                    mean(|p| p.gpu),
+                )
+            };
             eprintln!(
-                "[perf] {}: {n} frames in {:.0}s, avg {:.1}ms, p95 {:.1}ms, max {:.1}ms, {slow} over 8.3ms{fps}",
+                "[perf] {}: {n} frames in {:.0}s, avg {:.1}ms, p95 {:.1}ms, max {:.1}ms, {slow} over 8.3ms{fps}{breakdown}",
                 f.route,
                 window_start.elapsed().as_secs_f64(),
                 ms(avg),

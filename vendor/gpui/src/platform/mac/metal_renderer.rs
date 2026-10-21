@@ -441,7 +441,13 @@ impl MetalRenderer {
                 Ok(command_buffer) => {
                     let instance_buffer_pool = self.instance_buffer_pool.clone();
                     let instance_buffer = Cell::new(Some(instance_buffer));
-                    let block = ConcreteBlock::new(move |_| {
+                    let block = ConcreteBlock::new(move |command_buffer: &metal::CommandBufferRef| {
+                        let (start, end): (f64, f64) = unsafe {
+                            (msg_send![command_buffer, GPUStartTime], msg_send![command_buffer, GPUEndTime])
+                        };
+                        if end > start {
+                            crate::frame_timings::record_gpu_time(std::time::Duration::from_secs_f64(end - start));
+                        }
                         if let Some(instance_buffer) = instance_buffer.take() {
                             instance_buffer_pool.lock().release(instance_buffer);
                         }
