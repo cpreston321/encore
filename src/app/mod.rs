@@ -186,6 +186,14 @@ struct Settings {
     /// View > Animate Artwork: covers and headers slowly drift and zoom.
     #[serde(default)]
     animate_artwork: bool,
+    /// The welcome screen has been seen. Settings from before it existed count as seen, so
+    /// only a new install shows it.
+    #[serde(default = "seen")]
+    welcomed: bool,
+}
+
+fn seen() -> bool {
+    true
 }
 
 fn default_crossfade() -> u32 {
@@ -204,6 +212,7 @@ impl Settings {
             recent_searches: Vec::new(),
             native_volume: false,
             animate_artwork: false,
+            welcomed: false,
         })
     }
 
@@ -232,6 +241,7 @@ pub struct Fx {
     pub volume: crate::anim::Presence,
     pub notice: crate::anim::Presence,
     pub key_help: crate::anim::Presence,
+    pub welcome: crate::anim::Presence,
     pub now_playing: crate::anim::Presence,
     pub palette: crate::anim::Presence,
     pub shortcuts: crate::anim::Presence,
@@ -257,6 +267,7 @@ impl Fx {
             volume: Presence::new(quick),
             notice: Presence::new(Duration::from_millis(220)),
             key_help: Presence::new(quick),
+            welcome: Presence::new(Duration::from_millis(420)),
             now_playing: Presence::new(Duration::from_millis(320)),
             palette: Presence::new(Duration::from_millis(160)),
             shortcuts: Presence::new(quick),
@@ -287,6 +298,7 @@ impl Fx {
             || self.volume.animating()
             || self.notice.animating()
             || self.key_help.animating()
+            || self.welcome.animating()
             || self.now_playing.animating()
             || self.palette.animating()
             || self.shortcuts.animating()
@@ -340,6 +352,9 @@ pub struct MusicApp {
     pub(crate) palette_open: bool,
     pub(crate) palette_index: usize,
     pub(crate) show_shortcuts: bool,
+    /// The welcome screen is up (a new install, or `ENCORE_WELCOME=1`).
+    pub(crate) show_welcome: bool,
+    pub(crate) welcomed: bool,
     pub(crate) recent_searches: Vec<String>,
     /// Lets ↑/↓ keep the selection in view in the virtualized song lists.
     pub(crate) song_list_scroll: gpui::UniformListScrollHandle,
@@ -510,6 +525,8 @@ impl MusicApp {
             palette_open: false,
             palette_index: 0,
             show_shortcuts: false,
+            show_welcome: !Settings::load().welcomed || std::env::var_os("ENCORE_WELCOME").is_some(),
+            welcomed: Settings::load().welcomed,
             recent_searches: Settings::load().recent_searches,
             song_list_scroll: gpui::UniformListScrollHandle::new(),
             local_matches_cache: RefCell::default(),
@@ -781,6 +798,7 @@ impl Render for MusicApp {
             fx.account.set(self.show_account && self.account == Account::SignedIn);
             fx.volume.set(self.show_volume);
             fx.key_help.set(self.show_key_help);
+            fx.welcome.set(self.show_welcome);
             fx.now_playing.set(self.show_now_playing && self.queue.current().is_some());
             fx.palette.set(self.palette_open);
             fx.shortcuts.set(self.show_shortcuts);
@@ -858,6 +876,7 @@ impl Render for MusicApp {
             .children(self.render_palette(&t, cx))
             .children(self.render_new_playlist(&t, cx))
             .children(self.render_shortcuts(&t, cx))
+            .children(self.render_welcome(&t, cx))
             // Last, so it sees transitions started anywhere above.
             .child(gpui::canvas(|_, _, _| {}, {
                 // Keep drawing frames only while something is mid-transition.

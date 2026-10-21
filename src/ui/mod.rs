@@ -52,6 +52,7 @@ pub(crate) mod regions;
 pub(crate) mod see_all;
 pub(crate) mod shell;
 pub(crate) mod shortcuts;
+pub(crate) mod welcome;
 pub(crate) mod widgets;
 
 pub(crate) use widgets::*;

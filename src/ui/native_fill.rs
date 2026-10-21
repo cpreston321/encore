@@ -180,7 +180,8 @@ impl crate::app::MusicApp {
         let progress = self.progress.read(cx);
         let (hover, hover_moving) = progress.hover_amount();
         let bounds = self.progress_bounds.get();
-        let covered = self.show_now_playing
+        let covered = self.show_welcome
+            || self.show_now_playing
             || self.fx.borrow().now_playing.visible()
             || self.menu.is_some()
             || self.palette_open

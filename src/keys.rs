@@ -209,7 +209,10 @@ impl MusicApp {
 
     /// Esc closes the topmost thing that's open. Returns false if nothing was.
     pub(crate) fn dismiss_top(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let closed = if self.palette_open {
+        let closed = if self.show_welcome {
+            self.finish_welcome(cx);
+            true
+        } else if self.palette_open {
             self.palette_open = false;
             window.focus(&self.focus);
             true

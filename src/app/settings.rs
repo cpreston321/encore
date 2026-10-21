@@ -10,6 +10,7 @@ impl MusicApp {
             recent_searches: self.recent_searches.clone(),
             native_volume: self.native_volume_allowed,
             animate_artwork: self.animate_artwork,
+            welcomed: self.welcomed,
         }
         .save();
     }
