@@ -3,7 +3,7 @@ use crate::Inspector;
 use crate::SpriteMotion;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
+    AsyncWindowContext, AtlasTextureId, AtlasTile, TileId, level_for, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
     Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
@@ -105,6 +105,16 @@ const MOTION_FPS: f32 = 20.;
 
 /// Idle frames in a row before frame requests pause.
 const IDLE_FRAMES_BEFORE_PAUSE: u32 = 4;
+
+/// How long an image's texture stays in the atlas after it was last on screen. Another copy
+/// of the same image being on screen frees it right away.
+const IMAGE_TILE_GRACE: Duration = Duration::from_secs(2);
+
+/// An image's tile in the sprite atlas, and when it was last on screen.
+struct ImageTile {
+    tile: AtlasTile,
+    last_drawn: Instant,
+}
 
 #[derive(Clone)]
 pub(crate) struct WindowInvalidator {
@@ -850,6 +860,7 @@ pub struct Window {
     pub(crate) platform_window: Box<dyn PlatformWindow>,
     display_id: Option<DisplayId>,
     sprite_atlas: Arc<dyn PlatformAtlas>,
+    image_tiles: FxHashMap<RenderImageParams, ImageTile>,
     text_system: Arc<WindowTextSystem>,
     rem_size: Pixels,
     /// The stack of override values for the window's rem size.
@@ -1296,6 +1307,7 @@ impl Window {
             platform_window,
             display_id,
             sprite_atlas,
+            image_tiles: FxHashMap::default(),
             text_system,
             rem_size: px(16.),
             rem_size_override_stack: SmallVec::new(),
@@ -2074,6 +2086,7 @@ impl Window {
         let previous_window_active = self.rendered_frame.window_active;
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
+        self.release_undrawn_image_tiles();
         let current_focus_path = self.rendered_frame.focus_path();
         let current_window_active = self.rendered_frame.window_active;
 
@@ -3326,26 +3339,173 @@ impl Window {
         motion: Option<SpriteMotion>,
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
+        let tile = self.full_image_tile(&data, frame_index)?;
+        self.insert_image_sprite(bounds, corner_radii, tile, grayscale, texture_crop, motion);
+        Ok(())
+    }
 
-        let scale_factor = self.scale_factor();
-        let bounds = bounds.scale(scale_factor);
+    /// Like `paint_image_cropped`, but an image drawn much smaller than its pixel size draws
+    /// from a downscaled copy, so it doesn't alias or shimmer and its full-size texture can
+    /// be freed. The copy is made in the background; until it's ready the image draws as it
+    /// is, and the view redraws when it's done. Animated images always draw as they are.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_image_downscaled(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        data: Arc<RenderImage>,
+        frame_index: usize,
+        grayscale: bool,
+        texture_crop: Option<Bounds<f32>>,
+        motion: Option<SpriteMotion>,
+        cx: &mut App,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+
+        let level = if data.frame_count() == 1 {
+            // Size for the most zoomed-in moment, so the copy is never magnified.
+            let shown = match motion {
+                Some(motion) if motion.strength > 0. => {
+                    let side = 1. / (1. + motion.strength);
+                    size(side, side)
+                }
+                _ => texture_crop.map_or(size(1., 1.), |crop| crop.size),
+            };
+            let drawn = bounds.size.scale(self.scale_factor());
+            level_for(
+                data.size(0),
+                size(drawn.width.0 / shown.width, drawn.height.0 / shown.height),
+            )
+        } else {
+            0
+        };
+
+        let mut tile = None;
+        if level > 0 {
+            if data.ready_level(level).is_none() && data.request_level(level, self.current_view()) {
+                let image = data.clone();
+                let build = cx
+                    .background_executor()
+                    .spawn(async move { image.build_level(level) });
+                cx.spawn(async move |cx| {
+                    let views = build.await;
+                    cx.update(|cx| {
+                        for view in views {
+                            cx.notify(view);
+                        }
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            // While the copy is being made, a larger one that's ready beats the full image.
+            let ready = (1..=level)
+                .rev()
+                .find_map(|level| data.ready_level(level).map(|pixels| (level, pixels)));
+            if let Some((level, pixels)) = ready {
+                let params = RenderImageParams {
+                    image_id: data.id,
+                    frame_index: 0,
+                    level,
+                };
+                tile = Some(self.image_tile(params, pixels.size, &pixels.bytes, true)?);
+            }
+        }
+        let tile = match tile {
+            Some(tile) => tile,
+            None => self.full_image_tile(&data, frame_index)?,
+        };
+        self.insert_image_sprite(bounds, corner_radii, tile, grayscale, texture_crop, motion);
+        Ok(())
+    }
+
+    fn full_image_tile(&mut self, data: &RenderImage, frame_index: usize) -> Result<AtlasTile> {
         let params = RenderImageParams {
             image_id: data.id,
             frame_index,
+            level: 0,
         };
+        let bytes = data
+            .as_bytes(frame_index)
+            .expect("It's the caller's job to pass a valid frame index");
+        let track = data.frame_count() == 1;
+        self.image_tile(params, data.size(frame_index), bytes, track)
+    }
 
+    /// Uploads an image to the atlas if it isn't there. Tracked tiles are freed once they
+    /// haven't been on screen for a while (see `release_undrawn_image_tiles`).
+    fn image_tile(
+        &mut self,
+        params: RenderImageParams,
+        size: Size<DevicePixels>,
+        bytes: &[u8],
+        track: bool,
+    ) -> Result<AtlasTile> {
         let tile = self
             .sprite_atlas
-            .get_or_insert_with(&params.into(), &mut || {
-                Ok(Some((
-                    data.size(frame_index),
-                    Cow::Borrowed(
-                        data.as_bytes(frame_index)
-                            .expect("It's the caller's job to pass a valid frame index"),
-                    ),
-                )))
+            .get_or_insert_with(&params.clone().into(), &mut || {
+                Ok(Some((size, Cow::Borrowed(bytes))))
             })?
             .expect("Callback above only returns Some");
+        if track {
+            self.image_tiles
+                .entry(params)
+                .and_modify(|entry| entry.tile = tile.clone())
+                .or_insert_with(|| ImageTile {
+                    tile: tile.clone(),
+                    last_drawn: Instant::now(),
+                });
+        }
+        Ok(tile)
+    }
+
+    /// Frees the atlas tiles of images that the frame just rendered doesn't draw: right away
+    /// if it draws another copy of the same image, otherwise after `IMAGE_TILE_GRACE`.
+    ///
+    /// Only tiles missing from `rendered_frame` may go. It's the scene that gets presented
+    /// (and re-presented for motion), and the one cached views replay from.
+    fn release_undrawn_image_tiles(&mut self) {
+        if self.image_tiles.is_empty() {
+            return;
+        }
+        let drawn: FxHashSet<(AtlasTextureId, TileId)> = self
+            .rendered_frame
+            .scene
+            .polychrome_sprites
+            .iter()
+            .map(|sprite| (sprite.tile.texture_id, sprite.tile.tile_id))
+            .collect();
+        let now = Instant::now();
+        let mut drawn_images = FxHashSet::default();
+        for (params, entry) in &mut self.image_tiles {
+            if drawn.contains(&(entry.tile.texture_id, entry.tile.tile_id)) {
+                entry.last_drawn = now;
+                drawn_images.insert(params.image_id);
+            }
+        }
+        let atlas = &self.sprite_atlas;
+        self.image_tiles.retain(|params, entry| {
+            let keep = entry.last_drawn == now
+                || (!drawn_images.contains(&params.image_id)
+                    && now - entry.last_drawn < IMAGE_TILE_GRACE);
+            if !keep {
+                atlas.remove(&params.clone().into());
+            }
+            keep
+        });
+    }
+
+    fn insert_image_sprite(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        tile: AtlasTile,
+        grayscale: bool,
+        texture_crop: Option<Bounds<f32>>,
+        motion: Option<SpriteMotion>,
+    ) {
+        let scale_factor = self.scale_factor();
+        let bounds = bounds.scale(scale_factor);
         let content_mask = self.content_mask().scale(scale_factor);
         let corner_radii = corner_radii.scale(scale_factor);
         let opacity = self.element_opacity();
@@ -3367,7 +3527,6 @@ impl Window {
             }),
             motion: motion.unwrap_or_default(),
         });
-        Ok(())
     }
 
     /// Paint a surface into the scene for the next frame at the current z-index.
@@ -3392,13 +3551,16 @@ impl Window {
 
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
-        for frame_index in 0..data.frame_count() {
+        let frames = (0..data.frame_count()).map(|frame_index| (frame_index, 0));
+        let levels = data.levels().into_iter().map(|level| (0, level));
+        for (frame_index, level) in frames.chain(levels) {
             let params = RenderImageParams {
                 image_id: data.id,
                 frame_index,
+                level,
             };
-
             self.sprite_atlas.remove(&params.clone().into());
+            self.image_tiles.remove(&params);
         }
 
         Ok(())

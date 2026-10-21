@@ -59,9 +59,10 @@ impl PlatformAtlas for MetalAtlas {
 
     fn remove(&self, key: &AtlasKey) {
         let mut lock = self.0.lock();
-        let Some(id) = lock.tiles_by_key.get(key).map(|v| v.texture_id) else {
+        let Some(tile) = lock.tiles_by_key.remove(key) else {
             return;
         };
+        let id = tile.texture_id;
 
         let textures = match id.kind {
             AtlasTextureKind::Monochrome => &mut lock.monochrome_textures,
@@ -77,11 +78,11 @@ impl PlatformAtlas for MetalAtlas {
         };
 
         if let Some(mut texture) = texture_slot.take() {
+            texture.allocator.deallocate(tile.tile_id.into());
             texture.decrement_ref_count();
 
             if texture.is_unreferenced() {
                 textures.free_list.push(id.index as usize);
-                lock.tiles_by_key.remove(key);
             } else {
                 *texture_slot = Some(texture);
             }
@@ -279,3 +280,62 @@ impl From<etagere::Rectangle> for Bounds<DevicePixels> {
 struct AssertSend<T>(T);
 
 unsafe impl<T> Send for AssertSend<T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ImageId, RenderImageParams, size};
+
+    fn key(id: usize) -> AtlasKey {
+        AtlasKey::Image(RenderImageParams {
+            image_id: ImageId(id),
+            frame_index: 0,
+            level: 0,
+        })
+    }
+
+    fn insert(atlas: &MetalAtlas, id: usize, side: i32) -> AtlasTile {
+        let bytes = vec![0u8; (side * side * 4) as usize];
+        atlas
+            .get_or_insert_with(&key(id), &mut || {
+                Ok(Some((
+                    size(DevicePixels(side), DevicePixels(side)),
+                    Cow::Owned(bytes.clone()),
+                )))
+            })
+            .unwrap()
+            .unwrap()
+    }
+
+    fn live_textures(atlas: &MetalAtlas) -> usize {
+        let lock = atlas.0.lock();
+        lock.polychrome_textures.textures.iter().flatten().count()
+    }
+
+    #[test]
+    fn removing_a_tile_keeps_its_neighbors_and_frees_empty_textures() {
+        let Some(device) = Device::system_default() else {
+            return;
+        };
+        let atlas = MetalAtlas::new(device);
+        let a = insert(&atlas, 1, 64);
+        let b = insert(&atlas, 2, 64);
+        assert_eq!(a.texture_id, b.texture_id);
+
+        atlas.remove(&key(1));
+        atlas.remove(&key(1));
+        assert_eq!(live_textures(&atlas), 1);
+        assert_eq!(insert(&atlas, 2, 64), b);
+
+        let large = insert(&atlas, 3, 2400);
+        assert_ne!(large.texture_id, b.texture_id);
+        assert_eq!(live_textures(&atlas), 2);
+        atlas.remove(&key(3));
+        atlas.remove(&key(2));
+        assert_eq!(live_textures(&atlas), 0);
+
+        let again = insert(&atlas, 1, 64);
+        assert_eq!(live_textures(&atlas), 1);
+        atlas.metal_texture(again.texture_id);
+    }
+}

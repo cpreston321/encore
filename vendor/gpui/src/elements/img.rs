@@ -495,7 +495,7 @@ impl Element for Img {
                         .to_pixels(window.rem_size())
                         .clamp_radii_for_quad_size(new_bounds.size);
                     window
-                        .paint_image_cropped(
+                        .paint_image_downscaled(
                             new_bounds,
                             corner_radii,
                             data,
@@ -503,6 +503,7 @@ impl Element for Img {
                             self.style.grayscale,
                             self.style.texture_crop,
                             self.style.motion,
+                            cx,
                         )
                         .log_err();
                 } else if let Some(replacement) = &mut layout_state.replacement {
