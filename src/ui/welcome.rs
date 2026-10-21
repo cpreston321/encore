@@ -58,6 +58,78 @@ enum WelcomeStep {
 
 const TILE: f32 = 150.;
 const TILE_GAP: f32 = 14.;
+/// How far each row of covers sways, and how long one sway back and forth takes.
+const DRIFT: f32 = 36.;
+const DRIFT_PERIOD: f32 = 48.;
+
+static WALL_START: OnceLock<std::time::Instant> = OnceLock::new();
+
+/// Draws its child moved sideways by `offset`, a fraction of a pixel included. Moving a row
+/// through layout instead snaps it to whole points, and a slow drift then steps rather than
+/// glides.
+struct Shifted {
+    offset: f32,
+    child: Option<AnyElement>,
+}
+
+impl IntoElement for Shifted {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl gpui::Element for Shifted {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) -> (gpui::LayoutId, ()) {
+        (self.child.as_mut().expect("Shifted has a child").request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) {
+        let child = self.child.as_mut().expect("Shifted has a child");
+        window.with_element_offset(gpui::point(px(self.offset), px(0.)), |window| child.prepaint(window, cx));
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) {
+        if let Some(child) = self.child.as_mut() {
+            child.paint(window, cx);
+        }
+    }
+}
 
 impl MusicApp {
     pub(crate) fn render_welcome(&self, t: &Theme, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -74,6 +146,15 @@ impl MusicApp {
             .ready()
             .map(|b| b.top_albums.iter().map(|a| a.artwork.clone()).filter(|a| !a.is_empty()).take(48).collect())
             .unwrap_or_default();
+        // Rows sway slowly in alternating directions. The wall extends past the window on both
+        // sides by more than the sway, so no edge ever shows.
+        let drift = if crate::anim::reduce_motion() {
+            0.
+        } else {
+            window.request_animation_frame();
+            let start = *WALL_START.get_or_init(std::time::Instant::now);
+            DRIFT * (start.elapsed().as_secs_f32() * std::f32::consts::TAU / DRIFT_PERIOD).sin()
+        };
         // Enough rows and columns to cover a large window; covers repeat if there are too few.
         const ROWS: usize = 9;
         const COLUMNS: usize = 14;
@@ -81,14 +162,18 @@ impl MusicApp {
             !covers.is_empty(),
             |wall| {
                 wall.children((0..ROWS).map(|row| {
+                    let direction = if row % 2 == 0 { 1. } else { -1. };
                     // Alternate rows shift by half a tile, so the wall reads as a mosaic.
-                    div().flex().gap(px(TILE_GAP)).when(row % 2 == 1, |d| d.ml(px(-(TILE + TILE_GAP) / 2.))).children(
-                        (0..COLUMNS).map(|column| {
+                    let row_div = div()
+                        .flex()
+                        .gap(px(TILE_GAP))
+                        .when(row % 2 == 1, |d| d.ml(px(-(TILE + TILE_GAP) / 2.)))
+                        .children((0..COLUMNS).map(|column| {
                             // Stepping by a large prime spreads repeats far apart.
                             let artwork = &covers[(row * COLUMNS + column) * 29 % covers.len()];
                             self.art(artwork, TILE, 14., t, cx)
-                        }),
-                    )
+                        }));
+                    Shifted { offset: drift * direction, child: Some(row_div.into_any_element()) }
                 }))
             },
         );
