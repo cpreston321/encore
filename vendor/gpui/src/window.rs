@@ -14,10 +14,10 @@ use crate::{
     Render, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
     SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, BackdropBlur,
     SharedString, Size, StrikethroughStyle, Style, SubscriberSet, Subscription, SystemWindowTab,
-    SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement,
-    TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem,
-    point, prelude::*, px, rems, size, transparent_black,
+    SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextShadow, TextStyle,
+    TextStyleRefinement, TransformationMatrix, Underline, UnderlineStyle, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, WindowControls, WindowDecorations, WindowOptions,
+    WindowParams, WindowTextSystem, point, prelude::*, px, rems, size, transparent_black,
 };
 use anyhow::{Context as _, Result, anyhow};
 use collections::{FxHashMap, FxHashSet};
@@ -3138,15 +3138,56 @@ impl Window {
         font_size: Pixels,
         color: Hsla,
     ) -> Result<()> {
+        self.paint_monochrome_glyph(origin, font_id, glyph_id, font_size, color, Pixels::ZERO)
+    }
+
+    /// Paints a glyph's shadow: the glyph in the shadow's color, blurred by its blur radius.
+    /// Paint it before the glyph, in an earlier layer, so it sits underneath.
+    ///
+    /// The y component of the origin is the baseline of the glyph, with the shadow's offset
+    /// already applied.
+    pub fn paint_glyph_shadow(
+        &mut self,
+        origin: Point<Pixels>,
+        font_id: FontId,
+        glyph_id: GlyphId,
+        font_size: Pixels,
+        shadow: &TextShadow,
+    ) -> Result<()> {
+        self.paint_monochrome_glyph(
+            origin,
+            font_id,
+            glyph_id,
+            font_size,
+            shadow.color,
+            shadow.blur_radius,
+        )
+    }
+
+    fn paint_monochrome_glyph(
+        &mut self,
+        origin: Point<Pixels>,
+        font_id: FontId,
+        glyph_id: GlyphId,
+        font_size: Pixels,
+        color: Hsla,
+        blur_radius: Pixels,
+    ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
         let element_opacity = self.element_opacity();
         let scale_factor = self.scale_factor();
         let glyph_origin = origin.scale(scale_factor);
 
-        let subpixel_variant = Point {
-            x: (glyph_origin.x.0.fract() * SUBPIXEL_VARIANTS_X as f32).floor() as u8,
-            y: (glyph_origin.y.0.fract() * SUBPIXEL_VARIANTS_Y as f32).floor() as u8,
+        let blur_radius = (blur_radius.0 * scale_factor).round().clamp(0., 255.) as u8;
+        // A blurred glyph looks the same at every subpixel offset, so one raster serves all.
+        let subpixel_variant = if blur_radius > 0 {
+            Point::default()
+        } else {
+            Point {
+                x: (glyph_origin.x.0.fract() * SUBPIXEL_VARIANTS_X as f32).floor() as u8,
+                y: (glyph_origin.y.0.fract() * SUBPIXEL_VARIANTS_Y as f32).floor() as u8,
+            }
         };
         let params = RenderGlyphParams {
             font_id,
@@ -3155,6 +3196,7 @@ impl Window {
             subpixel_variant,
             scale_factor,
             is_emoji: false,
+            blur_radius,
         };
 
         let raster_bounds = self.text_system().raster_bounds(&params)?;
@@ -3211,6 +3253,7 @@ impl Window {
             subpixel_variant: Default::default(),
             scale_factor,
             is_emoji: true,
+            blur_radius: 0,
         };
 
         let raster_bounds = self.text_system().raster_bounds(&params)?;

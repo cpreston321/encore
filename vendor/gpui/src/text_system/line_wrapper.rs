@@ -7,6 +7,7 @@ pub struct LineWrapper {
     platform_text_system: Arc<dyn PlatformTextSystem>,
     pub(crate) font_id: FontId,
     pub(crate) font_size: Pixels,
+    letter_spacing: Pixels,
     cached_ascii_char_widths: [Option<Pixels>; 128],
     cached_other_char_widths: HashMap<char, Pixels>,
 }
@@ -24,9 +25,15 @@ impl LineWrapper {
             platform_text_system: text_system,
             font_id,
             font_size,
+            letter_spacing: Pixels::ZERO,
             cached_ascii_char_widths: [None; 128],
             cached_other_char_widths: HashMap::default(),
         }
+    }
+
+    /// Sets the tracking that widths are measured with, as [`TextRun::letter_spacing`].
+    pub fn set_letter_spacing(&mut self, letter_spacing: Pixels) {
+        self.letter_spacing = letter_spacing;
     }
 
     /// Wrap a line of text to the given width with this wrapper's font and font size.
@@ -191,6 +198,11 @@ impl LineWrapper {
 
     #[inline(always)]
     fn width_for_char(&mut self, c: char) -> Pixels {
+        self.untracked_width_for_char(c) + self.letter_spacing
+    }
+
+    #[inline(always)]
+    fn untracked_width_for_char(&mut self, c: char) -> Pixels {
         if (c as u32) < 128 {
             if let Some(cached_width) = self.cached_ascii_char_widths[c as usize] {
                 cached_width
@@ -218,13 +230,14 @@ impl LineWrapper {
                 &[FontRun {
                     len: buffer.len(),
                     font_id: self.font_id,
+                    letter_spacing: Pixels::ZERO,
                 }],
             )
             .width
     }
 }
 
-fn update_runs_after_truncation(result: &str, ellipsis: &str, runs: &mut Vec<TextRun>) {
+pub(crate) fn update_runs_after_truncation(result: &str, ellipsis: &str, runs: &mut Vec<TextRun>) {
     let mut truncate_at = result.len() - ellipsis.len();
     for (run_index, run) in runs.iter_mut().enumerate() {
         if run.len <= truncate_at {
@@ -344,6 +357,7 @@ mod tests {
                 background_color: None,
                 underline: None,
                 strikethrough: None,
+                letter_spacing: px(0.),
             })
             .collect()
     }
@@ -694,6 +708,7 @@ mod tests {
                 underline: Default::default(),
                 strikethrough: None,
                 background_color: None,
+                letter_spacing: px(0.),
             };
             let bold = TextRun {
                 len: 0,
@@ -702,6 +717,7 @@ mod tests {
                 underline: Default::default(),
                 strikethrough: None,
                 background_color: None,
+                letter_spacing: px(0.),
             };
 
             let text = "aa bbb cccc ddddd eeee".into();

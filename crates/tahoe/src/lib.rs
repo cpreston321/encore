@@ -10,6 +10,7 @@
 //!   [`PageHeader`], [`Card`], [`Badge`], [`SegmentedControl`], [`ToggleButton`], [`Avatar`],
 //!   [`Kbd`], [`EmptyState`] and [`ExpandableText`].
 //! - [`textfield`]: single-line text editing with macOS keys and input methods ([`TextInput`]).
+//! - [`typography`]: SF tracking for titles ([`tracking`]) and a shadow for text on artwork.
 //! - [`primitives`]: the same looks as plain, chainable gpui elements.
 //! - [`anim`]: reversible open/close transitions, color blends and Reduce Motion.
 //! - [`icons`]: the embedded icon set; register [`Assets`] with your `Application`.
@@ -38,6 +39,7 @@ pub mod layout;
 pub mod primitives;
 pub mod textfield;
 pub mod theme;
+pub mod typography;
 
 pub use components::{
     Avatar, Badge, Button, ButtonStyle, Card, EmptyState, ExpandableText, IconButton, IconButtonStyle, Kbd, Link,
@@ -46,12 +48,13 @@ pub use components::{
 pub use icons::{Assets, icon};
 pub use textfield::{TextField, TextFieldHost, TextInput};
 pub use theme::{Palette, Theme, contrast, luminance, readable_on};
+pub use typography::{text_shadow_on_art, tracking};
 
 /// Everything for building Tahoe-style views.
 pub mod prelude {
     pub use crate::{
         Avatar, Badge, Button, ButtonStyle, Card, EmptyState, ExpandableText, IconButton, IconButtonStyle, Kbd, Link,
         PageHeader, Palette, SectionHeader, SegmentedControl, SegmentedStyle, TextField, TextFieldHost, TextInput,
-        Theme, ToggleButton, icon, readable_on,
+        Theme, ToggleButton, icon, readable_on, text_shadow_on_art, tracking,
     };
 }

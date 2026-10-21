@@ -125,6 +125,29 @@ impl LineLayout {
         None
     }
 
+    /// The end of the longest run of whole glyphs from `start` that fits in `width`, with
+    /// trailing whitespace dropped.
+    fn fitting_prefix_end(&self, text: &str, start: usize, width: Pixels) -> usize {
+        let start_x = self.x_for_index(start);
+        let mut end = start;
+        let glyph_starts = self
+            .runs
+            .iter()
+            .flat_map(|run| run.glyphs.iter())
+            .map(|glyph| (glyph.index, glyph.position.x))
+            .chain([(self.len, self.width)]);
+        for (index, x) in glyph_starts {
+            if index <= start {
+                continue;
+            }
+            if x - start_x > width {
+                break;
+            }
+            end = index;
+        }
+        start + text[start..end].trim_end().len()
+    }
+
     fn compute_wrap_boundaries(
         &self,
         text: &str,
@@ -205,6 +228,45 @@ impl LineLayout {
 
         boundaries
     }
+}
+
+/// Where to cut text so that its first `max_lines` lines fit with a suffix `suffix_width` wide
+/// at the end of the last one. `paragraphs` are the text's `\n`-separated paragraphs, laid out
+/// and wrapped, with at least `max_lines + 1` lines of them shaped so overflow shows. Returns
+/// a byte offset into the whole text, or `None` when it fits in `max_lines` as it is.
+pub(crate) fn line_clamp_truncation_point(
+    paragraphs: &[(&str, &WrappedLineLayout)],
+    max_lines: usize,
+    suffix_width: Pixels,
+) -> Option<usize> {
+    let mut paragraph_start = 0;
+    let mut lines_before = 0;
+    for (ix, (text, layout)) in paragraphs.iter().enumerate() {
+        let line_count = layout.wrap_boundaries.len() + 1;
+        if lines_before + line_count < max_lines {
+            lines_before += line_count;
+            paragraph_start += text.len() + 1;
+            continue;
+        }
+
+        let last_line = max_lines.checked_sub(lines_before + 1)?;
+        if line_count == last_line + 1 && ix + 1 == paragraphs.len() {
+            return None;
+        }
+        let line_start = match last_line.checked_sub(1) {
+            Some(boundary_ix) => {
+                let boundary = layout.wrap_boundaries[boundary_ix];
+                layout.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index
+            }
+            None => 0,
+        };
+        let available = layout.wrap_width.unwrap_or(Pixels::MAX) - suffix_width;
+        let cut = layout
+            .unwrapped_layout
+            .fitting_prefix_end(text, line_start, available);
+        return Some(paragraph_start + cut);
+    }
+    None
 }
 
 /// A line of text that has been wrapped to fit a given width
@@ -597,6 +659,7 @@ impl LineLayoutCache {
 pub struct FontRun {
     pub(crate) len: usize,
     pub(crate) font_id: FontId,
+    pub(crate) letter_spacing: Pixels,
 }
 
 trait AsCacheKeyRef {
@@ -668,5 +731,103 @@ impl<'a> Borrow<dyn AsCacheKeyRef + 'a> for Arc<CacheKey> {
 impl AsCacheKeyRef for CacheKeyRef<'_> {
     fn as_cache_key_ref(&self) -> CacheKeyRef<'_> {
         *self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CHAR_WIDTH: f32 = 10.;
+
+    fn monospace(text: &str, wrap_width: Option<f32>) -> WrappedLineLayout {
+        let glyphs = text
+            .char_indices()
+            .enumerate()
+            .map(|(i, (index, _))| ShapedGlyph {
+                id: GlyphId(0),
+                position: point(px(i as f32 * CHAR_WIDTH), px(0.)),
+                index,
+                is_emoji: false,
+            })
+            .collect();
+        let layout = LineLayout {
+            font_size: px(10.),
+            width: px(text.chars().count() as f32 * CHAR_WIDTH),
+            ascent: px(8.),
+            descent: px(2.),
+            runs: vec![ShapedRun {
+                font_id: FontId(0),
+                glyphs,
+            }],
+            len: text.len(),
+        };
+        let wrap_width = wrap_width.map(px);
+        let wrap_boundaries = match wrap_width {
+            Some(width) => layout.compute_wrap_boundaries(text, width, None),
+            None => SmallVec::new(),
+        };
+        WrappedLineLayout {
+            unwrapped_layout: Arc::new(layout),
+            wrap_boundaries,
+            wrap_width,
+        }
+    }
+
+    /// Clamps `text` at 10 characters a line, with an ellipsis `suffix_chars` wide.
+    fn clamp(text: &str, max_lines: usize, suffix_chars: usize) -> String {
+        let layouts = text
+            .split('\n')
+            .map(|p| (p, monospace(p, Some(10. * CHAR_WIDTH))))
+            .collect::<Vec<_>>();
+        let paragraphs = layouts.iter().map(|(p, l)| (*p, l)).collect::<Vec<_>>();
+        let suffix_width = px(suffix_chars as f32 * CHAR_WIDTH);
+        match line_clamp_truncation_point(&paragraphs, max_lines, suffix_width) {
+            Some(cut) => format!("{}…", &text[..cut]),
+            None => text.to_string(),
+        }
+    }
+
+    #[test]
+    fn text_that_fits_is_left_alone() {
+        assert_eq!(clamp("one two", 2, 1), "one two");
+        assert_eq!(clamp("one two three four", 2, 1), "one two three four");
+        assert_eq!(clamp("one\ntwo", 2, 1), "one\ntwo");
+    }
+
+    #[test]
+    fn the_last_line_is_cut_to_fit_the_ellipsis() {
+        // Wraps as "aaaa bbbb " / "cccc dddd " / "eeee".
+        let text = "aaaa bbbb cccc dddd eeee";
+        assert_eq!(clamp(text, 2, 1), "aaaa bbbb cccc dddd…");
+        assert_eq!(clamp(text, 1, 1), "aaaa bbbb…");
+        assert_eq!(clamp(text, 2, 3), "aaaa bbbb cccc dd…");
+        assert_eq!(clamp(text, 2, 5), "aaaa bbbb cccc…");
+    }
+
+    #[test]
+    fn a_long_word_is_cut_mid_word() {
+        assert_eq!(clamp("aaaa bbbbbbbbbbbbbbbbbbbb", 2, 1), "aaaa bbbbbbbbb…");
+    }
+
+    #[test]
+    fn later_paragraphs_count_as_overflow() {
+        assert_eq!(clamp("short\nsecond\nthird", 2, 1), "short\nsecond…");
+        assert_eq!(clamp("short\naaaa bbbb cccc", 2, 1), "short\naaaa bbbb…");
+        assert_eq!(clamp("aaaa bbbb cccc\nnext", 2, 1), "aaaa bbbb cccc…");
+        assert_eq!(clamp("one\n\nthree", 2, 1), "one\n…");
+    }
+
+    #[test]
+    fn a_full_last_line_makes_room_for_the_ellipsis() {
+        assert_eq!(clamp("abcdefghij\nmore", 1, 1), "abcdefghi…");
+    }
+
+    #[test]
+    fn fitting_prefix_end_lands_on_character_boundaries() {
+        let text = "héllo wörld";
+        let layout = monospace(text, None);
+        let end = layout.unwrapped_layout.fitting_prefix_end(text, 0, px(85.));
+        assert_eq!(&text[..end], "héllo wö");
     }
 }

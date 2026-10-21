@@ -1,8 +1,9 @@
 use crate::{
     self as gpui, AbsoluteLength, AlignContent, AlignItems, BorderStyle, CursorStyle,
     DefiniteLength, Display, Fill, FlexDirection, FlexWrap, Font, FontStyle, FontWeight,
-    GridPlacement, Hsla, JustifyContent, Length, SharedString, StrikethroughStyle, StyleRefinement,
-    TextAlign, TextOverflow, TextStyleRefinement, UnderlineStyle, WhiteSpace, px, relative, rems,
+    GridPlacement, Hsla, JustifyContent, Length, Pixels, SharedString, StrikethroughStyle,
+    StyleRefinement, TextAlign, TextOverflow, TextShadow, TextStyleRefinement, UnderlineStyle,
+    WhiteSpace, px, relative, rems,
 };
 pub use gpui_macros::{
     border_style_methods, box_shadow_style_methods, cursor_style_methods, margin_style_methods,
@@ -415,6 +416,27 @@ pub trait Styled: Sized {
         self.text_style()
             .get_or_insert_with(Default::default)
             .background_color = Some(bg.into());
+        self
+    }
+
+    /// Sets the letter spacing (tracking): extra space after every character, negative to
+    /// tighten. [Docs](https://tailwindcss.com/docs/letter-spacing)
+    ///
+    /// This value cascades to its child elements.
+    fn tracking(mut self, letter_spacing: impl Into<Pixels>) -> Self {
+        self.text_style()
+            .get_or_insert_with(Default::default)
+            .letter_spacing = Some(letter_spacing.into());
+        self
+    }
+
+    /// Draws a shadow under the text, like CSS `text-shadow`.
+    ///
+    /// This value cascades to its child elements.
+    fn text_shadow(mut self, shadow: TextShadow) -> Self {
+        self.text_style()
+            .get_or_insert_with(Default::default)
+            .text_shadow = Some(shadow);
         self
     }
 

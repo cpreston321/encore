@@ -389,6 +389,7 @@ impl MusicApp {
                     .child(
                         div()
                             .text_size(px(32.))
+                            .tracking(tracking(32.))
                             .font_weight(FontWeight::BOLD)
                             .text_color(white())
                             .truncate()

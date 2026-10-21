@@ -307,6 +307,7 @@ impl MusicApp {
                     .flex()
                     .flex_col()
                     .text_color(white())
+                    .text_shadow(text_shadow_on_art())
                     .child(
                         div()
                             .text_size(px(11.))
@@ -314,7 +315,14 @@ impl MusicApp {
                             .text_color(white().opacity(0.75))
                             .child(if i == 0 { "NEW ALBUM · FEATURED" } else { "NEW ALBUM" }),
                     )
-                    .child(div().text_size(px(20.)).font_weight(FontWeight::BOLD).truncate().child(album.title.clone()))
+                    .child(
+                        div()
+                            .text_size(px(20.))
+                            .tracking(tracking(20.))
+                            .font_weight(FontWeight::BOLD)
+                            .truncate()
+                            .child(album.title.clone()),
+                    )
                     .child(
                         div()
                             .text_size(px(13.))

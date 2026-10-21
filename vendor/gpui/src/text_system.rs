@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Bounds, DevicePixels, Hsla, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
-    StrikethroughStyle, UnderlineStyle, px,
+    Bounds, DevicePixels, Hsla, IsZero, Pixels, PlatformTextSystem, Point, Result, SharedString,
+    Size, StrikethroughStyle, UnderlineStyle, px,
 };
 use anyhow::{Context as _, anyhow};
 use collections::FxHashMap;
@@ -311,9 +311,18 @@ impl TextSystem {
         if let Some(bounds) = raster_bounds.get(params) {
             Ok(*bounds)
         } else {
-            let mut raster_bounds = RwLockUpgradableReadGuard::upgrade(raster_bounds);
-            let bounds = self.platform_text_system.glyph_raster_bounds(params)?;
-            raster_bounds.insert(params.clone(), bounds);
+            drop(raster_bounds);
+            let bounds = if params.blur_radius > 0 {
+                let sharp = self.raster_bounds(&params.without_blur())?;
+                if sharp.is_zero() {
+                    sharp
+                } else {
+                    sharp.dilate(DevicePixels(blur_padding(params.blur_radius) as i32))
+                }
+            } else {
+                self.platform_text_system.glyph_raster_bounds(params)?
+            };
+            self.raster_bounds.write().insert(params.clone(), bounds);
             Ok(bounds)
         }
     }
@@ -322,6 +331,10 @@ impl TextSystem {
         &self,
         params: &RenderGlyphParams,
     ) -> Result<(Size<DevicePixels>, Vec<u8>)> {
+        if params.blur_radius > 0 && !params.is_emoji {
+            let (size, bytes) = self.rasterize_glyph(&params.without_blur())?;
+            return Ok(blur_alpha_mask(&bytes, size, params.blur_radius));
+        }
         let raster_bounds = self.raster_bounds(params)?;
         self.platform_text_system
             .rasterize_glyph(params, raster_bounds)
@@ -462,6 +475,7 @@ impl WindowTextSystem {
                 let font_id = self.resolve_font(&run.font);
                 if let Some(font_run) = font_runs.last_mut()
                     && font_id == font_run.font_id
+                    && run.letter_spacing == font_run.letter_spacing
                     && !decoration_changed
                 {
                     font_run.len += run_len_within_line;
@@ -469,6 +483,7 @@ impl WindowTextSystem {
                     font_runs.push(FontRun {
                         len: run_len_within_line,
                         font_id,
+                        letter_spacing: run.letter_spacing,
                     });
                 }
 
@@ -565,6 +580,7 @@ impl WindowTextSystem {
 
             if let Some(font_run) = font_runs.last_mut()
                 && Some(font_run.font_id) == last_font
+                && run.letter_spacing == font_run.letter_spacing
                 && !decoration_changed
             {
                 font_run.len += run.len;
@@ -574,6 +590,7 @@ impl WindowTextSystem {
                 font_runs.push(FontRun {
                     len: run.len,
                     font_id,
+                    letter_spacing: run.letter_spacing,
                 });
             }
         }
@@ -606,7 +623,8 @@ pub struct LineWrapperHandle {
 impl Drop for LineWrapperHandle {
     fn drop(&mut self) {
         let mut state = self.text_system.wrapper_pool.lock();
-        let wrapper = self.wrapper.take().unwrap();
+        let mut wrapper = self.wrapper.take().unwrap();
+        wrapper.set_letter_spacing(Pixels::ZERO);
         state
             .get_mut(&FontIdWithSize {
                 font_id: wrapper.font_id,
@@ -748,6 +766,8 @@ pub struct TextRun {
     pub underline: Option<UnderlineStyle>,
     /// The strikethrough style (if any)
     pub strikethrough: Option<StrikethroughStyle>,
+    /// Extra space after each character (tracking).
+    pub letter_spacing: Pixels,
 }
 
 #[cfg(all(target_os = "macos", test))]
@@ -772,6 +792,8 @@ pub(crate) struct RenderGlyphParams {
     pub(crate) subpixel_variant: Point<u8>,
     pub(crate) scale_factor: f32,
     pub(crate) is_emoji: bool,
+    /// In device pixels. A blurred glyph is drawn as a shadow.
+    pub(crate) blur_radius: u8,
 }
 
 impl Eq for RenderGlyphParams {}
@@ -784,7 +806,86 @@ impl Hash for RenderGlyphParams {
         self.subpixel_variant.hash(state);
         self.scale_factor.to_bits().hash(state);
         self.is_emoji.hash(state);
+        self.blur_radius.hash(state);
     }
+}
+
+impl RenderGlyphParams {
+    fn without_blur(&self) -> Self {
+        Self {
+            blur_radius: 0,
+            ..self.clone()
+        }
+    }
+}
+
+/// How far a blur of `radius` spreads past the glyph: three standard deviations, with the
+/// deviation half the radius as in CSS.
+fn blur_padding(radius: u8) -> usize {
+    (radius as f32 * 1.5).ceil() as usize
+}
+
+/// Blurs a one-byte-per-pixel coverage mask with a Gaussian, padding it so the blur has
+/// room to spread.
+fn blur_alpha_mask(
+    bytes: &[u8],
+    size: Size<DevicePixels>,
+    radius: u8,
+) -> (Size<DevicePixels>, Vec<u8>) {
+    let pad = blur_padding(radius);
+    let (width, height) = (size.width.0 as usize, size.height.0 as usize);
+    let (out_width, out_height) = (width + 2 * pad, height + 2 * pad);
+    let sigma = radius as f32 / 2.;
+    let kernel = (0..=2 * pad)
+        .map(|i| {
+            let x = i as f32 - pad as f32;
+            (-x * x / (2. * sigma * sigma)).exp()
+        })
+        .collect::<Vec<_>>();
+    let total = kernel.iter().sum::<f32>();
+    let kernel = kernel.iter().map(|k| k / total).collect::<Vec<_>>();
+
+    let mut padded = vec![0f32; out_width * out_height];
+    for y in 0..height {
+        for x in 0..width {
+            padded[(y + pad) * out_width + x + pad] = bytes[y * width + x] as f32;
+        }
+    }
+    let mut horizontal = vec![0f32; out_width * out_height];
+    for y in 0..out_height {
+        let row = &padded[y * out_width..][..out_width];
+        for x in 0..out_width {
+            horizontal[y * out_width + x] = kernel
+                .iter()
+                .enumerate()
+                .filter_map(|(k, weight)| {
+                    let source = (x + k).checked_sub(pad)?;
+                    row.get(source).map(|value| value * weight)
+                })
+                .sum();
+        }
+    }
+    let mut out = vec![0u8; out_width * out_height];
+    for y in 0..out_height {
+        for x in 0..out_width {
+            let value: f32 = kernel
+                .iter()
+                .enumerate()
+                .filter_map(|(k, weight)| {
+                    let source = (y + k).checked_sub(pad).filter(|&y| y < out_height)?;
+                    Some(horizontal[source * out_width + x] * weight)
+                })
+                .sum();
+            out[y * out_width + x] = value.round().clamp(0., 255.) as u8;
+        }
+    }
+    (
+        Size {
+            width: DevicePixels(out_width as i32),
+            height: DevicePixels(out_height as i32),
+        },
+        out,
+    )
 }
 
 /// The configuration details for identifying a specific font.
@@ -919,5 +1020,34 @@ pub(crate) fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'
         ".ZedSans" | "Zed Plex Sans" => "IBM Plex Sans",
         ".ZedMono" | "Zed Plex Mono" => "Lilex",
         _ => name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blurring_a_mask_pads_it_and_keeps_its_ink() {
+        let size = Size {
+            width: DevicePixels(3),
+            height: DevicePixels(3),
+        };
+        let mut mask = vec![0u8; 9];
+        mask[4] = 255;
+        let (blurred_size, blurred) = blur_alpha_mask(&mask, size, 4);
+
+        let pad = blur_padding(4) as i32;
+        assert_eq!(blurred_size.width.0, 3 + 2 * pad);
+        assert_eq!(blurred_size.height.0, 3 + 2 * pad);
+
+        let width = blurred_size.width.0 as usize;
+        let center = (width / 2) * width + width / 2;
+        assert!(blurred[center] < 255);
+        assert_eq!(blurred.iter().copied().max(), Some(blurred[center]));
+        assert_eq!(blurred[center - 1], blurred[center + 1]);
+        assert_eq!(blurred[center - width], blurred[center + width]);
+        let ink = blurred.iter().map(|&v| v as u32).sum::<u32>();
+        assert!((ink as i32 - 255).abs() < 30, "{ink}");
     }
 }

@@ -3,7 +3,8 @@ use crate::{
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, TextOverflow,
     TextRun, TextStyle, TooltipId, WhiteSpace, Window, WrappedLine, WrappedLineLayout,
-    register_tooltip_mouse_handlers, set_tooltip_on_window,
+    line_clamp_truncation_point, register_tooltip_mouse_handlers, set_tooltip_on_window,
+    update_runs_after_truncation,
 };
 use anyhow::Context as _;
 use smallvec::SmallVec;
@@ -377,29 +378,46 @@ impl TextLayout {
                     return text_layout.size.unwrap();
                 }
 
-                let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
-                let text = if let Some(truncate_width) = truncate_width {
-                    line_wrapper.truncate_line(
+                let clamp_width = wrap_width.filter(|_| text_style.text_overflow.is_some());
+                let shaped = if let (Some(max_lines), Some(wrap_width)) =
+                    (text_style.line_clamp, clamp_width)
+                {
+                    shape_clamped_with_suffix(
+                        window,
                         text.clone(),
-                        truncate_width,
-                        &truncation_suffix,
-                        &mut runs,
-                    )
-                } else {
-                    text.clone()
-                };
-                let len = text.len();
-
-                let Some(lines) = window
-                    .text_system()
-                    .shape_text(
-                        text,
                         font_size,
                         &runs,
-                        wrap_width,            // Wrap if we know the width.
-                        text_style.line_clamp, // Limit the number of lines if line_clamp is set.
+                        wrap_width,
+                        max_lines,
+                        &truncation_suffix,
                     )
-                    .log_err()
+                } else {
+                    let mut line_wrapper =
+                        cx.text_system().line_wrapper(text_style.font(), font_size);
+                    line_wrapper.set_letter_spacing(text_style.letter_spacing);
+                    let text = if let Some(truncate_width) = truncate_width {
+                        line_wrapper.truncate_line(
+                            text.clone(),
+                            truncate_width,
+                            &truncation_suffix,
+                            &mut runs,
+                        )
+                    } else {
+                        text.clone()
+                    };
+                    window
+                        .text_system()
+                        .shape_text(
+                            text.clone(),
+                            font_size,
+                            &runs,
+                            wrap_width,            // Wrap if we know the width.
+                            text_style.line_clamp, // Limit the number of lines if line_clamp is set.
+                        )
+                        .map(|lines| (text, lines))
+                };
+
+                let Some((len, lines)) = shaped.log_err().map(|(text, lines)| (text.len(), lines))
                 else {
                     element_state.0.borrow_mut().replace(TextLayoutInner {
                         lines: Default::default(),
@@ -466,6 +484,27 @@ impl TextLayout {
                 cx,
             )
             .log_err();
+            line_origin.y += line.size(line_height).height;
+        }
+        // All shadows go first so one line's shadow can't fall on the line above.
+        if let Some(shadow) = text_style.text_shadow {
+            let mut line_origin = bounds.origin;
+            for line in &element_state.lines {
+                line.paint_shadow(
+                    line_origin,
+                    line_height,
+                    text_style.text_align,
+                    Some(bounds),
+                    &shadow,
+                    window,
+                    cx,
+                )
+                .log_err();
+                line_origin.y += line.size(line_height).height;
+            }
+        }
+        let mut line_origin = bounds.origin;
+        for line in &element_state.lines {
             line.paint(
                 line_origin,
                 line_height,
@@ -619,6 +658,109 @@ impl TextLayout {
         }
 
         lines.join("\n")
+    }
+}
+
+/// Wraps text to `wrap_width` and, if it runs past `max_lines`, cuts the last visible line
+/// short so that `suffix` fits after it.
+fn shape_clamped_with_suffix(
+    window: &Window,
+    text: SharedString,
+    font_size: Pixels,
+    runs: &[TextRun],
+    wrap_width: Pixels,
+    max_lines: usize,
+    suffix: &SharedString,
+) -> anyhow::Result<(SharedString, SmallVec<[WrappedLine; 1]>)> {
+    let text_system = window.text_system();
+    // One line more than the clamp shows whether anything is cut off.
+    let shape = |text: &SharedString, runs: &[TextRun]| {
+        text_system.shape_text(
+            text.clone(),
+            font_size,
+            runs,
+            Some(wrap_width),
+            Some(max_lines + 1),
+        )
+    };
+    let line_count = |lines: &[WrappedLine]| -> usize {
+        lines
+            .iter()
+            .map(|line| line.wrap_boundaries.len() + 1)
+            .sum()
+    };
+    let suffix_width = |run: &TextRun| {
+        let run = TextRun {
+            len: suffix.len(),
+            ..run.clone()
+        };
+        text_system
+            .layout_line(suffix, font_size, &[run], None)
+            .width
+    };
+    let run_at = |ix: usize| {
+        let mut end = 0;
+        runs.iter()
+            .find(|run| {
+                end += run.len;
+                end > ix
+            })
+            .or(runs.last())
+    };
+
+    let lines = shape(&text, runs)?;
+    let Some(first_run) = runs.first() else {
+        return Ok((text, lines));
+    };
+    let cut = {
+        let paragraphs = lines
+            .iter()
+            .map(|line| (line.text.as_ref(), &*line.layout))
+            .collect::<SmallVec<[_; 4]>>();
+        let first_suffix_width = suffix_width(first_run);
+        line_clamp_truncation_point(&paragraphs, max_lines, first_suffix_width).map(|cut| {
+            // The suffix takes the style of the run it's appended to.
+            match run_at(cut.saturating_sub(1)) {
+                Some(run) if run != first_run => {
+                    let width = suffix_width(run);
+                    if width == first_suffix_width {
+                        cut
+                    } else {
+                        line_clamp_truncation_point(&paragraphs, max_lines, width).unwrap_or(cut)
+                    }
+                }
+                _ => cut,
+            }
+        })
+    };
+    let Some(mut cut) = cut else {
+        return Ok((text, lines));
+    };
+
+    // Shaped together, the text and suffix can come out a little wider than measured apart.
+    loop {
+        let truncated = SharedString::from(format!("{}{}", &text[..cut], suffix));
+        let mut truncated_runs = runs.to_vec();
+        update_runs_after_truncation(&truncated, suffix, &mut truncated_runs);
+        let lines = shape(&truncated, &truncated_runs)?;
+        if line_count(&lines) <= max_lines {
+            return Ok((truncated, lines));
+        }
+        if cut == 0 {
+            let lines = text_system.shape_text(
+                truncated.clone(),
+                font_size,
+                &truncated_runs,
+                Some(wrap_width),
+                Some(max_lines),
+            )?;
+            return Ok((truncated, lines));
+        }
+        let previous = text[..cut]
+            .char_indices()
+            .next_back()
+            .map_or(0, |(ix, _)| ix);
+        cut = text[..previous].trim_end().len();
     }
 }
 

@@ -2,14 +2,15 @@
 //! TAHOE_APPEARANCE=light|dark forces an appearance.
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, Hsla, IntoElement, KeyDownEvent, ParentElement, Render, Styled,
-    TitlebarOptions, Window, WindowBounds, WindowOptions, div, point, prelude::*, px, size,
+    App, Application, Bounds, Context, FocusHandle, FontWeight, Hsla, IntoElement, KeyDownEvent, ParentElement, Render,
+    Styled, TextShadow, TitlebarOptions, Window, WindowBounds, WindowOptions, black, div, point, prelude::*, px, size,
+    white,
 };
 use tahoe::{
     prelude::*,
     primitives::skeleton_block,
     textfield::text_input_box,
-    theme::{Appearance, force_appearance},
+    theme::{Appearance, force_appearance, gradient},
 };
 
 const NOTES: &str = "For a razor-toothed mixtape, the record is, to a surprising extent, a family affair. \
@@ -172,6 +173,66 @@ impl Gallery {
                     cx.notify();
                 }),
             )))
+            .child(SectionHeader::new("typography", "Typography"))
+            .child(
+                div()
+                    .px(px(32.))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children([13., 19., 28.].map(|size| {
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap_6()
+                            .text_size(px(size))
+                            .font_weight(FontWeight::BOLD)
+                            .child(div().w(px(300.)).child("Recently Added Albums"))
+                            .child(div().w(px(300.)).tracking(tracking(size)).child("Recently Added Albums"))
+                    }))
+                    .child(
+                        div()
+                            .text_color(t.text_secondary)
+                            .child("13, 19 and 28 pt: as shaped, then with tracking(size)"),
+                    ),
+            )
+            .child(row().pt_4().items_start().children([1, 2, 3].map(|lines| {
+                div()
+                    .w(px(230.))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_size(px(14.)).line_height(px(20.)).line_clamp(lines).text_ellipsis().child(NOTES))
+                    .child(div().text_size(px(11.)).text_color(t.text_secondary).child(format!("line_clamp({lines})")))
+            })))
+            .child(
+                row().pt_4().child(
+                    div()
+                        .w(px(560.))
+                        .h(px(120.))
+                        .rounded(px(12.))
+                        .bg(gradient(0xfde68a, 0x93c5fd))
+                        .p_5()
+                        .flex()
+                        .items_end()
+                        .gap_8()
+                        .text_color(white())
+                        .font_weight(FontWeight::BOLD)
+                        .text_size(px(20.))
+                        .tracking(tracking(20.))
+                        .child(div().child("No shadow"))
+                        .child(div().text_shadow(text_shadow_on_art()).child("text_shadow_on_art"))
+                        .child(
+                            div()
+                                .text_shadow(TextShadow {
+                                    color: black().opacity(0.6),
+                                    offset: point(px(2.), px(2.)),
+                                    blur_radius: px(0.),
+                                })
+                                .child("Hard"),
+                        ),
+                ),
+            )
             .child(SectionHeader::new("links", "Links and badges"))
             .child(
                 row()

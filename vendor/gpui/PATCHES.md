@@ -76,3 +76,20 @@ With a trackpad, scrolling past either end of a scroll view stretches it with re
 - **Dragging** the thumb scrolls; clicking the track jumps the thumb there and keeps dragging. While it's showing, a `BlockMouseExceptScroll` hitbox over the track keeps clicks from reaching the content underneath.
 - **Colors.** By default, translucent black in light windows and white in dark ones, with a faint opposite border. `insets` keep it clear of toolbars and rounded window corners.
 - **Frames.** It waits for the fade with a timer rather than drawing frames, and draws frames only while fading or widening.
+
+## Letter spacing
+
+`Styled::tracking(px)` sets `TextStyle::letter_spacing`, extra space after every character (negative tightens), and it cascades like the other text styles.
+- **The path.** `TextRun` and `FontRun` carry it, so it's part of the line layout cache key, and runs with different spacing aren't merged. On macOS `layout_line` sets CoreText's kern attribute on each run's text (not on the ZWNJs GPUI inserts between runs), so glyph positions and the line's width include it, and wrapping, hit-testing and caret positions follow from those as before. Like CSS, the last character gets it too.
+- **Single-line truncation** measures characters with `LineWrapper`, which adds the spacing to each width (`set_letter_spacing`; the pool resets it).
+- **Elsewhere** the Linux and Windows text systems ignore it.
+
+## `line_clamp` ends with a real ellipsis
+
+With `text_overflow` and `line_clamp`, GPUI used to truncate the text to `width × lines` as if it were one long line, so the last visible line could end early or be cut mid-word. When the text wraps (`white_space: normal`), `TextLayout` now shapes it wrapped with one line more than the clamp. If that extra line exists, `line_clamp_truncation_point` finds the start of the last visible line and cuts it at the last glyph that leaves room for the suffix, dropping trailing whitespace. The suffix is measured in the style of the run it's appended to. The text is then shaped again with the suffix, and if shaping them together comes out wider and wraps, it gives up one more character and tries again. Later paragraphs count as overflow, so a clamp that ends on a paragraph's last line still gets the ellipsis. Text that doesn't wrap (`truncate()`) is truncated as before.
+
+## Text shadows
+
+`Styled::text_shadow(TextShadow { color, offset, blur_radius })` draws the glyphs again underneath, in the shadow's color.
+- **Order.** `TextLayout::paint` paints every line's shadow (`WrappedLine::paint_shadow`) before any line's text, each in its own layer, so the text always sorts above the shadows, including the next line's. Decorations and emoji don't get shadows.
+- **The blur** is rasterized once per glyph and cached in the atlas: `RenderGlyphParams` gains `blur_radius` (device pixels), and for a blurred glyph `TextSystem` rasterizes the sharp glyph, pads it by 1.5 × the radius, and runs a separable Gaussian (σ = radius / 2, as in CSS) over the coverage mask on the CPU. Blurred glyphs skip subpixel variants. Because it happens above the platform text systems, it works on every platform, and a shadow costs one extra monochrome sprite per glyph.

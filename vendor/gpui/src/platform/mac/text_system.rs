@@ -25,7 +25,7 @@ use core_text::{
         kCTFontSlantTrait, kCTFontSymbolicTrait, kCTFontWeightTrait, kCTFontWidthTrait,
     },
     line::CTLine,
-    string_attributes::kCTFontAttributeName,
+    string_attributes::{kCTFontAttributeName, kCTKernAttributeName},
 };
 use font_kit::{
     font::Font as FontKitFont,
@@ -455,6 +455,7 @@ impl MacTextSystemState {
 
                 // note: replace_str may silently ignore codepoints it dislikes (e.g., BOM at start of string)
                 string.replace_str(&CFString::new(text), CFRange::init(utf16_start, 0));
+                let text_utf16_end = string.char_len();
                 if needs_zwnj {
                     let zwnjs_pos = string.char_len();
                     self.zwnjs_scratch_space.push(zwnjs_pos as usize);
@@ -479,6 +480,13 @@ impl MacTextSystemState {
                         kCTFontAttributeName,
                         &font.native_font().clone_with_font_size(font_size.into()),
                     );
+                    if run.letter_spacing != Pixels::ZERO {
+                        string.set_attribute(
+                            CFRange::init(utf16_start, text_utf16_end - utf16_start),
+                            kCTKernAttributeName,
+                            &CFNumber::from(f32::from(run.letter_spacing) as f64),
+                        );
+                    }
                 }
             }
         }
@@ -719,6 +727,7 @@ mod tests {
         let mut style = FontRun {
             font_id,
             len: line.len(),
+            letter_spacing: px(0.),
         };
 
         let layout = fonts.layout_line(line, px(16.), &[style]);
@@ -740,10 +749,12 @@ mod tests {
             FontRun {
                 len: "\u{feff}".len(),
                 font_id,
+                letter_spacing: px(0.),
             },
             FontRun {
                 len: "ab".len(),
                 font_id,
+                letter_spacing: px(0.),
             },
         ];
         let layout = fonts.layout_line(line, px(16.), font_runs);
@@ -756,14 +767,55 @@ mod tests {
     }
 
     #[test]
+    fn test_layout_line_letter_spacing() {
+        let fonts = MacTextSystem::new();
+        let font_id = fonts.font_id(&font("Helvetica")).unwrap();
+        let text = "hello world";
+        let layout = |letter_spacing| {
+            fonts.layout_line(
+                text,
+                px(16.),
+                &[FontRun {
+                    font_id,
+                    len: text.len(),
+                    letter_spacing,
+                }],
+            )
+        };
+        let xs = |layout: &crate::LineLayout| {
+            layout
+                .runs
+                .iter()
+                .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.position.x))
+                .collect::<Vec<_>>()
+        };
+        let plain = layout(px(0.));
+        let tracked = layout(px(-0.5));
+        let (plain_xs, tracked_xs) = (xs(&plain), xs(&tracked));
+        assert_eq!(plain_xs.len(), text.len());
+        for (i, (plain_x, tracked_x)) in plain_xs.iter().zip(&tracked_xs).enumerate() {
+            assert!((*tracked_x - (*plain_x - px(0.5 * i as f32))).abs() < px(0.01));
+        }
+        assert!((tracked.width - (plain.width - px(0.5 * text.len() as f32))).abs() < px(0.01));
+    }
+
+    #[test]
     fn test_layout_line_zwnj_insertion() {
         let fonts = MacTextSystem::new();
         let font_id = fonts.font_id(&font("Helvetica")).unwrap();
 
         let text = "hello world";
         let font_runs = &[
-            FontRun { font_id, len: 5 }, // "hello"
-            FontRun { font_id, len: 6 }, // " world"
+            FontRun {
+                font_id,
+                len: 5,
+                letter_spacing: px(0.),
+            }, // "hello"
+            FontRun {
+                font_id,
+                len: 6,
+                letter_spacing: px(0.),
+            }, // " world"
         ];
 
         let layout = fonts.layout_line(text, px(16.), font_runs);
@@ -783,11 +835,16 @@ mod tests {
         // Test with different font runs - should not insert ZWNJ
         let font_id2 = fonts.font_id(&font("Times")).unwrap_or(font_id);
         let font_runs_different = &[
-            FontRun { font_id, len: 5 }, // "hello"
+            FontRun {
+                font_id,
+                len: 5,
+                letter_spacing: px(0.),
+            }, // "hello"
             // " world"
             FontRun {
                 font_id: font_id2,
                 len: 6,
+                letter_spacing: px(0.),
             },
         ];
 
@@ -812,15 +869,31 @@ mod tests {
         let font_id = fonts.font_id(&font("Helvetica")).unwrap();
 
         let text = "hello";
-        let font_runs = &[FontRun { font_id, len: 5 }];
+        let font_runs = &[FontRun {
+            font_id,
+            len: 5,
+            letter_spacing: px(0.),
+        }];
         let layout = fonts.layout_line(text, px(16.), font_runs);
         assert_eq!(layout.len, text.len());
 
         let text = "abc";
         let font_runs = &[
-            FontRun { font_id, len: 1 }, // "a"
-            FontRun { font_id, len: 1 }, // "b"
-            FontRun { font_id, len: 1 }, // "c"
+            FontRun {
+                font_id,
+                len: 1,
+                letter_spacing: px(0.),
+            }, // "a"
+            FontRun {
+                font_id,
+                len: 1,
+                letter_spacing: px(0.),
+            }, // "b"
+            FontRun {
+                font_id,
+                len: 1,
+                letter_spacing: px(0.),
+            }, // "c"
         ];
         let layout = fonts.layout_line(text, px(16.), font_runs);
         assert_eq!(layout.len, text.len());

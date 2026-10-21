@@ -1,7 +1,7 @@
 use crate::{
     App, Bounds, Half, Hsla, LineLayout, Pixels, Point, Result, SharedString, StrikethroughStyle,
-    TextAlign, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black, fill, point, px,
-    size,
+    TextAlign, TextShadow, UnderlineStyle, Window, WrapBoundary, WrappedLineLayout, black, fill,
+    point, px, size,
 };
 use derive_more::{Deref, DerefMut};
 use smallvec::SmallVec;
@@ -75,6 +75,7 @@ impl ShapedLine {
             None,
             &self.decoration_runs,
             &[],
+            None,
             window,
             cx,
         )?;
@@ -147,11 +148,43 @@ impl WrappedLine {
             align_width,
             &self.decoration_runs,
             &self.wrap_boundaries,
+            None,
             window,
             cx,
         )?;
 
         Ok(())
+    }
+
+    /// Paint a shadow of this line's glyphs, to go under [`Self::paint`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_shadow(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        align: TextAlign,
+        bounds: Option<Bounds<Pixels>>,
+        shadow: &TextShadow,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        let align_width = match bounds {
+            Some(bounds) => Some(bounds.size.width),
+            None => self.layout.wrap_width,
+        };
+
+        paint_line(
+            origin,
+            &self.layout.unwrapped_layout,
+            line_height,
+            align,
+            align_width,
+            &[],
+            &self.wrap_boundaries,
+            Some(shadow),
+            window,
+            cx,
+        )
     }
 
     /// Paint the background of line of text to the window.
@@ -185,6 +218,7 @@ impl WrappedLine {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_line(
     origin: Point<Pixels>,
     layout: &LineLayout,
@@ -193,16 +227,21 @@ fn paint_line(
     align_width: Option<Pixels>,
     decoration_runs: &[DecorationRun],
     wrap_boundaries: &[WrapBoundary],
+    shadow: Option<&TextShadow>,
     window: &mut Window,
     cx: &mut App,
 ) -> Result<()> {
-    let line_bounds = Bounds::new(
+    let mut line_bounds = Bounds::new(
         origin,
         size(
             layout.width,
             line_height * (wrap_boundaries.len() as f32 + 1.),
         ),
     );
+    if let Some(shadow) = shadow {
+        line_bounds.origin += shadow.offset;
+        line_bounds = line_bounds.dilate(shadow.blur_radius);
+    }
     window.paint_layer(line_bounds, |window| {
         let padding_top = (line_height - layout.ascent - layout.descent) / 2.;
         let baseline_offset = point(px(0.), padding_top + layout.ascent);
@@ -368,7 +407,22 @@ fn paint_line(
                 };
 
                 let content_mask = window.content_mask();
-                if max_glyph_bounds.intersects(&content_mask.bounds) {
+                if let Some(shadow) = shadow {
+                    let shadow_bounds = Bounds {
+                        origin: glyph_origin + shadow.offset,
+                        size: max_glyph_size,
+                    }
+                    .dilate(shadow.blur_radius);
+                    if !glyph.is_emoji && shadow_bounds.intersects(&content_mask.bounds) {
+                        window.paint_glyph_shadow(
+                            glyph_origin + baseline_offset + shadow.offset,
+                            run.font_id,
+                            glyph.id,
+                            layout.font_size,
+                            shadow,
+                        )?;
+                    }
+                } else if max_glyph_bounds.intersects(&content_mask.bounds) {
                     if glyph.is_emoji {
                         window.paint_emoji(
                             glyph_origin + baseline_offset,

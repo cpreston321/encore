@@ -12,7 +12,10 @@ use crate::{
     app::{Account, Load, MusicApp, Route, SIDEBAR_W, SeeAllItems},
     model::{Album, ArtColors, Artwork, Playlist, Song, format_date},
     theme::{Palette, Theme},
-    ui::{GAP, PAD, explicit_badge, icon, icon_button, pill_button, scroll_row, skeleton_detail, skeleton_rows},
+    ui::{
+        GAP, PAD, explicit_badge, icon, icon_button, pill_button, scroll_row, skeleton_detail, skeleton_rows,
+        text_shadow_on_art, tracking,
+    },
 };
 
 /// A click handler stored for later (header subtitle, add button).
@@ -275,8 +278,10 @@ impl MusicApp {
                             .text_center()
                             .text_size(px(64.))
                             .line_height(px(68.))
+                            .tracking(tracking(64.))
                             .font_weight(FontWeight::BLACK)
                             .text_color(white())
+                            .text_shadow(text_shadow_on_art())
                             .line_clamp(2)
                             .child(detail.artist.name.clone()),
                     )
@@ -523,6 +528,7 @@ impl MusicApp {
                             .flex_col()
                             .gap_0p5()
                             .text_color(white())
+                            .text_shadow(text_shadow_on_art())
                             .child(
                                 div()
                                     .text_size(px(11.))
@@ -542,6 +548,7 @@ impl MusicApp {
                                             .flex_shrink()
                                             .truncate()
                                             .text_size(px(17.))
+                                            .tracking(tracking(17.))
                                             .font_weight(FontWeight::BOLD)
                                             .child(album.title.clone()),
                                     )
@@ -679,8 +686,10 @@ impl MusicApp {
                             .text_center()
                             .text_size(px(28.))
                             .line_height(px(34.))
+                            .tracking(tracking(28.))
                             .font_weight(FontWeight::BOLD)
                             .line_clamp(2)
+                            .text_ellipsis()
                             .child(title),
                     )
                     .children(subtitle)
@@ -872,6 +881,7 @@ impl MusicApp {
                         .pt_7()
                         .pb_2p5()
                         .text_size(px(19.))
+                        .tracking(tracking(19.))
                         .font_weight(FontWeight::BOLD)
                         .child(format!("More by {}", album.artist)),
                 )
@@ -1102,6 +1112,7 @@ impl MusicApp {
                             .text_center()
                             .text_size(px(42.))
                             .line_height(px(46.))
+                            .tracking(tracking(42.))
                             .font_weight(FontWeight::BLACK)
                             .line_clamp(2)
                             .child(name.to_string()),

@@ -320,6 +320,17 @@ pub struct BoxShadow {
     pub spread_radius: Pixels,
 }
 
+/// A shadow drawn under text, like CSS `text-shadow`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TextShadow {
+    /// The color of the shadow.
+    pub color: Hsla,
+    /// How far the shadow is offset from the text.
+    pub offset: Point<Pixels>,
+    /// The blur radius, as in CSS: the shadow fades out over about this distance.
+    pub blur_radius: Pixels,
+}
+
 /// How to handle whitespace in text
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum WhiteSpace {
@@ -400,6 +411,12 @@ pub struct TextStyle {
 
     /// The number of lines to display before truncating the text
     pub line_clamp: Option<usize>,
+
+    /// Extra space added after every character (tracking). Negative values tighten the text.
+    pub letter_spacing: Pixels,
+
+    /// A shadow drawn under the glyphs.
+    pub text_shadow: Option<TextShadow>,
 }
 
 impl Default for TextStyle {
@@ -421,6 +438,8 @@ impl Default for TextStyle {
             text_overflow: None,
             text_align: TextAlign::default(),
             line_clamp: None,
+            letter_spacing: Pixels::ZERO,
+            text_shadow: None,
         }
     }
 }
@@ -490,6 +509,7 @@ impl TextStyle {
             background_color: self.background_color,
             underline: self.underline,
             strikethrough: self.strikethrough,
+            letter_spacing: self.letter_spacing,
         }
     }
 }
