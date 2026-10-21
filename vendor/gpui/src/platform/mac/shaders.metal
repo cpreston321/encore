@@ -6,6 +6,7 @@ using namespace metal;
 float4 hsla_to_rgba(Hsla hsla);
 float3 srgb_to_linear(float3 color);
 float3 linear_to_srgb(float3 color);
+float3 display_p3_to_extended_srgb(float3 color);
 float4 srgb_to_oklab(float4 color);
 float4 oklab_to_srgb(float4 color);
 float4 to_device_position(float2 unit_vertex, Bounds_ScaledPixels bounds,
@@ -750,6 +751,9 @@ float4 polychrome_sprite_fragment_body(PolychromeSpriteFragmentInput input, cons
       quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
 
   float4 color = sample;
+  if (sprite.display_p3) {
+    color.rgb = display_p3_to_extended_srgb(color.rgb);
+  }
   if (sprite.grayscale) {
     float grayscale = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
     color.r = grayscale;
@@ -991,6 +995,22 @@ float3 srgb_to_linear(float3 color) {
 
 float3 linear_to_srgb(float3 color) {
   return pow(color, float3(1.0 / 2.2));
+}
+
+// The drawable is extended sRGB: components beyond 0...1 hold colors outside sRGB, with the
+// transfer function mirrored for negative values. Display P3 uses the same transfer function.
+float3 display_p3_to_extended_srgb(float3 color) {
+  float3 linear_p3 = select(pow((color + 0.055) / 1.055, float3(2.4)), color / 12.92,
+                            color <= 0.04045);
+  const float3x3 p3_to_srgb = float3x3(
+      float3(1.2249401, -0.0420569, -0.0196376),
+      float3(-0.2249404, 1.0420571, -0.0786361),
+      float3(0.0, 0.0, 1.0982735));
+  float3 linear_srgb = p3_to_srgb * linear_p3;
+  float3 magnitude = abs(linear_srgb);
+  float3 encoded = select(1.055 * pow(magnitude, float3(1.0 / 2.4)) - 0.055, magnitude * 12.92,
+                          magnitude <= 0.0031308);
+  return sign(linear_srgb) * encoded;
 }
 
 // Converts a sRGB color to the Oklab color space.
@@ -1421,7 +1441,10 @@ fragment float4 backdrop_blur_fragment(BackdropFragmentInput input [[stage_in]],
   p = clamp(p, float2(0.5), composite->low_max - 0.5);
   float3 color = blurred.sample(s, p).rgb;
   float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-  color = saturate(mix(float3(luma), color, blur->saturation) * blur->brightness);
+  // Boosting saturation mustn't push sRGB colors outside sRGB, nor wide colors further out.
+  float3 lo = min(color, 0.);
+  float3 hi = max(color, 1.);
+  color = clamp(mix(float3(luma), color, blur->saturation) * blur->brightness, lo, hi);
 
   float4 tint = hsla_to_rgba(blur->tint);
   color = mix(color, tint.rgb, tint.a);

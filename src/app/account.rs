@@ -67,11 +67,19 @@ impl MusicApp {
             let copied = cx
                 .background_executor()
                 .spawn(async move {
-                    // Re-encode so any image format works and the copy stays small.
-                    let image = image::open(&source)?.thumbnail(256, 256);
+                    use image::{ImageDecoder, ImageEncoder};
+                    // Re-encode so any image format works and the copy stays small, keeping the
+                    // color profile so photos in Display P3 aren't drawn as sRGB.
+                    let mut decoder = image::ImageReader::open(&source)?.with_guessed_format()?.into_decoder()?;
+                    let icc_profile = decoder.icc_profile().ok().flatten();
+                    let image = image::DynamicImage::from_decoder(decoder)?.thumbnail(256, 256).into_rgba8();
                     std::fs::create_dir_all(api::data_dir())?;
                     let path = api::data_dir().join("profile-photo.png");
-                    image.save(&path)?;
+                    let mut encoder = image::codecs::png::PngEncoder::new(std::io::BufWriter::new(std::fs::File::create(&path)?));
+                    if let Some(icc_profile) = icc_profile {
+                        encoder.set_icc_profile(icc_profile).ok();
+                    }
+                    encoder.write_image(image.as_raw(), image.width(), image.height(), image::ExtendedColorType::Rgba8)?;
                     anyhow::Ok(path)
                 })
                 .await;

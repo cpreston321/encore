@@ -3,11 +3,12 @@ use collections::FxHashMap;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 
-use image::{Delay, Frame, imageops::FilterType};
+use image::{Delay, DynamicImage, Frame, ImageDecoder, RgbaImage, imageops::FilterType};
 use std::{
     borrow::Cow,
     fmt,
     hash::Hash,
+    io::Cursor,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering::SeqCst},
@@ -88,12 +89,73 @@ enum ImageLevel {
     Ready(Arc<LevelPixels>),
 }
 
+/// The colorspace of an image's pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ImageColorSpace {
+    /// sRGB, like GPUI's colors. Images without a color profile are assumed to be sRGB.
+    #[default]
+    Srgb,
+    /// Display P3, which images with a profile wider than sRGB are decoded to on macOS.
+    DisplayP3,
+}
+
+/// Whether wide-gamut images keep their gamut, which needs a renderer that converts
+/// [`ImageColorSpace::DisplayP3`] sprites; elsewhere they're clipped to sRGB.
+const WIDE_GAMUT_IMAGES: bool = cfg!(all(target_os = "macos", not(feature = "macos-blade")));
+
+/// Decodes a still image to straight-alpha RGBA, applying its embedded color profile.
+pub(crate) fn decode_still_image(
+    bytes: &[u8],
+    format: image::ImageFormat,
+) -> image::ImageResult<(RgbaImage, ImageColorSpace)> {
+    let mut decoder = image::ImageReader::with_format(Cursor::new(bytes), format).into_decoder()?;
+    let icc_profile = decoder.icc_profile().ok().flatten();
+    let mut rgba = DynamicImage::from_decoder(decoder)?.into_rgba8();
+    let color_space = match icc_profile {
+        Some(icc_profile) => apply_icc_profile(&mut rgba, &icc_profile, WIDE_GAMUT_IMAGES),
+        None => ImageColorSpace::Srgb,
+    };
+    Ok((rgba, color_space))
+}
+
+/// Converts straight-alpha RGBA pixels tagged with `icc_profile` to sRGB in place, so their
+/// values mean what GPUI's colors mean. Colors outside sRGB are clipped. Returns false if the
+/// profile wasn't applied: it isn't an RGB profile, or the platform isn't macOS.
+pub fn convert_rgba_to_srgb(rgba: &mut RgbaImage, icc_profile: &[u8]) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let (width, height) = rgba.dimensions();
+        crate::platform::convert_rgba(rgba, width, height, icc_profile, false)
+            == Some(ImageColorSpace::Srgb)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (rgba, icc_profile);
+        false
+    }
+}
+
+fn apply_icc_profile(rgba: &mut RgbaImage, icc_profile: &[u8], wide_gamut: bool) -> ImageColorSpace {
+    #[cfg(target_os = "macos")]
+    {
+        let (width, height) = rgba.dimensions();
+        crate::platform::convert_rgba(rgba, width, height, icc_profile, wide_gamut)
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (rgba, icc_profile, wide_gamut);
+        ImageColorSpace::Srgb
+    }
+}
+
 /// A cached and processed image, in BGRA format
 pub struct RenderImage {
     /// The ID associated with this image
     pub id: ImageId,
     /// The scale factor of this image on render.
     pub(crate) scale_factor: f32,
+    color_space: ImageColorSpace,
     data: SmallVec<[Frame; 1]>,
     levels: Mutex<FxHashMap<u32, ImageLevel>>,
 }
@@ -114,9 +176,21 @@ impl RenderImage {
         Self {
             id: ImageId(NEXT_ID.fetch_add(1, SeqCst)),
             scale_factor: 1.0,
+            color_space: ImageColorSpace::Srgb,
             data: data.into(),
             levels: Mutex::default(),
         }
+    }
+
+    /// Marks the pixels as being in `color_space` rather than sRGB.
+    pub fn with_color_space(mut self, color_space: ImageColorSpace) -> Self {
+        self.color_space = color_space;
+        self
+    }
+
+    /// The colorspace of the pixels, which the renderer converts from.
+    pub fn color_space(&self) -> ImageColorSpace {
+        self.color_space
     }
 
     /// Convert this image into a byte slice.

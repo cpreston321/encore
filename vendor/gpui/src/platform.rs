@@ -1752,11 +1752,10 @@ impl Image {
 
     /// Convert the clipboard image to an `ImageData` object.
     pub fn to_image_data(&self, svg_renderer: SvgRenderer) -> Result<Arc<RenderImage>> {
-        fn frames_for_image(
-            bytes: &[u8],
-            format: image::ImageFormat,
-        ) -> Result<SmallVec<[Frame; 1]>> {
-            let mut data = image::load_from_memory_with_format(bytes, format)?.into_rgba8();
+        let mut color_space = crate::ImageColorSpace::Srgb;
+        let mut frames_for_image = |bytes: &[u8], format: image::ImageFormat| -> Result<SmallVec<[Frame; 1]>> {
+            let (mut data, space) = crate::decode_still_image(bytes, format)?;
+            color_space = space;
 
             // Convert from RGBA to BGRA.
             for pixel in data.chunks_exact_mut(4) {
@@ -1764,7 +1763,7 @@ impl Image {
             }
 
             Ok(SmallVec::from_elem(Frame::new(data), 1))
-        }
+        };
 
         let frames = match self.format {
             ImageFormat::Gif => {
@@ -1798,7 +1797,7 @@ impl Image {
             }
         };
 
-        Ok(Arc::new(RenderImage::new(frames)))
+        Ok(Arc::new(RenderImage::new(frames).with_color_space(color_space)))
     }
 
     /// Get the format of the clipboard image

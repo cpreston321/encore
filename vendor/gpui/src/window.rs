@@ -3,7 +3,7 @@ use crate::Inspector;
 use crate::SpriteMotion;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
-    AsyncWindowContext, AtlasTextureId, AtlasTile, TileId, level_for, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
+    AsyncWindowContext, AtlasTextureId, AtlasTile, ImageColorSpace, TileId, level_for, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
     Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener, FramePhase,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, Hsla, InputHandler, IsZero,
@@ -3544,6 +3544,7 @@ impl Window {
                 order: 0,
                 pad: 0,
                 grayscale: false,
+                display_p3: false,
                 bounds,
                 corner_radii: Default::default(),
                 content_mask,
@@ -3650,7 +3651,8 @@ impl Window {
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
         let tile = self.full_image_tile(&data, frame_index)?;
-        self.insert_image_sprite(bounds, corner_radii, tile, grayscale, texture_crop, motion);
+        let display_p3 = data.color_space() == ImageColorSpace::DisplayP3;
+        self.insert_image_sprite(bounds, corner_radii, tile, grayscale, display_p3, texture_crop, motion);
         Ok(())
     }
 
@@ -3725,7 +3727,8 @@ impl Window {
             Some(tile) => tile,
             None => self.full_image_tile(&data, frame_index)?,
         };
-        self.insert_image_sprite(bounds, corner_radii, tile, grayscale, texture_crop, motion);
+        let display_p3 = data.color_space() == ImageColorSpace::DisplayP3;
+        self.insert_image_sprite(bounds, corner_radii, tile, grayscale, display_p3, texture_crop, motion);
         Ok(())
     }
 
@@ -3805,12 +3808,14 @@ impl Window {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn insert_image_sprite(
         &mut self,
         bounds: Bounds<Pixels>,
         corner_radii: Corners<Pixels>,
         tile: AtlasTile,
         grayscale: bool,
+        display_p3: bool,
         texture_crop: Option<Bounds<f32>>,
         motion: Option<SpriteMotion>,
     ) {
@@ -3824,6 +3829,7 @@ impl Window {
             order: 0,
             pad: 0,
             grayscale,
+            display_p3,
             bounds: bounds
                 .map_origin(|origin| origin.floor())
                 .map_size(|size| size.ceil()),

@@ -187,7 +187,14 @@ fn fetch_art(url: &str) -> Result<std::path::PathBuf> {
 }
 
 fn average_color(path: &std::path::Path) -> Option<gpui::Hsla> {
-    let pixels = image::open(path).ok()?.thumbnail(16, 16).to_rgb8();
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.into_decoder().ok()?;
+    let icc_profile = decoder.icc_profile().ok().flatten();
+    let mut pixels = image::DynamicImage::from_decoder(decoder).ok()?.thumbnail(16, 16).to_rgba8();
+    // Artwork can be tagged Display P3, and Hsla is sRGB.
+    if let Some(icc_profile) = icc_profile {
+        gpui::convert_rgba_to_srgb(&mut pixels, &icc_profile);
+    }
     let n = (pixels.width() * pixels.height()) as f32;
     let [mut r, mut g, mut b] = [0f32; 3];
     for p in pixels.pixels() {

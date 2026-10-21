@@ -19,8 +19,9 @@ use core_video::{
     pixel_buffer::kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
 };
 use foreign_types::{ForeignType, ForeignTypeRef};
+use core_graphics::color_space::{CGColorSpace, kCGColorSpaceExtendedSRGB};
 use metal::{
-    CAMetalLayer, CommandQueue, MTLPixelFormat, MTLResourceOptions, NSRange,
+    CAMetalLayer, CommandQueue, MTLGPUFamily, MTLPixelFormat, MTLResourceOptions, NSRange,
     RenderPassColorAttachmentDescriptorRef,
 };
 use objc::{self, msg_send, sel, sel_impl};
@@ -47,9 +48,9 @@ pub unsafe fn new_renderer(
     _native_window: *mut c_void,
     _native_view: *mut c_void,
     _bounds: crate::Size<f32>,
-    _transparent: bool,
+    transparent: bool,
 ) -> Renderer {
-    MetalRenderer::new(context)
+    MetalRenderer::new(context, transparent)
 }
 
 pub(crate) struct InstanceBufferPool {
@@ -102,17 +103,9 @@ pub(crate) struct MetalRenderer {
     layer: metal::MetalLayer,
     presents_with_transaction: bool,
     command_queue: CommandQueue,
+    library: metal::Library,
     paths_rasterization_pipeline_state: metal::RenderPipelineState,
-    path_sprites_pipeline_state: metal::RenderPipelineState,
-    shadows_pipeline_state: metal::RenderPipelineState,
-    quads_pipeline_state: metal::RenderPipelineState,
-    underlines_pipeline_state: metal::RenderPipelineState,
-    monochrome_sprites_pipeline_state: metal::RenderPipelineState,
-    polychrome_sprites_pipeline_state: metal::RenderPipelineState,
-    surfaces_pipeline_state: metal::RenderPipelineState,
-    blur_downsample_pipeline_state: metal::RenderPipelineState,
-    blur_gaussian_pipeline_state: metal::RenderPipelineState,
-    backdrop_blur_pipeline_state: metal::RenderPipelineState,
+    pipelines: DrawablePipelines,
     /// Scratch textures for backdrop blurs, kept between frames: the copy of the drawable,
     /// and a shrunken one for the first of the two blur passes.
     blur_textures: Option<BlurTextures>,
@@ -176,7 +169,7 @@ pub struct PathRasterizationVertex {
 }
 
 impl MetalRenderer {
-    pub fn new(instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>) -> Self {
+    pub fn new(instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>, transparent: bool) -> Self {
         // Prefer low‐power integrated GPUs on Intel Mac. On Apple
         // Silicon, there is only ever one GPU, so this is equivalent to
         // `metal::Device::system_default()`.
@@ -189,8 +182,15 @@ impl MetalRenderer {
 
         let layer = metal::MetalLayer::new();
         layer.set_device(&device);
-        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        layer.set_opaque(false);
+        // Without a colorspace the compositor doesn't color-match the drawable, so sRGB colors
+        // show as the display's own primaries, oversaturated on wide-gamut displays.
+        if let Some(extended_srgb) =
+            CGColorSpace::create_with_name(unsafe { kCGColorSpaceExtendedSRGB })
+        {
+            unsafe {
+                let _: () = msg_send![&*layer, setColorspace: extended_srgb.as_ptr()];
+            }
+        }
         layer.set_maximum_drawable_count(3);
         // Backdrop blurs read the drawable back.
         layer.set_framebuffer_only(false);
@@ -242,87 +242,10 @@ impl MetalRenderer {
             MTLPixelFormat::BGRA8Unorm,
             PATH_SAMPLE_COUNT,
         );
-        let path_sprites_pipeline_state = build_path_sprite_pipeline_state(
-            &device,
-            &library,
-            "path_sprites",
-            "path_sprite_vertex",
-            "path_sprite_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let shadows_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "shadows",
-            "shadow_vertex",
-            "shadow_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let quads_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "quads",
-            "quad_vertex",
-            "quad_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let underlines_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "underlines",
-            "underline_vertex",
-            "underline_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let monochrome_sprites_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "monochrome_sprites",
-            "monochrome_sprite_vertex",
-            "monochrome_sprite_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let polychrome_sprites_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "polychrome_sprites",
-            "polychrome_sprite_vertex",
-            "polychrome_sprite_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let surfaces_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "surfaces",
-            "surface_vertex",
-            "surface_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-
-        let blur_downsample_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "blur_downsample",
-            "blur_pass_vertex",
-            "blur_downsample_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let blur_gaussian_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "blur_gaussian",
-            "blur_pass_vertex",
-            "blur_gaussian_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
-        let backdrop_blur_pipeline_state = build_pipeline_state(
-            &device,
-            &library,
-            "backdrop_blur",
-            "backdrop_blur_vertex",
-            "backdrop_blur_fragment",
-            MTLPixelFormat::BGRA8Unorm,
-        );
+        let format = drawable_format(&device, transparent);
+        layer.set_pixel_format(format);
+        layer.set_opaque(!has_alpha(format));
+        let pipelines = DrawablePipelines::new(&device, &library, format);
 
         let command_queue = device.new_command_queue();
         let sprite_atlas = Arc::new(MetalAtlas::new(device.clone()));
@@ -334,17 +257,9 @@ impl MetalRenderer {
             layer,
             presents_with_transaction: false,
             command_queue,
+            library,
             paths_rasterization_pipeline_state,
-            path_sprites_pipeline_state,
-            shadows_pipeline_state,
-            quads_pipeline_state,
-            underlines_pipeline_state,
-            monochrome_sprites_pipeline_state,
-            polychrome_sprites_pipeline_state,
-            surfaces_pipeline_state,
-            blur_downsample_pipeline_state,
-            blur_gaussian_pipeline_state,
-            backdrop_blur_pipeline_state,
+            pipelines,
             blur_textures: None,
             blur_cache: Vec::new(),
             blur_spares: Vec::new(),
@@ -423,8 +338,17 @@ impl MetalRenderer {
         }
     }
 
-    pub fn update_transparency(&self, _transparent: bool) {
-        // todo(mac)?
+    pub fn update_transparency(&mut self, transparent: bool) {
+        let format = drawable_format(&self.device, transparent);
+        if format == self.layer.pixel_format() {
+            return;
+        }
+        self.layer.set_pixel_format(format);
+        self.layer.set_opaque(!has_alpha(format));
+        self.pipelines = DrawablePipelines::new(&self.device, &self.library, format);
+        self.blur_textures = None;
+        self.blur_cache.clear();
+        self.blur_spares.clear();
     }
 
     pub fn destroy(&self) {
@@ -452,7 +376,7 @@ impl MetalRenderer {
             let mut instance_buffer = self.instance_buffer_pool.lock().acquire(&self.device);
 
             let command_buffer =
-                self.draw_primitives(scene, &mut instance_buffer, drawable, viewport_size);
+                self.draw_primitives(scene, &mut instance_buffer, drawable.texture(), viewport_size);
 
             match command_buffer {
                 Ok(command_buffer) => {
@@ -507,7 +431,7 @@ impl MetalRenderer {
         &mut self,
         scene: &Scene,
         instance_buffer: &mut InstanceBuffer,
-        drawable: &metal::MetalDrawableRef,
+        target: &metal::TextureRef,
         viewport_size: Size<DevicePixels>,
     ) -> Result<metal::CommandBuffer> {
         let command_queue = self.command_queue.clone();
@@ -525,7 +449,7 @@ impl MetalRenderer {
 
         let mut command_encoder = new_command_encoder(
             command_buffer,
-            drawable,
+            target,
             viewport_size,
             |color_attachment| {
                 color_attachment.set_load_action(metal::MTLLoadAction::Clear);
@@ -562,7 +486,7 @@ impl MetalRenderer {
 
                     command_encoder = new_command_encoder(
                         command_buffer,
-                        drawable,
+                        target,
                         viewport_size,
                         |color_attachment| {
                             color_attachment.set_load_action(metal::MTLLoadAction::Load);
@@ -628,14 +552,14 @@ impl MetalRenderer {
                             signature,
                             &mut previous_blurs,
                             command_buffer,
-                            drawable,
+                            target,
                             viewport_size,
                         );
                         blurs_reused += reused as u32;
                     }
                     command_encoder = new_command_encoder(
                         command_buffer,
-                        drawable,
+                        target,
                         viewport_size,
                         |color_attachment| {
                             color_attachment.set_load_action(metal::MTLLoadAction::Load);
@@ -685,7 +609,7 @@ impl MetalRenderer {
         signature: Option<u64>,
         previous: &mut Vec<CachedBlur>,
         command_buffer: &metal::CommandBufferRef,
-        drawable: &metal::MetalDrawableRef,
+        target: &metal::TextureRef,
         viewport_size: Size<DevicePixels>,
     ) -> bool {
         let (vw, vh) = (
@@ -727,16 +651,16 @@ impl MetalRenderer {
             None => {
                 let mut cached = self.take_blur_texture(lw, lh);
                 cached.key = key;
-                self.blur_backdrop(&cached.texture, (w, h), (lw, lh), [x0, y0], downsample, sigma, command_buffer, drawable);
+                self.blur_backdrop(&cached.texture, (w, h), (lw, lh), [x0, y0], downsample, sigma, command_buffer, target);
                 cached
             }
         };
 
         let encoder =
-            new_command_encoder(command_buffer, drawable, viewport_size, |color_attachment| {
+            new_command_encoder(command_buffer, target, viewport_size, |color_attachment| {
                 color_attachment.set_load_action(metal::MTLLoadAction::Load);
             });
-        encoder.set_render_pipeline_state(&self.backdrop_blur_pipeline_state);
+        encoder.set_render_pipeline_state(&self.pipelines.backdrop_blur);
         encoder.set_vertex_buffer(0, Some(&self.unit_vertices), 0);
         encoder.set_vertex_bytes(
             1,
@@ -767,19 +691,19 @@ impl MetalRenderer {
         reused.is_some()
     }
 
-    /// Copies the `w` × `h` pixels of the drawable at `origin`, shrinks them by `downsample`
-    /// into `target`, and blurs them there.
+    /// Copies the `w` × `h` pixels of `source` at `origin`, shrinks them by `downsample`
+    /// into `output`, and blurs them there.
     #[allow(clippy::too_many_arguments)]
     fn blur_backdrop(
         &mut self,
-        target: &metal::TextureRef,
+        output: &metal::TextureRef,
         (w, h): (u64, u64),
         (lw, lh): (u64, u64),
         origin: [f32; 2],
         downsample: u64,
         sigma: f32,
         command_buffer: &metal::CommandBufferRef,
-        drawable: &metal::MetalDrawableRef,
+        source: &metal::TextureRef,
     ) {
         let (x0, y0) = (origin[0], origin[1]);
         self.ensure_blur_textures(w, h, lw, lh);
@@ -789,7 +713,7 @@ impl MetalRenderer {
 
         let blit = command_buffer.new_blit_command_encoder();
         blit.copy_from_texture(
-            drawable.texture(),
+            source,
             0,
             0,
             metal::MTLOrigin { x: x0 as u64, y: y0 as u64, z: 0 },
@@ -832,9 +756,9 @@ impl MetalRenderer {
         let d = downsample as f32;
         let low_max = [lw as f32, lh as f32];
         pass(
-            &self.blur_downsample_pipeline_state,
+            &self.pipelines.blur_downsample,
             &textures.capture,
-            target,
+            output,
             BlurPass {
                 source_scale: [d, d],
                 source_max: [w as f32, h as f32],
@@ -844,10 +768,10 @@ impl MetalRenderer {
             },
         );
         for (source, destination, direction) in
-            [(target, &*textures.low, [1., 0.]), (&*textures.low, target, [0., 1.])]
+            [(output, &*textures.low, [1., 0.]), (&*textures.low, output, [0., 1.])]
         {
             pass(
-                &self.blur_gaussian_pipeline_state,
+                &self.pipelines.blur_gaussian,
                 source,
                 destination,
                 BlurPass { source_scale: [1., 1.], source_max: low_max, direction, sigma, _pad: 0. },
@@ -868,7 +792,7 @@ impl MetalRenderer {
         let descriptor = metal::TextureDescriptor::new();
         descriptor.set_width(width);
         descriptor.set_height(height);
-        descriptor.set_pixel_format(metal::MTLPixelFormat::BGRA8Unorm);
+        descriptor.set_pixel_format(self.layer.pixel_format());
         descriptor.set_storage_mode(metal::MTLStorageMode::Private);
         descriptor.set_usage(metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead);
         self.device.new_texture(&descriptor)
@@ -994,7 +918,7 @@ impl MetalRenderer {
         }
         align_offset(instance_offset);
 
-        command_encoder.set_render_pipeline_state(&self.shadows_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.shadows);
         command_encoder.set_vertex_buffer(
             ShadowInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1057,7 +981,7 @@ impl MetalRenderer {
         }
         align_offset(instance_offset);
 
-        command_encoder.set_render_pipeline_state(&self.quads_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.quads);
         command_encoder.set_vertex_buffer(
             QuadInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1119,7 +1043,7 @@ impl MetalRenderer {
             return false;
         };
 
-        command_encoder.set_render_pipeline_state(&self.path_sprites_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.path_sprites);
         command_encoder.set_vertex_buffer(
             SpriteInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1206,7 +1130,7 @@ impl MetalRenderer {
         }
         align_offset(instance_offset);
 
-        command_encoder.set_render_pipeline_state(&self.underlines_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.underlines);
         command_encoder.set_vertex_buffer(
             UnderlineInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1284,7 +1208,7 @@ impl MetalRenderer {
             DevicePixels(texture.width() as i32),
             DevicePixels(texture.height() as i32),
         );
-        command_encoder.set_render_pipeline_state(&self.monochrome_sprites_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.monochrome_sprites);
         command_encoder.set_vertex_buffer(
             SpriteInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1351,7 +1275,7 @@ impl MetalRenderer {
             DevicePixels(texture.width() as i32),
             DevicePixels(texture.height() as i32),
         );
-        command_encoder.set_render_pipeline_state(&self.polychrome_sprites_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.polychrome_sprites);
         command_encoder.set_vertex_bytes(
             SpriteInputIndex::MotionTime as u64,
             mem::size_of::<f32>() as u64,
@@ -1419,7 +1343,7 @@ impl MetalRenderer {
         viewport_size: Size<DevicePixels>,
         command_encoder: &metal::RenderCommandEncoderRef,
     ) -> bool {
-        command_encoder.set_render_pipeline_state(&self.surfaces_pipeline_state);
+        command_encoder.set_render_pipeline_state(&self.pipelines.surfaces);
         command_encoder.set_vertex_buffer(
             SurfaceInputIndex::Vertices as u64,
             Some(&self.unit_vertices),
@@ -1513,7 +1437,7 @@ impl MetalRenderer {
 
 fn new_command_encoder<'a>(
     command_buffer: &'a metal::CommandBufferRef,
-    drawable: &'a metal::MetalDrawableRef,
+    target: &'a metal::TextureRef,
     viewport_size: Size<DevicePixels>,
     configure_color_attachment: impl Fn(&RenderPassColorAttachmentDescriptorRef),
 ) -> &'a metal::RenderCommandEncoderRef {
@@ -1522,7 +1446,7 @@ fn new_command_encoder<'a>(
         .color_attachments()
         .object_at(0)
         .unwrap();
-    color_attachment.set_texture(Some(drawable.texture()));
+    color_attachment.set_texture(Some(target));
     color_attachment.set_store_action(metal::MTLStoreAction::Store);
     configure_color_attachment(color_attachment);
 
@@ -1536,6 +1460,134 @@ fn new_command_encoder<'a>(
         zfar: 1.0,
     });
     command_encoder
+}
+
+/// The pipelines that draw into the drawable, built for its pixel format.
+struct DrawablePipelines {
+    path_sprites: metal::RenderPipelineState,
+    shadows: metal::RenderPipelineState,
+    quads: metal::RenderPipelineState,
+    underlines: metal::RenderPipelineState,
+    monochrome_sprites: metal::RenderPipelineState,
+    polychrome_sprites: metal::RenderPipelineState,
+    surfaces: metal::RenderPipelineState,
+    blur_downsample: metal::RenderPipelineState,
+    blur_gaussian: metal::RenderPipelineState,
+    backdrop_blur: metal::RenderPipelineState,
+}
+
+impl DrawablePipelines {
+    fn new(device: &metal::DeviceRef, library: &metal::LibraryRef, format: MTLPixelFormat) -> Self {
+        let path_sprites = build_path_sprite_pipeline_state(
+            device,
+            library,
+            "path_sprites",
+            "path_sprite_vertex",
+            "path_sprite_fragment",
+            format,
+        );
+        let shadows = build_pipeline_state(
+            device,
+            library,
+            "shadows",
+            "shadow_vertex",
+            "shadow_fragment",
+            format,
+        );
+        let quads = build_pipeline_state(
+            device,
+            library,
+            "quads",
+            "quad_vertex",
+            "quad_fragment",
+            format,
+        );
+        let underlines = build_pipeline_state(
+            device,
+            library,
+            "underlines",
+            "underline_vertex",
+            "underline_fragment",
+            format,
+        );
+        let monochrome_sprites = build_pipeline_state(
+            device,
+            library,
+            "monochrome_sprites",
+            "monochrome_sprite_vertex",
+            "monochrome_sprite_fragment",
+            format,
+        );
+        let polychrome_sprites = build_pipeline_state(
+            device,
+            library,
+            "polychrome_sprites",
+            "polychrome_sprite_vertex",
+            "polychrome_sprite_fragment",
+            format,
+        );
+        let surfaces = build_pipeline_state(
+            device,
+            library,
+            "surfaces",
+            "surface_vertex",
+            "surface_fragment",
+            format,
+        );
+
+        let blur_downsample = build_pipeline_state(
+            device,
+            library,
+            "blur_downsample",
+            "blur_pass_vertex",
+            "blur_downsample_fragment",
+            format,
+        );
+        let blur_gaussian = build_pipeline_state(
+            device,
+            library,
+            "blur_gaussian",
+            "blur_pass_vertex",
+            "blur_gaussian_fragment",
+            format,
+        );
+        let backdrop_blur = build_pipeline_state(
+            device,
+            library,
+            "backdrop_blur",
+            "backdrop_blur_vertex",
+            "backdrop_blur_fragment",
+            format,
+        );
+        Self {
+            path_sprites,
+            shadows,
+            quads,
+            underlines,
+            monochrome_sprites,
+            polychrome_sprites,
+            surfaces,
+            blur_downsample,
+            blur_gaussian,
+            backdrop_blur,
+        }
+    }
+}
+
+/// The drawable holds extended sRGB: sRGB colors keep their values, and wide-gamut images
+/// reach outside 0...1. BGR10_XR is as small as BGRA8Unorm and holds every 8-bit sRGB value
+/// exactly, but it has no alpha and only Apple GPUs have it, so transparent windows and
+/// other GPUs use half floats, which take twice the memory.
+fn drawable_format(device: &metal::DeviceRef, transparent: bool) -> MTLPixelFormat {
+    if !transparent && device.supports_family(MTLGPUFamily::Apple3) {
+        MTLPixelFormat::BGR10_XR
+    } else {
+        MTLPixelFormat::RGBA16Float
+    }
+}
+
+fn has_alpha(format: MTLPixelFormat) -> bool {
+    format != MTLPixelFormat::BGR10_XR
 }
 
 fn build_pipeline_state(
@@ -1708,4 +1760,204 @@ pub struct PathSprite {
 pub struct SurfaceBounds {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AtlasKey, Corners, Hsla, ImageId, PlatformAtlas, RenderImageParams, SpriteMotion, rgb};
+    use std::borrow::Cow;
+
+    const SIDE: i32 = 4;
+
+    fn rect(x: i32) -> Bounds<ScaledPixels> {
+        Bounds::new(
+            point(ScaledPixels(x as f32), ScaledPixels(0.)),
+            size(ScaledPixels(SIDE as f32), ScaledPixels(SIDE as f32)),
+        )
+    }
+
+    fn full_mask() -> ContentMask<ScaledPixels> {
+        ContentMask {
+            bounds: Bounds::new(point(ScaledPixels(0.), ScaledPixels(0.)), size(ScaledPixels(1e4), ScaledPixels(1e4))),
+            corner_radii: Corners::default(),
+        }
+    }
+
+    fn quad(x: i32, color: Hsla) -> Quad {
+        Quad {
+            order: 0,
+            border_style: Default::default(),
+            bounds: rect(x),
+            content_mask: full_mask(),
+            background: color.into(),
+            border_color: Default::default(),
+            corner_radii: Default::default(),
+            border_widths: Default::default(),
+        }
+    }
+
+    fn sprite(renderer: &MetalRenderer, id: usize, x: i32, bgra: [u8; 4], display_p3: bool) -> PolychromeSprite {
+        let bytes: Vec<u8> = bgra.repeat((SIDE * SIDE) as usize);
+        let key = AtlasKey::Image(RenderImageParams { image_id: ImageId(usize::MAX - id), frame_index: 0, level: 0 });
+        let tile = renderer
+            .sprite_atlas
+            .get_or_insert_with(&key, &mut || {
+                Ok(Some((size(DevicePixels(SIDE), DevicePixels(SIDE)), Cow::Owned(bytes.clone()))))
+            })
+            .unwrap()
+            .unwrap();
+        PolychromeSprite {
+            order: 0,
+            pad: 0,
+            grayscale: false,
+            display_p3,
+            opacity: 1.,
+            bounds: rect(x),
+            content_mask: full_mask(),
+            corner_radii: Default::default(),
+            tile,
+            texture_crop: PolychromeSprite::WHOLE_TEXTURE,
+            motion: SpriteMotion::default(),
+        }
+    }
+
+    /// Renders `scene` into an offscreen texture in the drawable's format and returns the
+    /// center pixel of each `SIDE`-wide column.
+    fn render(renderer: &mut MetalRenderer, scene: &Scene, columns: i32) -> Vec<[f32; 3]> {
+        let format = renderer.layer.pixel_format();
+        let width = SIDE * columns;
+        let descriptor = metal::TextureDescriptor::new();
+        descriptor.set_width(width as u64);
+        descriptor.set_height(SIDE as u64);
+        descriptor.set_pixel_format(format);
+        descriptor.set_storage_mode(metal::MTLStorageMode::Managed);
+        descriptor.set_usage(metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead);
+        let target = renderer.device.new_texture(&descriptor);
+        let viewport = size(DevicePixels(width), DevicePixels(SIDE));
+        renderer.update_path_intermediate_textures(viewport);
+
+        let mut instance_buffer = renderer.instance_buffer_pool.lock().acquire(&renderer.device);
+        let command_buffer = renderer
+            .draw_primitives(scene, &mut instance_buffer, &target, viewport)
+            .unwrap();
+        let blit = command_buffer.new_blit_command_encoder();
+        blit.synchronize_resource(&target);
+        blit.end_encoding();
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+
+        let bytes_per_pixel = if format == MTLPixelFormat::RGBA16Float { 8 } else { 4 };
+        let mut pixels = vec![0u8; (width * SIDE) as usize * bytes_per_pixel];
+        target.get_bytes(
+            pixels.as_mut_ptr().cast(),
+            (width as usize * bytes_per_pixel) as u64,
+            metal::MTLRegion::new_2d(0, 0, width as u64, SIDE as u64),
+            0,
+        );
+        let row = (SIDE / 2) as usize * width as usize * bytes_per_pixel;
+        (0..columns)
+            .map(|column| {
+                let at = row + (column * SIDE + SIDE / 2) as usize * bytes_per_pixel;
+                let pixel = &pixels[at..at + bytes_per_pixel];
+                if format == MTLPixelFormat::RGBA16Float {
+                    let half = |i: usize| f16_to_f32(u16::from_le_bytes([pixel[2 * i], pixel[2 * i + 1]]));
+                    [half(0), half(1), half(2)]
+                } else {
+                    // BGR10_XR: 384 is 0 and 894 is 1.
+                    let packed = u32::from_le_bytes(pixel.try_into().unwrap());
+                    let field = |shift: u32| (((packed >> shift) & 0x3ff) as f32 - 384.) / 510.;
+                    [field(20), field(10), field(0)]
+                }
+            })
+            .collect()
+    }
+
+    fn f16_to_f32(bits: u16) -> f32 {
+        let sign = if bits & 0x8000 != 0 { -1. } else { 1. };
+        let exponent = ((bits >> 10) & 0x1f) as i32;
+        let mantissa = (bits & 0x3ff) as f32;
+        sign * if exponent == 0 {
+            mantissa / 1024. * 2f32.powi(-14)
+        } else {
+            (1. + mantissa / 1024.) * 2f32.powi(exponent - 15)
+        }
+    }
+
+    /// What ColorSync makes of a Display P3 color in extended sRGB.
+    fn reference_p3_to_extended_srgb(rgb: [f32; 3]) -> [f32; 3] {
+        use core_graphics::color_space::kCGColorSpaceDisplayP3;
+        unsafe extern "C" {
+            fn CGColorCreate(space: core_graphics::sys::CGColorSpaceRef, components: *const f64) -> *mut c_void;
+            fn CGColorCreateCopyByMatchingToColorSpace(
+                space: core_graphics::sys::CGColorSpaceRef,
+                intent: i32,
+                color: *mut c_void,
+                options: *const c_void,
+            ) -> *mut c_void;
+            fn CGColorGetComponents(color: *mut c_void) -> *const f64;
+            fn CFRelease(object: *mut c_void);
+        }
+        let p3 = CGColorSpace::create_with_name(unsafe { kCGColorSpaceDisplayP3 }).unwrap();
+        let extended = CGColorSpace::create_with_name(unsafe { kCGColorSpaceExtendedSRGB }).unwrap();
+        unsafe {
+            let components = [rgb[0] as f64, rgb[1] as f64, rgb[2] as f64, 1.];
+            let color = CGColorCreate(p3.as_ptr(), components.as_ptr());
+            let matched = CGColorCreateCopyByMatchingToColorSpace(extended.as_ptr(), 0, color, ptr::null());
+            let out = std::slice::from_raw_parts(CGColorGetComponents(matched), 3);
+            let result = [out[0] as f32, out[1] as f32, out[2] as f32];
+            CFRelease(matched);
+            CFRelease(color);
+            result
+        }
+    }
+
+    #[test]
+    fn srgb_colors_keep_their_values_and_p3_images_leave_srgb() {
+        let ui_colors = [0x3478f6, 0xff0000, 0x1c1c1e, 0xfa2d48, 0x808080, 0xffffff];
+        let p3_pixels: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [204, 77, 51], [128, 128, 128]];
+        for transparent in [false, true] {
+            let mut renderer =
+                MetalRenderer::new(Arc::new(Mutex::new(InstanceBufferPool::default())), transparent);
+            let format = renderer.layer.pixel_format();
+            let mut scene = Scene::default();
+            let mut x = 0;
+            for color in ui_colors {
+                scene.insert_primitive(quad(x, rgb(color).into()));
+                x += SIDE;
+            }
+            for (i, [r, g, b]) in p3_pixels.iter().copied().enumerate() {
+                scene.insert_primitive(sprite(&renderer, i, x, [b, g, r, 255], true));
+                x += SIDE;
+            }
+            scene.insert_primitive(sprite(&renderer, 99, x, [0, 0, 255, 255], false));
+            scene.finish();
+            let pixels = render(&mut renderer, &scene, x / SIDE + 1);
+
+            for (i, color) in ui_colors.iter().enumerate() {
+                let expected = [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff];
+                for channel in 0..3 {
+                    let got = pixels[i][channel] * 255.;
+                    assert!(
+                        (got - expected[channel] as f32).abs() < 0.5,
+                        "{format:?}: UI color {color:06x} channel {channel} came out as {got}"
+                    );
+                }
+            }
+            for (i, pixel) in p3_pixels.iter().enumerate() {
+                let got = pixels[ui_colors.len() + i];
+                let expected = reference_p3_to_extended_srgb(pixel.map(|c| c as f32 / 255.));
+                for channel in 0..3 {
+                    assert!(
+                        (got[channel] - expected[channel]).abs() < 2.5 / 510.,
+                        "{format:?}: P3 {pixel:?} came out as {got:?}, ColorSync says {expected:?}"
+                    );
+                }
+            }
+            let p3_red = pixels[ui_colors.len()];
+            assert!(p3_red[0] > 1.05 && p3_red[1] < -0.1, "{format:?}: P3 red is {p3_red:?}");
+            let srgb_red = pixels[ui_colors.len() + p3_pixels.len()];
+            assert_eq!(srgb_red, [1., 0., 0.], "{format:?}");
+        }
+    }
 }

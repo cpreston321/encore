@@ -4,13 +4,13 @@ use crate::{
     Entity, GlobalElementId, Hitbox, Image, ImageCache, InspectorElementId, InteractiveElement,
     Interactivity, IntoElement, LayoutId, Length, ObjectFit, Pixels, RenderImage, Resource,
     SMOOTH_SVG_SCALE_FACTOR, SharedString, SharedUri, StyleRefinement, Styled, SvgSize, Task,
-    Window, px, swap_rgba_pa_to_bgra,
+    Window, decode_still_image, px, swap_rgba_pa_to_bgra, ImageColorSpace,
 };
 use anyhow::{Context as _, Result};
 
 use futures::{AsyncReadExt, Future};
 use image::{
-    AnimationDecoder, DynamicImage, Frame, ImageBuffer, ImageError, ImageFormat, Rgba,
+    AnimationDecoder, Frame, ImageBuffer, ImageError, ImageFormat, Rgba,
     codecs::{gif::GifDecoder, webp::WebPDecoder},
 };
 use smallvec::SmallVec;
@@ -657,6 +657,7 @@ impl Asset for ImageAssetLoader {
             };
 
             let data = if let Ok(format) = image::guess_format(&bytes) {
+                let mut color_space = ImageColorSpace::Srgb;
                 let data = match format {
                     ImageFormat::Gif => {
                         let decoder = GifDecoder::new(Cursor::new(&bytes))?;
@@ -691,7 +692,8 @@ impl Asset for ImageAssetLoader {
 
                             frames
                         } else {
-                            let mut data = DynamicImage::from_decoder(decoder)?.into_rgba8();
+                            let (mut data, space) = decode_still_image(&bytes, format)?;
+                            color_space = space;
 
                             // Convert from RGBA to BGRA.
                             for pixel in data.chunks_exact_mut(4) {
@@ -702,8 +704,8 @@ impl Asset for ImageAssetLoader {
                         }
                     }
                     _ => {
-                        let mut data =
-                            image::load_from_memory_with_format(&bytes, format)?.into_rgba8();
+                        let (mut data, space) = decode_still_image(&bytes, format)?;
+                        color_space = space;
 
                         // Convert from RGBA to BGRA.
                         for pixel in data.chunks_exact_mut(4) {
@@ -714,7 +716,7 @@ impl Asset for ImageAssetLoader {
                     }
                 };
 
-                RenderImage::new(data)
+                RenderImage::new(data).with_color_space(color_space)
             } else {
                 let pixmap =
                     // TODO: Can we make svgs always rescale?

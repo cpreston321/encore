@@ -22,6 +22,7 @@ use metal_renderer as renderer;
 use crate::platform::blade as renderer;
 
 mod attributed_string;
+mod color_profile;
 
 #[cfg(feature = "font-kit")]
 mod open_type;
@@ -45,6 +46,7 @@ use std::{
     ops::Range,
 };
 
+pub(crate) use color_profile::*;
 pub(crate) use dispatcher::*;
 pub(crate) use display::*;
 pub(crate) use display_link::*;
