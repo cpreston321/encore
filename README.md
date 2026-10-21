@@ -8,11 +8,13 @@
 
 Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-length playback for subscribers.
 
-[Features](#features) · [Benchmarks](#benchmarks) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
+[Features](#features) · [Screenshots](#screenshots) · [Benchmarks](#benchmarks) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
-![Now Playing with synced lyrics](docs/screenshots/now-playing.png)
+<p align="center">
+  <img src="docs/screenshots/now-playing.png" alt="Now Playing with synced lyrics">
+</p>
 
 ## Features
 
@@ -27,26 +29,32 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 
 [All features →](docs/features.md)
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/home.png" alt="Home, with the floating player bar"></td>
-    <td width="50%"><img src="docs/screenshots/new.png" alt="New, with the week's albums and songs"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/album.png" alt="Album page tinted from its artwork"></td>
-    <td><img src="docs/screenshots/quick-search.png" alt="Quick search"></td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/welcome.png" alt="Welcome screen on a new install"></td>
-    <td><img src="docs/screenshots/setup.png" alt="Connecting a MusicKit key"></td>
-  </tr>
-</table>
+## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/mini-player.png" width="300" alt="Mini Player with its controls showing">
+  <img src="docs/screenshots/home.png" width="48%" alt="Home, with the floating player bar">
+  <img src="docs/screenshots/new.png" width="48%" alt="New, with the week's albums and songs">
 </p>
+<p align="center"><sub><b>Home</b> with the floating player bar &nbsp;·&nbsp; <b>New</b> this week</sub></p>
 
-The screenshots use stand-in gradients in place of album artwork (`ENCORE_TOUR_PLACEHOLDER_ART`); [CONTRIBUTING.md](CONTRIBUTING.md) explains how to take them.
+<p align="center">
+  <img src="docs/screenshots/album.png" width="48%" alt="Album page tinted from its artwork">
+  <img src="docs/screenshots/quick-search.png" width="48%" alt="Quick search">
+</p>
+<p align="center"><sub><b>Album pages</b> tinted from the artwork &nbsp;·&nbsp; <b>Quick search</b> with ⌘K</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/welcome.png" width="48%" alt="Welcome screen on a new install">
+  <img src="docs/screenshots/setup.png" width="48%" alt="Connecting a MusicKit key">
+</p>
+<p align="center"><sub><b>Welcome</b> on a new install &nbsp;·&nbsp; <b>Guided setup</b> for your own MusicKit key</sub></p>
+
+<p align="center">
+  <img src="docs/screenshots/mini-player.png" width="260" alt="Mini Player with its controls showing">
+</p>
+<p align="center"><sub><b>Mini Player</b> with ⇧⌘M</sub></p>
+
+<sub>Album artwork is replaced with stand-in gradients. [CONTRIBUTING.md](CONTRIBUTING.md) explains how to take and frame these.</sub>
 
 ## Benchmarks
 

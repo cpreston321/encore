@@ -60,6 +60,13 @@ HOME=/tmp/shots/home ENCORE_TOUR=1 ENCORE_TOUR_SIGNED_OUT=1 ENCORE_TOUR_NAME="Ja
   ENCORE_SNAPSHOT_SCALE=2 ENCORE_SNAPSHOT_DIR=/tmp/shots cargo run --features tour
 ```
 
+Then frame them as Mac windows, with corners, window buttons and a shadow, with `scripts/frame_screenshot.py` (it needs Pillow). The Mini Player's window is 300 points wide with its buttons at 10, 10:
+
+```sh
+scripts/frame_screenshot.py docs/screenshots/home.png
+scripts/frame_screenshot.py --points 300 --lights 10,10 docs/screenshots/mini-player.png
+```
+
 To profile an optimized build (release builds are stripped, so turn that off for `sample` or Instruments to show function names):
 
 ```sh
