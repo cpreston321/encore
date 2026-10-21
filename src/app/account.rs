@@ -185,8 +185,14 @@ impl MusicApp {
             cx.notify();
             return;
         };
+        self.sign_in_error = None;
         let server = match auth::SignInServer::start(&developer_token) {
             Ok(server) => server,
+            Err(e) if self.welcome_signing => {
+                self.welcome_signing = false;
+                self.sign_in_error = Some(format!("{e:#}"));
+                return cx.notify();
+            }
             Err(e) => return self.show_notice(format!("Couldn't start sign-in: {e:#}"), cx),
         };
         cx.open_url(&server.url);
@@ -204,11 +210,18 @@ impl MusicApp {
                     this.retry_failed_loads();
                     this.load_remote_library(cx);
                     this.load_personal_home(cx);
-                    this.show_notice("Signed in to Apple Music".into(), cx);
+                    if !this.welcome_signing {
+                        this.show_notice("Signed in to Apple Music".into(), cx);
+                    }
                 }
                 Err(e) => {
                     this.account = Account::SignedOut;
-                    this.show_notice(format!("Sign-in didn't complete: {e:#}"), cx);
+                    if this.welcome_signing {
+                        this.sign_in_error = Some(format!("{e:#}"));
+                        this.welcome_signing = false;
+                    } else {
+                        this.show_notice(format!("Sign-in didn't complete: {e:#}"), cx);
+                    }
                 }
             })
             .ok();
@@ -222,7 +235,10 @@ impl MusicApp {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.sign_in_task = None;
-        self.account = Account::SignedOut;
+        if self.account == Account::SigningIn {
+            self.account = Account::SignedOut;
+        }
+        self.welcome_signing = false;
         cx.notify();
     }
 
@@ -269,13 +285,20 @@ impl MusicApp {
                             cx,
                             |c| c.user_token_valid(),
                             |this, load, cx| match load {
-                                Load::Ready(false) => this.sign_out_expired(),
+                                Load::Ready(false) => {
+                                    if this.welcome_signing {
+                                        this.welcome_signing = false;
+                                        this.sign_in_error = Some("Apple Music didn't accept the sign-in.".into());
+                                    }
+                                    this.sign_out_expired();
+                                }
                                 _ => {
                                     if this.remote.ready().is_none() {
                                         this.remote = Load::Failed(
                                             "Apple Music refused the library request. Try again later.".into(),
                                         );
                                     }
+                                    this.welcome_library_settled(cx);
                                     cx.notify();
                                 }
                             },
@@ -287,6 +310,7 @@ impl MusicApp {
                         if this.remote.ready().is_none() {
                             this.remote = Load::Failed(err);
                         }
+                        this.welcome_library_settled(cx);
                     }
                     Load::Ready(mut library) => {
                         eprintln!(
@@ -305,6 +329,7 @@ impl MusicApp {
                         this.library_updated = Some(std::time::Instant::now());
                         this.save_remote_cache();
                         this.load_favorites(songs, cx);
+                        this.welcome_library_settled(cx);
                     }
                     Load::Loading => {}
                 }

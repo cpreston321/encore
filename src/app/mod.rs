@@ -379,6 +379,10 @@ pub struct MusicApp {
     notice_task: Option<Task<()>>,
     sign_in_task: Option<Task<()>>,
     sign_in_stop: Option<crate::localhost::StopFlag>,
+    /// Sign-in was started from the welcome screen, which stays up until the library loads.
+    pub(crate) welcome_signing: bool,
+    /// Why the last sign-in from the welcome screen didn't finish.
+    pub(crate) sign_in_error: Option<String>,
     pub(crate) show_key_help: bool,
     pub(crate) route: Route,
     pub(crate) history: Vec<Route>,
@@ -544,6 +548,8 @@ impl MusicApp {
             notice_task: None,
             sign_in_task: None,
             sign_in_stop: None,
+            welcome_signing: false,
+            sign_in_error: None,
             show_key_help: false,
             route: Route::New,
             history: Vec::new(),
