@@ -9,8 +9,8 @@ use crate::{App, Global, ScrollWheelEvent, TouchPhase};
 pub const RUBBER_BAND_COEFFICIENT: f32 = 0.55;
 
 /// Angular frequency of the critically damped spring that pulls a stretched view back, in
-/// radians per second. It settles in about half a second.
-pub const SPRING_BACK_OMEGA: f32 = 15.;
+/// radians per second. It settles in about 0.3 s, as quick as AppKit's.
+pub const SPRING_BACK_OMEGA: f32 = 26.;
 
 /// How far momentum may carry a view past its edge, as a fraction of the view's length.
 const MAX_BOUNCE: f32 = 0.1;
@@ -425,7 +425,7 @@ mod tests {
             t += 1. / 120.;
             assert!(t < 2., "spring didn't settle");
         }
-        assert!(t > 0.25 && t < 0.8, "settled in {t}s");
+        assert!(t > 0.15 && t < 0.45, "settled in {t}s");
     }
 
     #[test]
