@@ -1,6 +1,7 @@
 //! Browse pages: routing plus Home, New, Radio and Search.
 
 use super::*;
+use crate::app::SeeAllItems;
 
 impl MusicApp {
     pub(crate) fn render_route(
@@ -48,6 +49,7 @@ impl MusicApp {
                 cx,
             ),
             Route::AllPlaylists => self.render_all_playlists(t, content_w, cx).into_any_element(),
+            Route::SeeAll(page) => self.render_see_all(t, &page, content_w, cx),
         }
     }
 
@@ -116,7 +118,12 @@ impl MusicApp {
         div()
             .child(page_title("New"))
             .child(heroes)
-            .child(section_header(t, "Best New Songs"))
+            .child(self.section_link(
+                t,
+                "Best New Songs",
+                |this| this.browse.ready().map(|b| SeeAllItems::Songs(Arc::new(b.best_new_songs()))),
+                cx,
+            ))
             .child(self.song_columns(
                 t,
                 "best-new",
@@ -125,9 +132,19 @@ impl MusicApp {
                 false,
                 cx,
             ))
-            .child(section_header(t, "New Releases"))
+            .child(self.section_link(
+                t,
+                "New Releases",
+                |this| this.browse.ready().map(|b| SeeAllItems::Albums(Arc::new(b.new_releases()))),
+                cx,
+            ))
             .child(new_albums)
-            .child(section_header(t, "Top Playlists"))
+            .child(self.section_link(
+                t,
+                "Top Playlists",
+                |this| this.browse.ready().map(|b| SeeAllItems::Playlists(Arc::new(b.top_playlists.clone()))),
+                cx,
+            ))
             .child(playlists)
     }
 
@@ -140,57 +157,66 @@ impl MusicApp {
         songs: &Arc<Vec<Song>>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        use crate::model::TopResult;
         let mut row = scroll_row(id).pt_1();
         for (i, item) in items.iter().enumerate() {
-            let (art, title, subtitle, kind): (AnyElement, String, String, &str) = match item {
-                TopResult::Song(s) => {
-                    (self.art(&s.artwork, 160., 8., t, cx), s.title.clone(), s.artist.clone(), "Song")
-                }
-                TopResult::Album(a) => {
-                    (self.art(&a.artwork, 160., 8., t, cx), a.title.clone(), a.artist.clone(), "Album")
-                }
-                TopResult::Artist(a) => {
-                    (self.avatar(&a.artwork, &a.name, 160., t, cx), a.name.clone(), String::new(), "Artist")
-                }
-                TopResult::Playlist(p) => {
-                    (self.playlist_art(p, 160., 8., t, cx), p.name.clone(), p.curator.clone(), "Playlist")
-                }
-            };
-            let item = item.clone();
-            let songs = songs.clone();
-            row =
-                row.child(
-                    div()
-                        .id(ElementId::from((SharedString::from(id), i)))
-                        .w(px(160.))
-                        .flex_none()
-                        .flex()
-                        .flex_col()
-                        .cursor_pointer()
-                        .child(art)
-                        .child(div().pt_2().truncate().child(title))
-                        .child(div().truncate().text_size(px(12.)).text_color(t.text_secondary).child(
-                            if subtitle.is_empty() { kind.to_string() } else { format!("{kind} · {subtitle}") },
-                        ))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if this.route == Route::Search {
-                                this.remember_search();
-                            }
-                            match &item {
-                                TopResult::Song(s) => {
-                                    let ix = songs.iter().position(|x| x.id == s.id).unwrap_or(0);
-                                    let list = if songs.is_empty() { vec![s.clone()] } else { songs.as_ref().clone() };
-                                    this.play(list, ix, false, cx);
-                                }
-                                TopResult::Album(a) => this.push(Route::Album(a.id.clone()), cx),
-                                TopResult::Artist(a) => this.push(Route::Artist(a.id.clone()), cx),
-                                TopResult::Playlist(p) => this.push(Route::Playlist(p.clone()), cx),
-                            }
-                        })),
-                );
+            row = row.child(self.mixed_card(t, id, i, item, songs, 160., cx));
         }
         row
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn mixed_card(
+        &self,
+        t: &Theme,
+        id: &'static str,
+        i: usize,
+        item: &crate::model::TopResult,
+        songs: &Arc<Vec<Song>>,
+        w: f32,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        use crate::model::TopResult;
+        let (art, title, subtitle, kind): (AnyElement, String, String, &str) = match item {
+            TopResult::Song(s) => (self.art(&s.artwork, w, 8., t, cx), s.title.clone(), s.artist.clone(), "Song"),
+            TopResult::Album(a) => (self.art(&a.artwork, w, 8., t, cx), a.title.clone(), a.artist.clone(), "Album"),
+            TopResult::Artist(a) => {
+                (self.avatar(&a.artwork, &a.name, w, t, cx), a.name.clone(), String::new(), "Artist")
+            }
+            TopResult::Playlist(p) => {
+                (self.playlist_art(p, w, 8., t, cx), p.name.clone(), p.curator.clone(), "Playlist")
+            }
+        };
+        let item = item.clone();
+        let songs = songs.clone();
+        div()
+            .id(ElementId::from((SharedString::from(id), i)))
+            .w(px(w))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .cursor_pointer()
+            .child(art)
+            .child(div().pt_2().truncate().child(title))
+            .child(div().truncate().text_size(px(12.)).text_color(t.text_secondary).child(if subtitle.is_empty() {
+                kind.to_string()
+            } else {
+                format!("{kind} · {subtitle}")
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if this.route == Route::Search {
+                    this.remember_search();
+                }
+                match &item {
+                    TopResult::Song(s) => {
+                        let ix = songs.iter().position(|x| x.id == s.id).unwrap_or(0);
+                        let list = if songs.is_empty() { vec![s.clone()] } else { songs.as_ref().clone() };
+                        this.play(list, ix, false, cx);
+                    }
+                    TopResult::Album(a) => this.push(Route::Album(a.id.clone()), cx),
+                    TopResult::Artist(a) => this.push(Route::Artist(a.id.clone()), cx),
+                    TopResult::Playlist(p) => this.push(Route::Playlist(p.clone()), cx),
+                }
+            }))
     }
 
     pub(crate) fn render_home(&self, t: &Theme, content_w: f32, cx: &mut Context<Self>) -> Div {
@@ -200,14 +226,20 @@ impl MusicApp {
         let mut personal = div();
         if let Some(Load::Ready(Some(home))) = &self.personal {
             if !home.recent_tracks.is_empty() {
-                personal = personal.child(section_header(t, "Recently Played")).child(self.song_columns(
-                    t,
-                    "home-recent",
-                    home.recent_tracks.clone(),
-                    col_w_personal,
-                    false,
-                    cx,
-                ));
+                personal = personal
+                    .child(self.section_link(
+                        t,
+                        "Recently Played",
+                        |this| {
+                            (match &this.personal {
+                                Some(Load::Ready(Some(home))) => Some(home),
+                                _ => None,
+                            })
+                            .map(|h| SeeAllItems::Songs(Arc::new(h.recent_tracks.clone())))
+                        },
+                        cx,
+                    ))
+                    .child(self.song_columns(t, "home-recent", home.recent_tracks.clone(), col_w_personal, false, cx));
             }
             for (n, (title, items)) in home.shelves.iter().enumerate() {
                 if title == "Recently Played" && !home.recent_tracks.is_empty() {
@@ -217,22 +249,36 @@ impl MusicApp {
                     "shelf-0", "shelf-1", "shelf-2", "shelf-3", "shelf-4", "shelf-5", "shelf-6", "shelf-7", "shelf-8",
                     "shelf-9",
                 ];
-                personal = personal.child(section_header_owned(t, title.clone())).child(self.mixed_row(
-                    t,
-                    ids[n.min(9)],
-                    items,
-                    &Arc::new(Vec::new()),
-                    cx,
-                ));
+                personal = personal
+                    .child(self.section_link(
+                        t,
+                        title.clone(),
+                        move |this| {
+                            (match &this.personal {
+                                Some(Load::Ready(Some(home))) => Some(home),
+                                _ => None,
+                            })
+                            .map(|h| SeeAllItems::Mixed(Arc::new(h.shelves[n].1.clone())))
+                        },
+                        cx,
+                    ))
+                    .child(self.mixed_row(t, ids[n.min(9)], items, &Arc::new(Vec::new()), cx));
             }
             if !home.heavy_rotation.is_empty() {
-                personal = personal.child(section_header(t, "Heavy Rotation")).child(self.mixed_row(
-                    t,
-                    "heavy-rotation",
-                    &home.heavy_rotation,
-                    &Arc::new(Vec::new()),
-                    cx,
-                ));
+                personal = personal
+                    .child(self.section_link(
+                        t,
+                        "Heavy Rotation",
+                        |this| {
+                            (match &this.personal {
+                                Some(Load::Ready(Some(home))) => Some(home),
+                                _ => None,
+                            })
+                            .map(|h| SeeAllItems::Mixed(Arc::new(h.heavy_rotation.clone())))
+                        },
+                        cx,
+                    ))
+                    .child(self.mixed_row(t, "heavy-rotation", &home.heavy_rotation, &Arc::new(Vec::new()), cx));
             }
         } else if matches!(self.personal, Some(Load::Loading))
             || (self.personal.is_none() && self.account == Account::SignedIn)
@@ -263,9 +309,19 @@ impl MusicApp {
         let mut page = div()
             .child(page_title("Home"))
             .child(personal)
-            .child(section_header(t, if self.personal.is_some() { "Top Picks" } else { "Top Picks for You" }))
+            .child(self.section_link(
+                t,
+                if self.personal.is_some() { "Top Picks" } else { "Top Picks for You" },
+                |this| this.browse.ready().map(|b| SeeAllItems::Playlists(Arc::new(b.top_playlists.clone()))),
+                cx,
+            ))
             .child(picks)
-            .child(section_header(t, "Top Songs"))
+            .child(self.section_link(
+                t,
+                "Top Songs",
+                |this| this.browse.ready().map(|b| SeeAllItems::Songs(Arc::new(b.top_songs.clone()))),
+                cx,
+            ))
             .child(self.song_columns(
                 t,
                 "top-songs",
@@ -274,7 +330,12 @@ impl MusicApp {
                 true,
                 cx,
             ))
-            .child(section_header(t, "Top Albums"))
+            .child(self.section_link(
+                t,
+                "Top Albums",
+                |this| this.browse.ready().map(|b| SeeAllItems::Albums(Arc::new(b.top_albums.clone()))),
+                cx,
+            ))
             .child(albums);
 
         let recently_added = self.lib_recently_added();
@@ -283,7 +344,7 @@ impl MusicApp {
             for (i, album) in recently_added.iter().take(20).enumerate() {
                 recent = recent.child(self.album_tile(t, "home-library-album", i, album, 180., cx));
             }
-            page = page.child(section_header(t, "Recently Added")).child(recent);
+            page = page.child(self.section_link_to(t, "Recently Added", Route::RecentlyAdded, cx)).child(recent);
         }
         page
     }
@@ -380,7 +441,17 @@ impl MusicApp {
                         ),
                 );
             }
-            page = page.child(section_header(t, "Live Stations")).child(row);
+            page = page
+                .child(self.section_link(
+                    t,
+                    "Live Stations",
+                    |this| match &this.stations {
+                        Some(Load::Ready(s)) if s.len() > 1 => Some(SeeAllItems::Stations(Arc::new(s[1..].to_vec()))),
+                        _ => None,
+                    },
+                    cx,
+                ))
+                .child(row);
         }
 
         if let Some(browse) = self.browse.ready() {
@@ -493,7 +564,20 @@ impl MusicApp {
                 r.top.iter().filter_map(|t| if let TopResult::Song(s) = t { Some(s.clone()) } else { None }).collect(),
             );
             let row = self.mixed_row(t, "top-results", &r.top, &top_songs, cx);
-            page = page.child(section_header(t, "Top Results")).child(row);
+            page = page
+                .child(self.section_link(
+                    t,
+                    "Top Results",
+                    |this| {
+                        (this
+                            .search_results
+                            .as_ref()
+                            .and_then(|(_, r)| if let Load::Ready(r) = r { Some(r) } else { None }))
+                        .map(|r| SeeAllItems::Mixed(Arc::new(r.top.clone())))
+                    },
+                    cx,
+                ))
+                .child(row);
         }
 
         // Instant matches from the library, before Apple's catalog answers.
@@ -520,14 +604,21 @@ impl MusicApp {
                 return page.child(self.error_state(t, err, cx));
             }
             return match self.browse.ready() {
-                Some(browse) => page.child(section_header(t, "Top Songs Right Now")).child(self.song_columns(
-                    t,
-                    "search-top",
-                    browse.top_songs.iter().take(20).cloned().collect(),
-                    col_w,
-                    true,
-                    cx,
-                )),
+                Some(browse) => page
+                    .child(self.section_link(
+                        t,
+                        "Top Songs Right Now",
+                        |this| this.browse.ready().map(|b| SeeAllItems::Songs(Arc::new(b.top_songs.clone()))),
+                        cx,
+                    ))
+                    .child(self.song_columns(
+                        t,
+                        "search-top",
+                        browse.top_songs.iter().take(20).cloned().collect(),
+                        col_w,
+                        true,
+                        cx,
+                    )),
                 None => page,
             };
         };
@@ -574,24 +665,56 @@ impl MusicApp {
                         .on_click(cx.listener(move |this, _, _, cx| this.push(Route::Artist(id.clone()), cx))),
                 );
             }
-            found = found.child(section_header(t, "Artists")).child(row);
+            found = found
+                .child(self.section_link(
+                    t,
+                    "Artists",
+                    |this| {
+                        (this
+                            .search_results
+                            .as_ref()
+                            .and_then(|(_, r)| if let Load::Ready(r) = r { Some(r) } else { None }))
+                        .map(|r| SeeAllItems::Artists(Arc::new(r.artists.clone())))
+                    },
+                    cx,
+                ))
+                .child(row);
         }
         if !results.songs.is_empty() {
-            found = found.child(section_header(t, "Songs")).child(self.song_columns(
-                t,
-                "song-results",
-                results.songs.clone(),
-                col_w,
-                false,
-                cx,
-            ));
+            found = found
+                .child(self.section_link(
+                    t,
+                    "Songs",
+                    |this| {
+                        (this
+                            .search_results
+                            .as_ref()
+                            .and_then(|(_, r)| if let Load::Ready(r) = r { Some(r) } else { None }))
+                        .map(|r| SeeAllItems::Songs(Arc::new(r.songs.clone())))
+                    },
+                    cx,
+                ))
+                .child(self.song_columns(t, "song-results", results.songs.clone(), col_w, false, cx));
         }
         if !results.albums.is_empty() {
             let mut row = scroll_row("album-results");
             for (i, album) in results.albums.iter().enumerate() {
                 row = row.child(self.album_tile(t, "album-result", i, album, 180., cx));
             }
-            found = found.child(section_header(t, "Albums")).child(row);
+            found = found
+                .child(self.section_link(
+                    t,
+                    "Albums",
+                    |this| {
+                        (this
+                            .search_results
+                            .as_ref()
+                            .and_then(|(_, r)| if let Load::Ready(r) = r { Some(r) } else { None }))
+                        .map(|r| SeeAllItems::Albums(Arc::new(r.albums.clone())))
+                    },
+                    cx,
+                ))
+                .child(row);
         }
         page.child(found.with_animation(
             ElementId::Name(format!("results-{term}").into()),

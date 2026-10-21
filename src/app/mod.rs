@@ -69,6 +69,46 @@ pub enum Route {
     Album(String),
     Artist(String),
     Playlist(Playlist),
+    /// Everything in a shelf whose header was clicked.
+    SeeAll(Arc<SeeAll>),
+}
+
+/// A shelf's full contents, for its See All page.
+#[derive(Clone, Debug)]
+pub struct SeeAll {
+    pub title: SharedString,
+    pub items: SeeAllItems,
+}
+
+#[derive(Clone, Debug)]
+pub enum SeeAllItems {
+    Songs(Arc<Vec<crate::model::Song>>),
+    Albums(Arc<Vec<crate::model::Album>>),
+    Playlists(Arc<Vec<Playlist>>),
+    Artists(Arc<Vec<crate::model::Artist>>),
+    Stations(Arc<Vec<crate::model::Station>>),
+    Mixed(Arc<Vec<crate::model::TopResult>>),
+}
+
+impl SeeAllItems {
+    fn len(&self) -> usize {
+        match self {
+            Self::Songs(v) => v.len(),
+            Self::Albums(v) => v.len(),
+            Self::Playlists(v) => v.len(),
+            Self::Artists(v) => v.len(),
+            Self::Stations(v) => v.len(),
+            Self::Mixed(v) => v.len(),
+        }
+    }
+}
+
+/// Mixed search results have no equality, so pages compare by title and size, which is
+/// what history needs to tell them apart.
+impl PartialEq for SeeAll {
+    fn eq(&self, other: &Self) -> bool {
+        self.title == other.title && self.items.len() == other.items.len()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -716,6 +756,15 @@ impl Render for MusicApp {
                 this.go_root(Route::Search, window, cx);
             }))
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.back(cx)))
+            // A mouse's back and forward buttons.
+            .on_mouse_down(
+                MouseButton::Navigate(gpui::NavigationDirection::Back),
+                cx.listener(|this, _, _, cx| this.back(cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(gpui::NavigationDirection::Forward),
+                cx.listener(|this, _, _, cx| this.forward(cx)),
+            )
             .on_action(
                 cx.listener(|this, _: &crate::keys::ToggleAnimatedArtwork, _, cx| this.toggle_animate_artwork(cx)),
             )

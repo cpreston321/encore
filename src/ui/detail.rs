@@ -9,13 +9,10 @@ use gpui::{
 };
 
 use crate::{
-    app::{Account, Load, MusicApp, Route, SIDEBAR_W},
+    app::{Account, Load, MusicApp, Route, SIDEBAR_W, SeeAllItems},
     model::{Album, ArtColors, Artwork, Playlist, Song, format_date},
     theme::{Palette, Theme},
-    ui::{
-        GAP, PAD, explicit_badge, icon, icon_button, pill_button, scroll_row, section_header, skeleton_detail,
-        skeleton_rows,
-    },
+    ui::{GAP, PAD, explicit_badge, icon, icon_button, pill_button, scroll_row, skeleton_detail, skeleton_rows},
 };
 
 /// A click handler stored for later (header subtitle, add button).
@@ -378,13 +375,21 @@ impl MusicApp {
             page = page.child(div().pt_6().child(self.latest_release(t, latest, content_w - 2. * PAD, cx)));
         }
         if !detail.top_songs.is_empty() {
-            page = page.child(section_header(t, "Top Songs")).child(self.song_columns_by_album(
-                t,
-                "artist-top",
-                detail.top_songs.clone(),
-                col_w,
-                cx,
-            ));
+            let artist_id = id.to_string();
+            page = page
+                .child(self.section_link(
+                    t,
+                    "Top Songs",
+                    move |this| {
+                        (match this.artists.get(&artist_id) {
+                            Some(Load::Ready(d)) => Some(d),
+                            _ => None,
+                        })
+                        .map(|d| SeeAllItems::Songs(Arc::new(d.top_songs.clone())))
+                    },
+                    cx,
+                ))
+                .child(self.song_columns_by_album(t, "artist-top", detail.top_songs.clone(), col_w, cx));
         }
         for (title, prefix, list) in
             [("Albums", "artist-albums", &albums), ("Singles & EPs", "artist-singles", &singles)]
@@ -396,7 +401,24 @@ impl MusicApp {
             for (i, album) in list.iter().enumerate() {
                 row = row.child(self.album_tile(t, prefix, i, album, 180., cx));
             }
-            page = page.child(section_header(t, title)).child(row);
+            let (artist_id, singles) = (id.to_string(), prefix == "artist-singles");
+            page = page
+                .child(self.section_link(
+                    t,
+                    title,
+                    move |this| {
+                        (match this.artists.get(&artist_id) {
+                            Some(Load::Ready(d)) => Some(d),
+                            _ => None,
+                        })
+                        .map(|d| {
+                            let (albums, single_list) = d.split_releases();
+                            SeeAllItems::Albums(Arc::new(if singles { single_list } else { albums }))
+                        })
+                    },
+                    cx,
+                ))
+                .child(row);
         }
         if !detail.similar.is_empty() {
             let mut row = scroll_row("similar-artists");
@@ -417,7 +439,21 @@ impl MusicApp {
                         .on_click(cx.listener(move |this, _, _, cx| this.push(Route::Artist(id.clone()), cx))),
                 );
             }
-            page = page.child(section_header(t, "Similar Artists")).child(row);
+            let artist_id = id.to_string();
+            page = page
+                .child(self.section_link(
+                    t,
+                    "Similar Artists",
+                    move |this| {
+                        (match this.artists.get(&artist_id) {
+                            Some(Load::Ready(d)) => Some(d),
+                            _ => None,
+                        })
+                        .map(|d| SeeAllItems::Artists(Arc::new(d.similar.clone())))
+                    },
+                    cx,
+                ))
+                .child(row);
         }
         page.into_any_element()
     }

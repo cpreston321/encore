@@ -124,32 +124,15 @@ pub(crate) fn table_header(t: &Theme) -> impl IntoElement {
         .child(div().w(px(26.)))
 }
 
-pub(crate) fn page_title(title: &'static str) -> impl IntoElement {
+pub(crate) fn page_title(title: impl Into<SharedString>) -> impl IntoElement {
+    let title = title.into();
     div().px(px(PAD)).pt(px(46.)).pb_4().text_size(px(28.)).font_weight(FontWeight::BOLD).child(title)
 }
 
-pub(crate) fn section_header_owned(t: &Theme, title: String) -> impl IntoElement {
-    div()
-        .px(px(PAD))
-        .pt_7()
-        .pb_2p5()
-        .flex()
-        .items_center()
-        .gap_1()
-        .child(div().text_size(px(19.)).font_weight(FontWeight::BOLD).child(title))
-        .child(icon("chevron-right", 14., t.text_secondary))
-}
-
-pub(crate) fn section_header(t: &Theme, title: &'static str) -> impl IntoElement {
-    div()
-        .px(px(PAD))
-        .pt_7()
-        .pb_2p5()
-        .flex()
-        .items_center()
-        .gap_1()
-        .child(div().text_size(px(19.)).font_weight(FontWeight::BOLD).child(title))
-        .child(icon("chevron-right", 14., t.text_secondary))
+/// A section title with nothing more to show. Sections that open a fuller page use
+/// `MusicApp::section_link`, which adds the chevron.
+pub(crate) fn section_header(_t: &Theme, title: &'static str) -> impl IntoElement {
+    div().px(px(PAD)).pt_7().pb_2p5().text_size(px(19.)).font_weight(FontWeight::BOLD).child(title)
 }
 
 pub(crate) fn loading(t: &Theme) -> Div {

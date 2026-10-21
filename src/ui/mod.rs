@@ -41,6 +41,7 @@ pub(crate) mod player;
 pub(crate) mod playlists;
 pub(crate) mod progress;
 pub(crate) mod regions;
+pub(crate) mod see_all;
 pub(crate) mod shell;
 pub(crate) mod shortcuts;
 pub(crate) mod widgets;

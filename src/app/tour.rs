@@ -291,6 +291,20 @@ impl MusicApp {
         if let Some(p) = self.lib_playlists().first() {
             steps.push(("library-playlist".into(), Route::Playlist(p.clone()), None));
         }
+        if let Some(browse) = self.browse.ready() {
+            use crate::app::{SeeAll, SeeAllItems};
+            let page = |title: &str, items| Route::SeeAll(Arc::new(SeeAll { title: title.to_string().into(), items }));
+            steps.push((
+                "see-all-songs".into(),
+                page("Top Songs", SeeAllItems::Songs(Arc::new(browse.top_songs.clone()))),
+                None,
+            ));
+            steps.push((
+                "see-all-albums".into(),
+                page("Top Albums", SeeAllItems::Albums(Arc::new(browse.top_albums.clone()))),
+                None,
+            ));
+        }
         steps
     }
 }
