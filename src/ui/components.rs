@@ -489,7 +489,20 @@ impl MusicApp {
                             )
                             .when(song.explicit, |d| d.child(explicit_badge(t))),
                     )
-                    .child(div().truncate().text_size(px(12.5)).text_color(t.text_secondary).child(subtitle)),
+                    .child(
+                        div().flex().min_w_0().child(
+                            self.song_link(
+                                song,
+                                by_album,
+                                ElementId::from((SharedString::from(format!("{prefix}-by")), ix)),
+                                cx,
+                            )
+                            .truncate()
+                            .text_size(px(12.5))
+                            .text_color(t.text_secondary)
+                            .child(subtitle),
+                        ),
+                    ),
             )
             .child(self.more_button(
                 t,
@@ -585,8 +598,22 @@ impl MusicApp {
                     )
                     .when(song.explicit, |d| d.child(explicit_badge(t))),
             )
-            .child(div().w(relative(0.22)).truncate().text_color(fg2).child(song.artist.clone()))
-            .child(div().w(relative(0.22)).truncate().text_color(fg2).child(song.album.clone()))
+            .child(
+                div().w(relative(0.22)).min_w_0().flex().child(
+                    self.song_link(song, false, ElementId::from((SharedString::from(format!("{id}-artist")), ix)), cx)
+                        .truncate()
+                        .text_color(fg2)
+                        .child(song.artist.clone()),
+                ),
+            )
+            .child(
+                div().w(relative(0.22)).min_w_0().flex().child(
+                    self.song_link(song, true, ElementId::from((SharedString::from(format!("{id}-album")), ix)), cx)
+                        .truncate()
+                        .text_color(fg2)
+                        .child(song.album.clone()),
+                ),
+            )
             .child(div().w(px(44.)).flex().justify_end().text_color(fg2).child(format_ms(song.duration_ms)))
             .child(self.more_button(
                 t,
@@ -607,6 +634,22 @@ impl MusicApp {
     }
 
     /// "⋯" button that opens the song menu. With a `hover_group`, it only shows on row hover.
+    /// A song's artist (or, with `album`, its album) as a link: underlined on hover, and a
+    /// click opens that page instead of playing the song.
+    pub(crate) fn song_link(&self, song: &Song, album: bool, id: ElementId, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (artist, artist_id, album_id) = (song.artist.clone(), song.artist_id.clone(), song.album_id.clone());
+        let target = if album { album_id.is_some() } else { !artist.is_empty() };
+        div().id(id).min_w_0().when(target, |d| {
+            d.cursor_pointer().hover(|s| s.underline()).on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                match (&album_id, album) {
+                    (Some(album_id), true) => this.push(Route::Album(album_id.clone()), cx),
+                    _ => this.open_artist(artist.clone(), artist_id.clone(), cx),
+                }
+            }))
+        })
+    }
+
     pub(crate) fn more_button(
         &self,
         t: &Theme,

@@ -85,33 +85,6 @@ impl MusicApp {
         }
     }
 
-    /// The name of the page Back returns to, for back buttons.
-    pub(crate) fn back_label(&self) -> Option<SharedString> {
-        let label: SharedString = match self.history.last()? {
-            Route::Home => "Home".into(),
-            Route::New => "New".into(),
-            Route::Radio => "Radio".into(),
-            Route::Search => "Search".into(),
-            Route::RecentlyAdded => "Recently Added".into(),
-            Route::Artists => "Artists".into(),
-            Route::Albums => "Albums".into(),
-            Route::Songs => "Songs".into(),
-            Route::AllPlaylists => "Playlists".into(),
-            Route::Favorites => "Favorite Songs".into(),
-            Route::Album(id) => match self.albums.get(id) {
-                Some(Load::Ready((album, _))) => album.title.clone().into(),
-                _ => "Back".into(),
-            },
-            Route::Artist(id) => match self.artists.get(id) {
-                Some(Load::Ready(detail)) => detail.artist.name.clone().into(),
-                _ => "Back".into(),
-            },
-            Route::Playlist(playlist) => playlist.name.clone().into(),
-            Route::SeeAll(page) => page.title.clone(),
-        };
-        Some(label)
-    }
-
     /// The top-level sidebar entry the current page belongs to.
     pub(crate) fn root_route(&self) -> &Route {
         self.history.first().unwrap_or(&self.route)

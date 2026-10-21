@@ -157,35 +157,30 @@ impl MusicApp {
                 .into_any_element()
             }
         };
-        let back = self.back_label().map(|label| {
-            div().px(px(PAD)).pt(px(30.)).flex().child(
-                div()
-                    .id("see-all-back")
-                    .flex()
-                    .items_center()
-                    .gap_0p5()
-                    .text_size(px(14.))
-                    .text_color(t.accent)
-                    .cursor_pointer()
-                    .hover(|s| s.opacity(0.7))
-                    .active(|s| s.opacity(0.5))
-                    .child(icon("chevron-left", 13., t.accent))
-                    .child(label)
-                    .on_click(cx.listener(|this, _, _, cx| this.back(cx))),
-            )
+        // A round, translucent toolbar button beside the title, as in macOS Tahoe.
+        let back = (!self.history.is_empty()).then(|| {
+            div()
+                .id("see-all-back")
+                .size(px(32.))
+                .flex_none()
+                .rounded_full()
+                .bg(t.text.opacity(0.07))
+                .border_1()
+                .border_color(t.text.opacity(0.1))
+                .shadow_sm()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(|s| s.bg(t.text.opacity(0.13)))
+                .active(|s| s.bg(t.text.opacity(0.18)))
+                .child(icon("chevron-left", 13., t.text))
+                .on_click(cx.listener(|this, _, _, cx| this.back(cx)))
         });
-        let has_back = back.is_some();
         div()
-            .children(back)
-            .child(
-                div()
-                    .px(px(PAD))
-                    .pt(px(if has_back { 6. } else { 46. }))
-                    .pb_4()
-                    .text_size(px(28.))
-                    .font_weight(FontWeight::BOLD)
-                    .child(page.title.clone()),
-            )
+            .child(div().px(px(PAD)).pt(px(42.)).pb_4().flex().items_center().gap_3().children(back).child(
+                div().min_w_0().truncate().text_size(px(28.)).font_weight(FontWeight::BOLD).child(page.title.clone()),
+            ))
             .child(body)
             .into_any_element()
     }

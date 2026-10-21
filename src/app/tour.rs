@@ -147,6 +147,11 @@ impl MusicApp {
                     eprintln!("TOUR {n} {label}{}", scroll.map(|y| format!("-{y}")).unwrap_or_default());
                     this.history.clear();
                     this.scroll_history.clear();
+                    // See All pages are reached from a shelf, so give them a page to go back to.
+                    if label.starts_with("see-all") {
+                        this.history.push(Route::Home);
+                        this.scroll_history.push(point(px(0.), px(0.)));
+                    }
                     if let Some(term) = search {
                         this.search.set(term);
                         this.schedule_search(cx);
