@@ -14,7 +14,6 @@ use tahoe::primitives::icon_button;
 use crate::{
     api,
     app::{MusicApp, PlayState},
-    queue::Repeat,
     theme::{Palette, Theme},
     ui::{icon, player::player_theme},
 };
@@ -24,8 +23,11 @@ const MIN: f32 = 220.;
 /// The glass card's gap from the window's edges, and its padding.
 const CARD_INSET: f32 = 8.;
 const CARD_PAD: f32 = 14.;
+/// The times beside the scrubber, and their gap from it.
+const TIME_W: f32 = 30.;
+const TIME_GAP: f32 = 6.;
 /// Where the scrubber starts and stops, from either side of the window.
-const SCRUB_INSET: f32 = CARD_INSET + CARD_PAD;
+const SCRUB_INSET: f32 = CARD_INSET + CARD_PAD + TIME_W + TIME_GAP;
 const FADE: Duration = Duration::from_millis(180);
 
 pub struct MiniPlayer {
@@ -51,8 +53,6 @@ struct Drawn {
     playing: bool,
     art: bool,
     tint: bool,
-    shuffle: bool,
-    repeat: Repeat,
 }
 
 thread_local! {
@@ -194,8 +194,6 @@ impl MiniPlayer {
             playing: matches!(app.state, PlayState::Playing | PlayState::Loading),
             art: art_url(app).is_some_and(|u| app.cached_image(&u).is_some()),
             tint: self.tint.is_some(),
-            shuffle: app.queue.shuffle,
-            repeat: app.queue.repeat,
         }
     }
 
@@ -268,13 +266,11 @@ impl Render for MiniPlayer {
         let song = app.queue.current().cloned();
         let playing = matches!(app.state, PlayState::Playing | PlayState::Loading);
         let (position, duration) = (app.position(), app.duration());
-        let (shuffle, repeat) = (app.queue.shuffle, app.queue.repeat);
         let art = art_url(app).and_then(|url| app.cached_image(&url));
         let has_art = art.is_some();
         let fraction = self.scrub.unwrap_or(if duration > 0. { (position / duration).clamp(0., 1.) } else { 0. });
         let shown_position = if self.scrub.is_some() { fraction * duration } else { position };
 
-        let toggle_color = |on: bool| if on { t.accent } else { t.text_secondary };
         let control = |id: &'static str, label: &'static str, name: &'static str, size: f32, color: Hsla| {
             icon_button(&t, id, name, size, color)
                 .accessibility_label(label)
@@ -350,18 +346,20 @@ impl Render for MiniPlayer {
                     ),
             );
 
-        let time = |text: String| div().text_size(px(10.5)).text_color(t.text_secondary).child(text);
+        let time =
+            |text: String| div().flex_none().w(px(TIME_W)).text_size(px(10.)).text_color(t.text_secondary).child(text);
         let card = div()
             .id("mini-card")
             .absolute()
             .left(px(CARD_INSET))
             .right(px(CARD_INSET))
             // Rises into place as it fades in.
-            .bottom(px(CARD_INSET - (1. - shown) * 10.))
-            .px(px(CARD_PAD))
-            .pt_3()
+            .bottom(px(CARD_INSET - (1. - shown) * 8.))
+            .pl(px(CARD_PAD))
+            .pr_1()
+            .pt_1()
             .pb_1p5()
-            .rounded(px(22.))
+            .rounded(px(18.))
             .glass_style(GlassStyle { blur: px(22.), ..GlassStyle::default() })
             .bg(t.pill)
             .border_1()
@@ -370,44 +368,37 @@ impl Render for MiniPlayer {
             .opacity(shown)
             .flex()
             .flex_col()
-            .gap_1()
-            .when_some(song.clone(), |d, s| {
-                d.child(
-                    div()
-                        .truncate()
-                        .text_size(px(13.5))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(t.text)
-                        .child(s.title),
-                )
-                .child(div().truncate().text_size(px(12.)).text_color(t.text_secondary).child(s.artist))
-            })
-            .child(div().pt_1().child(scrubber))
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .child(time(format_secs(shown_position)))
-                    .child(time(format!("-{}", format_secs(duration - shown_position)))),
-            )
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .child(control("mini-shuffle", "Shuffle", "shuffle", 13., toggle_color(shuffle)).on_click(act(
-                        |a, cx| {
-                            a.queue.toggle_shuffle();
-                            cx.notify();
-                        },
-                    )))
+                    .gap_1()
+                    .child(div().flex_1().min_w_0().flex().flex_col().when_some(song.clone(), |d, s| {
+                        d.child(
+                            div()
+                                .truncate()
+                                .text_size(px(13.))
+                                .line_height(px(17.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(t.text)
+                                .child(s.title),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(11.5))
+                                .line_height(px(15.))
+                                .text_color(t.text_secondary)
+                                .child(s.artist),
+                        )
+                    }))
                     .child(
                         div()
                             .flex()
+                            .flex_none()
                             .items_center()
-                            .gap_1()
                             .child(
-                                control("mini-prev", "Previous", "prev", 18., t.icon)
+                                control("mini-prev", "Previous", "prev", 15., t.icon)
                                     .on_click(act(|a, cx| a.previous(cx))),
                             )
                             .child(
@@ -415,27 +406,25 @@ impl Render for MiniPlayer {
                                     "mini-play",
                                     if playing { "Pause" } else { "Play" },
                                     if playing { "pause" } else { "play" },
-                                    22.,
+                                    19.,
                                     t.icon,
                                 )
-                                .size(px(40.))
+                                .size(px(34.))
                                 .on_click(act(|a, cx| a.toggle_play(cx))),
                             )
-                            .child(control("mini-next", "Next", "next", 18., t.icon).on_click(act(|a, cx| a.next(cx)))),
-                    )
-                    .child(
-                        control(
-                            "mini-repeat",
-                            "Repeat",
-                            if repeat == Repeat::One { "repeat-one" } else { "repeat" },
-                            13.,
-                            toggle_color(repeat != Repeat::Off),
-                        )
-                        .on_click(act(|a, cx| {
-                            a.queue.cycle_repeat();
-                            cx.notify();
-                        })),
+                            .child(control("mini-next", "Next", "next", 15., t.icon).on_click(act(|a, cx| a.next(cx)))),
                     ),
+            )
+            // The times sit at the scrubber's ends, on its line.
+            .child(
+                div()
+                    .mr(px(CARD_PAD - 4.))
+                    .flex()
+                    .items_center()
+                    .gap(px(TIME_GAP))
+                    .child(time(format_secs(shown_position)))
+                    .child(div().flex_1().min_w_0().child(scrubber))
+                    .child(div().text_right().child(time(format!("-{}", format_secs(duration - shown_position))))),
             );
 
         // A soft shade under the window buttons and the expand button, so they read on bright
