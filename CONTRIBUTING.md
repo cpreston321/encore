@@ -43,6 +43,22 @@ For UI changes, include a screenshot or a short recording. If the change looks d
 | `ENCORE_TOUR_OVERLAY=palette` / `shortcuts` / `nowplaying` / `volume` / `account` / `menu` | Opens that overlay for the tour (`nowplaying` also needs `ENCORE_TOUR_PLAY=1`) |
 | `ENCORE_TOUR_SCROLL=1` | On each tour page, scrolls smoothly down and back, redrawing only the page, as a real scroll does. Use it with `ENCORE_PERF=1` to check that frames fit 120 Hz |
 | `ENCORE_TOUR_PLACEHOLDER_ART=1` | Replaces all artwork with generated gradients, for screenshots that don't include album covers or artist photos |
+| `ENCORE_SNAPSHOT_DIR=dir` | Saves each tour step as a PNG, rendered offscreen, so it works while the screen is locked |
+| `ENCORE_SNAPSHOT_SCALE=2` | Renders those snapshots at that many pixels per point, for Retina screenshots from a 1x display |
+| `ENCORE_TOUR_SIGNED_OUT=1` | Leaves the Keychain alone, so the tour shows the app signed out, as a new user sees it |
+| `ENCORE_TOUR_NAME="Jane Appleseed"` | Shows that name for the account instead of the Mac user's |
+| `ENCORE_TOUR_MINI=1` | Ends the tour by opening the Mini Player with its controls showing, saved as `mini-player.png` |
+| `ENCORE_WELCOME=1` | Shows the welcome screen, which otherwise only a new install sees; the tour hides it without this |
+
+The README's screenshots come from a tour in an empty home folder. It holds only a copy of `musickit.json`, so the catalog is Apple Music's but no account, library or settings show; leave it out to see the MusicKit setup step instead:
+
+```sh
+mkdir -p /tmp/shots/home/Library/Application\ Support/Encore
+cp ~/Library/Application\ Support/Encore/musickit.json /tmp/shots/home/Library/Application\ Support/Encore/
+HOME=/tmp/shots/home ENCORE_TOUR=1 ENCORE_TOUR_SIGNED_OUT=1 ENCORE_TOUR_NAME="Jane Appleseed" \
+  ENCORE_TOUR_PLACEHOLDER_ART=1 ENCORE_TOUR_PLAY=1 ENCORE_TOUR_ONLY=new,home,catalog-album \
+  ENCORE_SNAPSHOT_SCALE=2 ENCORE_SNAPSHOT_DIR=/tmp/shots cargo run --features tour
+```
 
 To profile an optimized build (release builds are stripped, so turn that off for `sample` or Instruments to show function names):
 

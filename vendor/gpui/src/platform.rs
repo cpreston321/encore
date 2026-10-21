@@ -501,9 +501,9 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_close(&self, callback: Box<dyn FnOnce()>);
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>);
     fn draw(&self, scene: &Scene);
-    /// Renders `scene` offscreen at the window's size and returns it as 8-bit sRGB, for
-    /// screenshots that work while the display is asleep or locked.
-    fn snapshot(&self, _scene: &Scene) -> Option<image::RgbaImage> {
+    /// Renders `scene` offscreen at the window's size times `factor` and returns it as 8-bit
+    /// sRGB, for screenshots that work while the display is asleep or locked.
+    fn snapshot(&self, _scene: &Scene, _factor: f32) -> Option<image::RgbaImage> {
         None
     }
     fn completed_frame(&self) {}

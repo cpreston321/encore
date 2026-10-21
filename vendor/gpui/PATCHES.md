@@ -140,7 +140,7 @@ GPUI left the `CAMetalLayer`'s `colorspace` unset, which tells the compositor no
 
 ## Windows can be snapshotted offscreen
 
-`Window::snapshot` draws the window and renders the frame into an offscreen texture, returning it as an 8-bit sRGB image (wide-gamut colors are clamped). The window draws nothing while the screen is locked or the display sleeps, and screen capture sees nothing then either; this works regardless, so tools and tests can look at the app. `PlatformWindow::snapshot` does the rendering; only macOS implements it. `DispatchEventResult` is now public, so code outside GPUI can call `Window::dispatch_event` to drive a window with synthetic input.
+`Window::snapshot` draws the window and renders the frame into an offscreen texture, returning it as an 8-bit sRGB image (wide-gamut colors are clamped). The window draws nothing while the screen is locked or the display sleeps, and screen capture sees nothing then either; this works regardless, so tools and tests can look at the app. `PlatformWindow::snapshot` does the rendering; only macOS implements it. `DispatchEventResult` is now public, so code outside GPUI can call `Window::dispatch_event` to drive a window with synthetic input. `Window::snapshot_at_scale` draws at a chosen number of pixels per point instead of the display's, so a 1x display can produce Retina screenshots; the next frame goes back to the display's scale.
 
 ## Images can be drawn between pixels
 

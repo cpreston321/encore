@@ -60,7 +60,18 @@ impl MusicApp {
                     break;
                 }
             }
-            let Ok(steps) = this.update(cx, |this, _| this.tour_steps()) else {
+            let Ok(steps) = this.update(cx, |this, cx| {
+                // ENCORE_TOUR_NAME=… shows that name for the account instead of the Mac user's.
+                if let Ok(name) = std::env::var("ENCORE_TOUR_NAME") {
+                    this.user_name = name;
+                }
+                // The welcome screen covers every page; ENCORE_WELCOME=1 keeps it up to see it.
+                if std::env::var_os("ENCORE_WELCOME").is_none() {
+                    this.show_welcome = false;
+                    cx.notify();
+                }
+                this.tour_steps()
+            }) else {
                 return;
             };
             // ENCORE_TOUR_PLAY=1: play silently so the player and progress bar show up.
@@ -217,7 +228,7 @@ impl MusicApp {
                     for _ in 0..2 {
                         cx.update(|cx| {
                             if let Some(window) = cx.windows().first() {
-                                window.update(cx, |_, window, cx| window.snapshot(cx)).ok();
+                                window.update(cx, |_, window, cx| snapshot(window, cx)).ok();
                             }
                         })
                         .ok();
@@ -226,7 +237,7 @@ impl MusicApp {
                     let image = cx
                         .update(|cx| {
                             let window = *cx.windows().first()?;
-                            window.update(cx, |_, window, cx| window.snapshot(cx)).ok().flatten()
+                            window.update(cx, |_, window, cx| snapshot(window, cx)).ok().flatten()
                         })
                         .ok()
                         .flatten();
@@ -256,6 +267,28 @@ impl MusicApp {
                 );
             })
             .ok();
+            // ENCORE_TOUR_MINI=1: open the mini player with its controls showing, and with
+            // ENCORE_SNAPSHOT_DIR save it as mini-player.png.
+            if std::env::var_os("ENCORE_TOUR_MINI").is_some() {
+                this.update(cx, |_, cx| crate::ui::mini::toggle(cx.entity(), cx)).ok();
+                pause(4).await;
+                if let Some(dir) = std::env::var_os("ENCORE_SNAPSHOT_DIR") {
+                    let image = cx
+                        .update(|cx| {
+                            let mini = *cx.windows().iter().find(|w| crate::ui::mini::is_mini(**w))?;
+                            mini.update(cx, |_, window, cx| snapshot(window, cx)).ok().flatten()
+                        })
+                        .ok()
+                        .flatten();
+                    if let Some(image) = image {
+                        let path = std::path::Path::new(&dir).join("mini-player.png");
+                        match image.save(&path) {
+                            Ok(()) => eprintln!("TOUR snapshot {}", path.display()),
+                            Err(e) => eprintln!("TOUR snapshot failed: {e}"),
+                        }
+                    }
+                }
+            }
             eprintln!("TOUR done");
         })
         .detach();
@@ -432,7 +465,12 @@ async fn tour_gestures(cx: &mut gpui::AsyncApp, prefix: &str) {
             .update(|cx| {
                 let window = *cx.windows().first()?;
                 window
-                    .update(cx, |_, window, cx| window.snapshot(cx).map(|image| (image, window.scale_factor())))
+                    .update(cx, |_, window, cx| {
+                        snapshot(window, cx).map(|image| {
+                            let scale = image.width() as f32 / f32::from(window.viewport_size().width);
+                            (image, scale)
+                        })
+                    })
                     .ok()
                     .flatten()
             })
@@ -574,4 +612,13 @@ fn hsl(h: f32, s: f32, l: f32) -> [f32; 3] {
         _ => (c, 0., x),
     };
     [r + m, g + m, b + m]
+}
+
+/// ENCORE_SNAPSHOT_SCALE=2 saves snapshots at that many pixels per point, Retina screenshots
+/// from a 1x display.
+fn snapshot(window: &mut Window, cx: &mut gpui::App) -> Option<image::RgbaImage> {
+    match std::env::var("ENCORE_SNAPSHOT_SCALE").ok().and_then(|s| s.parse::<f32>().ok()) {
+        Some(scale) => window.snapshot_at_scale(scale, cx),
+        None => window.snapshot(cx),
+    }
 }

@@ -2173,11 +2173,24 @@ impl Window {
     /// while the display is asleep or the screen is locked, when the window isn't drawing, so
     /// tools and tests can see the app. Only macOS supports it.
     pub fn snapshot(&mut self, cx: &mut App) -> Option<image::RgbaImage> {
+        let scale = self.platform_window.scale_factor();
+        self.snapshot_at_scale(scale, cx)
+    }
+
+    /// Like `snapshot`, but drawn at `scale` pixels per point whatever the display's scale,
+    /// so a 1x display can still produce Retina screenshots.
+    pub fn snapshot_at_scale(&mut self, scale: f32, cx: &mut App) -> Option<image::RgbaImage> {
+        let display_scale = self.scale_factor;
+        self.scale_factor = scale;
         self.refresh();
         self.draw(cx).clear();
         let scene = &self.rendered_frame.scene;
         scene.motion_time.set(self.motion_clock.get());
-        self.platform_window.snapshot(scene)
+        let image = self.platform_window.snapshot(scene, scale / display_scale);
+        self.scale_factor = display_scale;
+        // The frame just drawn is at the snapshot's scale; the window draws its own next.
+        self.refresh();
+        image
     }
 
     /// Produces a new frame and assigns it to `rendered_frame`. To actually show

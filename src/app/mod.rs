@@ -667,7 +667,13 @@ impl MusicApp {
         if std::env::var_os("ENCORE_TOUR").is_some() {
             this.start_tour(cx);
         }
-        if this.catalog.is_musickit() {
+        // ENCORE_TOUR_SIGNED_OUT=1 leaves the Keychain alone, so a tour shows the app as a new
+        // user sees it without asking for, or showing, anyone's account.
+        #[cfg(any(debug_assertions, feature = "tour"))]
+        let signed_out = std::env::var_os("ENCORE_TOUR_SIGNED_OUT").is_some();
+        #[cfg(not(any(debug_assertions, feature = "tour")))]
+        let signed_out = false;
+        if this.catalog.is_musickit() && !signed_out {
             this.restore_sign_in(cx);
         }
         this

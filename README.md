@@ -24,17 +24,35 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 - **Synced lyrics.** Lyrics come from [LRCLIB](https://lrclib.net) and follow along with the song. Click a line to jump there.
 - **Detail pages that take on the artwork's colors.** Album, artist and playlist pages tint to match their artwork, the header moves with parallax, and a compact title bar fades in as you scroll.
 - **Quick search (⌘K).** Spotlight-style results show a top result, artists, albums, songs and playlists from both your library and the Apple Music catalog.
-- **A Mac app first.** Media keys and Control Center's Now Playing work. There's a Mini Player, Dock menu controls, a menu bar item for every page, and full keyboard navigation.
+- **Easy to set up.** A new install opens on a welcome screen that signs you in and only shows the app once your library has loaded. Without a MusicKit key, it walks you through adding one: a link to Apple's key page, a file picker for the `.p8` file, and a check with Apple before saving.
+- **A Mac app first.** Media keys and Control Center's Now Playing work. There are Dock menu controls, a menu bar item for every page, and full keyboard navigation.
+- **Mini Player (⇧⌘M).** A small floating window with the cover, and the player bar's glass, scrubber and controls on hover. It stands in for the main window, which hides while it's open, and remembers where you put it.
+- **Trackpad gestures.** Swipe sideways with two fingers to go back and forward, swipe the player to skip songs, scroll over the volume to change it, and shelves settle on a tile when you let go. Scroll views stretch and bounce at their edges, as in AppKit.
+- **See All.** Every shelf opens a full page: 200 entries deep for the charts, and up to 100 of an artist's top songs.
 - **Visualizer.** Hovering the progress bar shows a live spectrum of the song as it plays. Before volume control is on, or on the web player, it's computed from the song's preview instead.
 - **Library tools.** Sort and filter your Songs, Favorites and Albums. ⌘-click or ⇧-click to select several songs, and drag songs onto a playlist or into Playing Next.
 - **Fast and accessible.** Encore scrolls and animates at 120 fps on ProMotion displays. It launches in about a quarter of a second and uses less CPU than Music.app while playing ([benchmarks](docs/benchmarks.md)). It follows the system's light or dark appearance and honors Reduce Motion.
 
 <table>
   <tr>
-    <td width="58%"><img src="docs/screenshots/album.png" alt="Album page tinted from its artwork"></td>
+    <td width="50%"><img src="docs/screenshots/home.png" alt="Home, with the floating player bar"></td>
+    <td width="50%"><img src="docs/screenshots/new.png" alt="New, with the week's albums and songs"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/album.png" alt="Album page tinted from its artwork"></td>
     <td><img src="docs/screenshots/quick-search.png" alt="Quick search"></td>
   </tr>
+  <tr>
+    <td><img src="docs/screenshots/welcome.png" alt="Welcome screen on a new install"></td>
+    <td><img src="docs/screenshots/setup.png" alt="Connecting a MusicKit key"></td>
+  </tr>
 </table>
+
+<p align="center">
+  <img src="docs/screenshots/mini-player.png" width="300" alt="Mini Player with its controls showing">
+</p>
+
+The screenshots use stand-in gradients in place of album artwork (`ENCORE_TOUR_PLACEHOLDER_ART`); [CONTRIBUTING.md](CONTRIBUTING.md) explains how to take them.
 
 ## Getting started
 

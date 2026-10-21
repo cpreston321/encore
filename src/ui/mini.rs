@@ -77,6 +77,11 @@ fn save_bounds(window: &Window) {
     }
 }
 
+/// Whether `window` is the mini player.
+pub fn is_mini(window: AnyWindowHandle) -> bool {
+    OPEN.with(|o| o.get()) == Some(window)
+}
+
 /// The app's other windows: the main window, which the mini player stands in for.
 fn main_windows(cx: &App) -> Vec<AnyWindowHandle> {
     let mini = OPEN.with(|o| o.get());
@@ -158,7 +163,9 @@ fn toggle_now(app: Entity<MusicApp>, cx: &mut App) {
                 let mut mini = MiniPlayer {
                     app,
                     focus: cx.focus_handle(),
-                    hovered: false,
+                    // A tour shows the controls, which otherwise need the pointer.
+                    hovered: cfg!(any(debug_assertions, feature = "tour"))
+                        && std::env::var_os("ENCORE_TOUR_MINI").is_some(),
                     hover_changed: Instant::now() - FADE,
                     scrub: None,
                     pointer: None,

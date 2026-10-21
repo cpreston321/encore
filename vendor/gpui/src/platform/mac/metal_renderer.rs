@@ -309,11 +309,13 @@ impl MetalRenderer {
         self.update_path_intermediate_textures(device_pixels_size);
     }
 
-    /// Renders `scene` into an offscreen texture the size of the drawable and reads it back
-    /// as 8-bit sRGB, clamping wide-gamut colors.
-    pub fn snapshot(&mut self, scene: &Scene) -> Option<image::RgbaImage> {
+    /// Renders `scene` into an offscreen texture the size of the drawable times `factor` and
+    /// reads it back as 8-bit sRGB, clamping wide-gamut colors.
+    pub fn snapshot(&mut self, scene: &Scene, factor: f32) -> Option<image::RgbaImage> {
         let drawable_size = self.layer.drawable_size();
-        let (width, height) = (drawable_size.width.ceil() as u32, drawable_size.height.ceil() as u32);
+        let factor = f64::from(factor);
+        let (width, height) =
+            ((drawable_size.width * factor).ceil() as u32, (drawable_size.height * factor).ceil() as u32);
         if width == 0 || height == 0 {
             return None;
         }
@@ -336,6 +338,11 @@ impl MetalRenderer {
         command_buffer.commit();
         command_buffer.wait_until_completed();
         self.instance_buffer_pool.lock().release(instance_buffer);
+        // Paths draw through textures sized for the viewport; put them back for the window.
+        self.update_path_intermediate_textures(size(
+            DevicePixels(drawable_size.width.ceil() as i32),
+            DevicePixels(drawable_size.height.ceil() as i32),
+        ));
 
         let bytes_per_pixel = match format {
             MTLPixelFormat::RGBA16Float => 8,
