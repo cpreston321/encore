@@ -363,7 +363,7 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let art_size = if big { 52. } else { 36. };
-        let sub = if is_sel { white().opacity(0.8) } else { t.text_secondary };
+        let sub = if is_sel { t.on_accent().opacity(0.8) } else { t.text_secondary };
         let (art, title, subtitle, trailing): (AnyElement, String, String, AnyElement) = match &item {
             PaletteItem::Artist(n, id, a) => (
                 {
@@ -451,11 +451,11 @@ impl MusicApp {
                                     .flex()
                                     .items_center()
                                     .gap_1()
-                                    .bg(if is_sel { white() } else { t.accent })
-                                    .text_color(if is_sel { t.accent } else { white() })
+                                    .bg(if is_sel { t.on_accent() } else { t.accent })
+                                    .text_color(if is_sel { t.accent } else { t.on_accent() })
                                     .text_size(px(12.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(icon("play", 10., if is_sel { t.accent } else { white() }))
+                                    .child(icon("play", 10., if is_sel { t.accent } else { t.on_accent() }))
                                     .child("Play"),
                             )
                         })
@@ -492,7 +492,7 @@ impl MusicApp {
             .flex()
             .items_center()
             .gap_3()
-            .when(is_sel, |d| d.bg(t.accent).text_color(white()))
+            .when(is_sel, |d| d.bg(t.accent).text_color(t.on_accent()))
             .when(!is_sel, |d| d.hover(|s| s.bg(t.hover)))
             .child(art)
             .child(

@@ -13,14 +13,14 @@ impl MusicApp {
     ) -> impl IntoElement {
         let is_current = self.queue.current().is_some_and(|c| c.id == song.id);
         let selected = self.is_selected(&song.id);
-        let fg2 = if selected { white().opacity(0.85) } else { t.text_secondary };
+        let fg2 = if selected { t.on_accent().opacity(0.85) } else { t.text_secondary };
         // The number (or now-playing speaker) sits in-flow in a centered box; the hover
         // play icon overlays the same box, so swapping between them doesn't shift anything.
         let number: AnyElement = if is_current {
             icon(
                 if self.state == PlayState::Playing { "speaker-loud" } else { "speaker" },
                 14.,
-                if selected { white() } else { t.accent },
+                if selected { t.on_accent() } else { t.accent },
             )
             .into_any_element()
         } else {
@@ -47,7 +47,7 @@ impl MusicApp {
                 .invisible()
                 .group_hover("track", |s| s.visible())
                 // The triangle's visual center sits left of its box; nudge it.
-                .child(div().ml(px(1.5)).child(icon("play", 12., if selected { white() } else { t.text })))
+                .child(div().ml(px(1.5)).child(icon("play", 12., if selected { t.on_accent() } else { t.text })))
         });
         let list = list.clone();
         let menu_list = list.clone();
@@ -77,7 +77,7 @@ impl MusicApp {
             .when(ix.is_multiple_of(2) && !selected, |d| d.bg(t.row_alt))
             // Tinted (artwork-colored) pages use thin dividers instead of zebra stripes.
             .when(t.row_alt.a == 0., |d| d.rounded_none().border_b_1().border_color(t.separator))
-            .when(selected, |d| d.bg(t.accent).text_color(white()))
+            .when(selected, |d| d.bg(t.accent).text_color(t.on_accent()))
             .when(!selected, |d| d.hover(|s| s.bg(t.hover)))
             .child(
                 div()
@@ -537,8 +537,8 @@ impl MusicApp {
         let song = &list[ix];
         let is_current = self.queue.current().is_some_and(|c| c.id == song.id);
         let selected = self.is_selected(&song.id);
-        let fg2 = if selected { white().opacity(0.85) } else { t.text_secondary };
-        let fg1 = if selected { white() } else { t.text };
+        let fg2 = if selected { t.on_accent().opacity(0.85) } else { t.text_secondary };
+        let fg1 = if selected { t.on_accent() } else { t.text };
         let row_key: SharedString = format!("{id}-row-{ix}").into();
         let link_hovered = self.link_hovered(&row_key);
         let list = list.clone();
@@ -569,7 +569,7 @@ impl MusicApp {
             .gap_3()
             .rounded(px(6.))
             .when(ix % 2 == 1 && !selected, |d| d.bg(t.row_alt))
-            .when(selected, |d| d.bg(t.accent).text_color(white()))
+            .when(selected, |d| d.bg(t.accent).text_color(t.on_accent()))
             .when(!selected && !link_hovered, |d| d.hover(|s| s.bg(t.hover)))
             .child(
                 div()

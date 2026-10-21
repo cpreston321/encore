@@ -190,7 +190,7 @@ impl MusicApp {
                 .flex()
                 .items_center()
                 .font_weight(FontWeight::SEMIBOLD)
-                .when(primary, |d| d.bg(t.accent).text_color(gpui::white()))
+                .when(primary, |d| d.bg(t.accent).text_color(t.on_accent()))
                 .when(!primary, |d| d.bg(t.button))
                 .hover(|s| s.opacity(0.85))
                 .child(label)

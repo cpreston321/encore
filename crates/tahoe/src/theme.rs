@@ -65,6 +65,12 @@ impl Theme {
         }
     }
 
+    /// Text and icon color for anything drawn on the accent, such as a selected row: white,
+    /// or near-black when the accent is too light for white (artwork-tinted pages).
+    pub fn on_accent(&self) -> Hsla {
+        readable_on(self.accent, rgb(0xffffff).into())
+    }
+
     pub fn dark() -> Self {
         Self {
             window: rgb(0x1e1e1e).into(),

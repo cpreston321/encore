@@ -19,7 +19,7 @@ pub(crate) fn toggle_chip(t: &Theme, id: &'static str, icon_name: &'static str, 
         .justify_center()
         .bg(if on { t.accent } else { t.button })
         .hover(|s| s.opacity(0.85))
-        .child(icon(icon_name, 13., if on { white() } else { t.icon }))
+        .child(icon(icon_name, 13., if on { t.on_accent() } else { t.icon }))
 }
 
 /// `1395` → `1,395`.

@@ -485,7 +485,7 @@ impl gpui::Render for DragPreview {
             .py_1p5()
             .rounded_full()
             .bg(t.accent)
-            .text_color(gpui::white())
+            .text_color(t.on_accent())
             .text_size(px(12.5))
             .font_weight(FontWeight::SEMIBOLD)
             .font_family(".SystemUIFont")
