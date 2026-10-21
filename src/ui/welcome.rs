@@ -64,9 +64,9 @@ const DRIFT_PERIOD: f32 = 48.;
 
 static WALL_START: OnceLock<std::time::Instant> = OnceLock::new();
 
-/// Draws its child moved sideways by `offset`, a fraction of a pixel included. Moving a row
-/// through layout instead snaps it to whole points, and a slow drift then steps rather than
-/// glides.
+/// Draws its child moved sideways by `offset`, a fraction of a pixel included. Layout rounds
+/// to whole points and images snap to whole pixels, either of which makes a slow drift step
+/// rather than glide.
 struct Shifted {
     offset: f32,
     child: Option<AnyElement>,
@@ -126,7 +126,7 @@ impl gpui::Element for Shifted {
         cx: &mut gpui::App,
     ) {
         if let Some(child) = self.child.as_mut() {
-            child.paint(window, cx);
+            window.with_subpixel_images(|window| child.paint(window, cx));
         }
     }
 }

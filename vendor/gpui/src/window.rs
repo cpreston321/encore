@@ -910,6 +910,8 @@ pub struct Window {
     pub(crate) needs_present: Rc<Cell<bool>>,
     pub(crate) last_input_timestamp: Rc<Cell<Instant>>,
     motion_clock: Cell<f32>,
+    /// While set, images keep fractional device-pixel positions (`with_subpixel_images`).
+    subpixel_images: bool,
     last_motion_present: Cell<Option<Instant>>,
     phase_clock: crate::frame_timings::PhaseClock,
     frame_timings: Cell<crate::FrameTimings>,
@@ -1375,6 +1377,7 @@ impl Window {
             needs_present,
             last_input_timestamp,
             motion_clock: Cell::new(0.),
+            subpixel_images: false,
             last_motion_present: Cell::new(None),
             phase_clock: Default::default(),
             frame_timings: Cell::new(Default::default()),
@@ -2798,6 +2801,17 @@ impl Window {
         }
     }
 
+    /// Paints images in `f` at their exact position, fractions of a device pixel included,
+    /// instead of snapping them to the pixel grid. Something moving slowly then glides
+    /// rather than stepping a pixel at a time; the cost is a slightly softer image whenever
+    /// it sits between pixels. Call it during paint.
+    pub fn with_subpixel_images<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let was = std::mem::replace(&mut self.subpixel_images, true);
+        let result = f(self);
+        self.subpixel_images = was;
+        result
+    }
+
     /// Updates the global element offset relative to the current offset. This is used to implement
     /// scrolling. This method should only be called during the prepaint phase of element drawing.
     pub fn with_element_offset<R>(
@@ -3852,9 +3866,13 @@ impl Window {
             pad: 0,
             grayscale,
             display_p3,
-            bounds: bounds
-                .map_origin(|origin| origin.floor())
-                .map_size(|size| size.ceil()),
+            bounds: if self.subpixel_images {
+                bounds
+            } else {
+                bounds
+                    .map_origin(|origin| origin.floor())
+                    .map_size(|size| size.ceil())
+            },
             content_mask,
             corner_radii,
             tile,
