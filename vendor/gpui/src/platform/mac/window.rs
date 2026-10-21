@@ -1368,6 +1368,13 @@ impl PlatformWindow for MacWindow {
             .detach();
     }
 
+    fn order_out(&self) {
+        let window = self.0.lock().native_window;
+        unsafe {
+            let _: () = msg_send![window, orderOut: nil];
+        }
+    }
+
     fn minimize(&self) {
         let window = self.0.lock().native_window;
         unsafe {

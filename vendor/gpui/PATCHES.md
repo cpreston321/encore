@@ -157,3 +157,7 @@ GPUI rounded corners with quarter circles. A circle meets a straight edge with a
 - **Where it applies.** Quads (backgrounds and uniform borders), `quad_sdf` and so everything built on it: image and surface corner clipping, rounded content masks, unblurred shadows, and the backdrop blur's shape and rim. Borders of different widths on adjacent sides still use the elliptical inner edge, and blurred shadows still integrate a circular corner; both are close enough not to show.
 - **Elsewhere** the Blade and DirectX renderers keep circular corners.
 
+## Windows can be hidden
+
+`Window::hide_window` takes a window off screen without closing or minimizing it (`orderOut:` on macOS), and `activate_window` brings it back, so an app can stand a mini player in for its main window. `PlatformWindow::order_out` does the work; it does nothing on other platforms.
+

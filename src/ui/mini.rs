@@ -66,14 +66,41 @@ fn save_bounds(window: &Window) {
     }
 }
 
-/// Opens the mini player, or closes it if it's open.
-pub fn toggle(app: Entity<MusicApp>, cx: &mut App) {
-    if let Some(handle) = OPEN.with(|o| o.take()) {
-        let _ = handle.update(cx, |_, window, _| {
+/// The app's other windows: the main window, which the mini player stands in for.
+fn main_windows(cx: &App) -> Vec<AnyWindowHandle> {
+    let mini = OPEN.with(|o| o.get());
+    cx.windows().into_iter().filter(|w| Some(*w) != mini).collect()
+}
+
+fn show_main_windows(cx: &mut App) {
+    for handle in main_windows(cx) {
+        let _ = handle.update(cx, |_, window, _| window.activate_window());
+    }
+    cx.activate(true);
+}
+
+/// Closes the mini player and brings the main window back.
+fn close(cx: &mut App) {
+    if let Some(mini) = OPEN.with(|o| o.take()) {
+        let _ = mini.update(cx, |_, window, _| {
             save_bounds(window);
             window.remove_window();
         });
-        return;
+    }
+    show_main_windows(cx);
+}
+
+/// Opens the mini player in place of the main window, or closes it and brings the main
+/// window back.
+pub fn toggle(app: Entity<MusicApp>, cx: &mut App) {
+    // The menu or shortcut arrives while its window is mid-update, and a window can't be
+    // hidden or closed from inside its own update; those calls would be dropped.
+    cx.defer(move |cx| toggle_now(app, cx));
+}
+
+fn toggle_now(app: Entity<MusicApp>, cx: &mut App) {
+    if OPEN.with(|o| o.get()).is_some() {
+        return close(cx);
     }
     let bounds = saved_bounds().unwrap_or_else(|| Bounds::new(point(px(80.), px(80.)), size(px(DEFAULT), px(DEFAULT))));
     let handle = cx.open_window(
@@ -90,9 +117,10 @@ pub fn toggle(app: Entity<MusicApp>, cx: &mut App) {
             ..Default::default()
         },
         |window, cx| {
-            window.on_window_should_close(cx, |window, _| {
+            window.on_window_should_close(cx, |window, cx| {
                 save_bounds(window);
                 OPEN.with(|o| o.set(None));
+                show_main_windows(cx);
                 true
             });
             let view = cx.new(|cx| {
@@ -135,6 +163,9 @@ pub fn toggle(app: Entity<MusicApp>, cx: &mut App) {
     );
     if let Ok(handle) = handle {
         OPEN.with(|o| o.set(Some(handle.into())));
+        for main in main_windows(cx) {
+            let _ = main.update(cx, |_, window, _| window.hide_window());
+        }
     }
 }
 
@@ -186,19 +217,8 @@ impl MiniPlayer {
     }
 
     fn show_main_window(&mut self, cx: &mut Context<Self>) {
-        let mini = OPEN.with(|o| o.get());
-        for handle in cx.windows() {
-            if Some(handle) != mini {
-                let _ = handle.update(cx, |_, window, _| window.activate_window());
-            }
-        }
-        cx.activate(true);
-        if let Some(mini) = OPEN.with(|o| o.take()) {
-            let _ = mini.update(cx, |_, window, _| {
-                save_bounds(window);
-                window.remove_window();
-            });
-        }
+        // Closing the window from inside its own view's update would update it reentrantly.
+        cx.defer(close);
     }
 
     fn key_down(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {

@@ -4853,6 +4853,12 @@ impl Window {
         self.platform_window.activate();
     }
 
+    /// Hide the current window, as a mini player hides the main window; `activate_window`
+    /// shows it again.
+    pub fn hide_window(&self) {
+        self.platform_window.order_out();
+    }
+
     /// Minimize the current window at the platform level.
     pub fn minimize_window(&self) {
         self.platform_window.minimize();
