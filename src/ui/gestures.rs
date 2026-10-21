@@ -170,7 +170,8 @@ impl MusicApp {
             }
             TouchPhase::Moved => {
                 let Some(swipe) = self.nav_swipe.as_mut() else { return };
-                let dx = f32::from(e.delta.pixel_delta(px(20.)).x);
+                // Positive as the fingers move right (the delta is negative then).
+                let dx = -f32::from(e.delta.pixel_delta(px(20.)).x);
                 // Only toward a page there is: back with history, forward with a forward stack.
                 let (can_back, can_forward) = (!self.history.is_empty(), !self.forward_history.is_empty());
                 let next = swipe.offset + dx;
@@ -203,7 +204,8 @@ impl MusicApp {
         match e.touch_phase {
             TouchPhase::Started => self.player_swipe = Swipe::default(),
             TouchPhase::Moved => {
-                let dx = f32::from(e.delta.pixel_delta(px(20.)).x);
+                // Positive as the fingers move right (the delta is negative then).
+                let dx = -f32::from(e.delta.pixel_delta(px(20.)).x);
                 if self.player_swipe.add(dx, SKIP_SWIPE) {
                     perform(Haptic::Alignment);
                 }
