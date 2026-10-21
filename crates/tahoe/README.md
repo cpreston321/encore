@@ -15,7 +15,7 @@ TAHOE_APPEARANCE=light cargo run -p tahoe --example gallery
 | `primitives` | The same looks as plain, chainable gpui elements (`pill_button`, `circle_button`, `glass_button`, `toolbar_button`…) |
 | `textfield` | `TextField`, a single-line editing model, and `TextInput`, which draws it and takes text from macOS input methods (IME composition, dead keys, press-and-hold accents, dictation, the emoji picker) for any view that implements `TextFieldHost` |
 | `theme` | Light and dark color tokens, `Palette`s for surfaces tinted by artwork, and WCAG `contrast` / `readable_on` |
-| `typography` | `tracking(size)`: the extra SF tracking large titles get, for `.tracking(..)`; `text_shadow_on_art()` for white text on artwork |
+| `typography` | `text_shadow_on_art()` for white text on artwork |
 | `anim` | `Presence` (open/close transitions that reverse mid-way), `ColorBlend`, and `reduce_motion()` |
 | `icons` | The embedded icon set as an `AssetSource` (`tahoe::Assets`) and `icon(name, size, color)` |
 | `chrome` | `use_tahoe_corners`: Tahoe's larger window corner radius, which macOS only gives windows with a toolbar |

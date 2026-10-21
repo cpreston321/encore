@@ -479,6 +479,7 @@ impl<V: TextFieldHost> Element for TextInput<V> {
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: style.letter_spacing,
         };
         let runs: Vec<TextRun> = match field.marked_range() {
             Some(m) if !placeholder => [
@@ -593,6 +594,7 @@ impl<V: TextFieldHost> FieldInputHandler<V> {
             background_color: None,
             underline: None,
             strikethrough: None,
+            letter_spacing: gpui::Pixels::ZERO,
         };
         window.text_system().shape_line(text.into(), self.font_size, &[run], None)
     }

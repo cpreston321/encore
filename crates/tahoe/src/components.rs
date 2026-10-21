@@ -17,7 +17,6 @@ use crate::{
     icons::icon,
     primitives,
     theme::{Theme, readable_on},
-    typography::tracking,
 };
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -329,7 +328,7 @@ impl SectionHeader {
 impl RenderOnce for SectionHeader {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let t = theme_for(self.theme, window);
-        let title = div().text_size(px(19.)).tracking(tracking(19.)).font_weight(FontWeight::BOLD).child(self.title);
+        let title = div().text_size(px(19.)).font_weight(FontWeight::BOLD).child(self.title);
         let row = div().px(px(self.inset)).pt_7().pb_2p5().flex();
         match self.on_click {
             None => row.child(title),
@@ -394,15 +393,7 @@ impl RenderOnce for PageHeader {
             .when_some(self.on_back, |d, f| {
                 d.child(primitives::toolbar_button(&t, "page-back", "chevron-left", 32.).on_click(f))
             })
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(28.))
-                    .tracking(tracking(28.))
-                    .font_weight(FontWeight::BOLD)
-                    .child(self.title),
-            )
+            .child(div().min_w_0().truncate().text_size(px(28.)).font_weight(FontWeight::BOLD).child(self.title))
     }
 }
 

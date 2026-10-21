@@ -188,12 +188,12 @@ impl Gallery {
                             .text_size(px(size))
                             .font_weight(FontWeight::BOLD)
                             .child(div().w(px(300.)).child("Recently Added Albums"))
-                            .child(div().w(px(300.)).tracking(tracking(size)).child("Recently Added Albums"))
+                            .child(div().w(px(300.)).tracking(px(-0.02 * size)).child("Recently Added Albums"))
                     }))
                     .child(
                         div()
                             .text_color(t.text_secondary)
-                            .child("13, 19 and 28 pt: as shaped, then with tracking(size)"),
+                            .child("13, 19 and 28 pt: as the system shapes it, then with .tracking(-2% of the size)"),
                     ),
             )
             .child(row().pt_4().items_start().children([1, 2, 3].map(|lines| {
@@ -219,7 +219,6 @@ impl Gallery {
                         .text_color(white())
                         .font_weight(FontWeight::BOLD)
                         .text_size(px(20.))
-                        .tracking(tracking(20.))
                         .child(div().child("No shadow"))
                         .child(div().text_shadow(text_shadow_on_art()).child("text_shadow_on_art"))
                         .child(

@@ -8,7 +8,7 @@ pub(crate) use tahoe::{
     layout::{capture_bounds, group_digits, lock_scroll_axis},
     primitives::{button, empty_state, icon_button, pill_button, toggle_button},
     theme::gradient,
-    typography::{text_shadow_on_art, tracking},
+    typography::text_shadow_on_art,
 };
 
 pub(crate) fn explicit_badge(t: &Theme) -> impl IntoElement {
@@ -36,14 +36,7 @@ pub(crate) fn table_header(t: &Theme) -> impl IntoElement {
 
 pub(crate) fn page_title(title: impl Into<SharedString>) -> impl IntoElement {
     let title = title.into();
-    div()
-        .px(px(PAD))
-        .pt(px(46.))
-        .pb_4()
-        .text_size(px(28.))
-        .tracking(tracking(28.))
-        .font_weight(FontWeight::BOLD)
-        .child(title)
+    div().px(px(PAD)).pt(px(46.)).pb_4().text_size(px(28.)).font_weight(FontWeight::BOLD).child(title)
 }
 
 /// A section title with nothing more to show. Sections that open a fuller page use

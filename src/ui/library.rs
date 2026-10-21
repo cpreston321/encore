@@ -196,7 +196,6 @@ impl MusicApp {
                             .pt(px(46.))
                             .pb_3()
                             .text_size(px(28.))
-                            .tracking(tracking(28.))
                             .font_weight(FontWeight::BOLD)
                             .child("Artists"),
                     )
