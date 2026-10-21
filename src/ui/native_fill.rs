@@ -51,6 +51,16 @@ struct CGRect {
     size: CGSize,
 }
 
+/// Core Graphics' color, only ever handled by pointer.
+#[repr(C)]
+struct CGColor {
+    _private: [u8; 0],
+}
+
+unsafe impl objc2::RefEncode for CGColor {
+    const ENCODING_REF: objc2::Encoding = objc2::Encoding::Pointer(&objc2::Encoding::Struct("CGColor", &[]));
+}
+
 unsafe impl objc2::Encode for CGPoint {
     const ENCODING: objc2::Encoding = objc2::Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
 }
@@ -141,7 +151,7 @@ impl NativeFill {
                     blue: f64::from(b),
                     alpha: f64::from(a)
                 ];
-                let cg: *const std::ffi::c_void = msg_send![&*color, CGColor];
+                let cg: *const CGColor = msg_send![&*color, CGColor];
                 let _: () = msg_send![layer, setBackgroundColor: cg];
             }
             let _: () = msg_send![layer, setHidden: false];
