@@ -370,7 +370,15 @@ impl Render for Progress {
                                 )
                             })
                             .child(
-                                div().absolute().top_0().bottom_0().left_0().w(relative(solid)).rounded_full().bg(fill),
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .bottom_0()
+                                    .left_0()
+                                    .w(relative(solid))
+                                    // Against the preview, a rounded end would leave a notch.
+                                    .when(preview.is_none(), |d| d.rounded_full())
+                                    .bg(fill),
                             )
                     }),
             )
