@@ -41,6 +41,8 @@ impl MusicApp {
         self.show_now_playing = true;
         self.menu = None;
         self.show_queue = false;
+        self.show_account = false;
+        self.show_volume = false;
         if let Some(song) = self.queue.current().cloned() {
             self.ensure_lyrics(&song, cx);
         }
