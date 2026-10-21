@@ -100,6 +100,10 @@ pub struct Palette {
 impl Palette {
     /// From Apple's own artwork colors, which are picked to read on the background.
     pub fn from_art_colors(c: crate::model::ArtColors) -> Self {
+        Self::from_art_colors_raw(c).readable()
+    }
+
+    fn from_art_colors_raw(c: crate::model::ArtColors) -> Self {
         let bg: Hsla = rgb(c.bg).into();
         let texts: Vec<Hsla> = c.text.iter().map(|&t| rgb(t).into()).collect();
         let accent = texts
@@ -121,6 +125,10 @@ impl Palette {
 
     /// Fallback from the artwork's average color.
     pub fn from_average(c: Hsla) -> Self {
+        Self::from_average_raw(c).readable()
+    }
+
+    fn from_average_raw(c: Hsla) -> Self {
         Self {
             bg: Hsla { s: c.s.min(0.45), l: (c.l * 0.55).clamp(0.11, 0.22), ..c },
             text: white_ish(0.95),
@@ -131,8 +139,48 @@ impl Palette {
 
     /// Icon color that reads on the accent fill.
     pub fn on_accent(&self) -> Hsla {
-        if self.accent.l > 0.62 { self.bg } else { white_ish(1.) }
+        readable_on(self.accent, white_ish(1.))
     }
+
+    /// Makes sure the colors read on the background: body text at 4.5:1, secondary text at
+    /// 3:1, and the accent at 3:1 too, since it's also used for text and selected items.
+    fn readable(mut self) -> Self {
+        if contrast(self.text, self.bg) < 4.5 {
+            self.text = best_of_black_white(self.bg, 0.95);
+        }
+        if contrast(self.text2, self.bg) < 3. {
+            self.text2 = Hsla { a: 0.7, ..self.text };
+        }
+        if contrast(self.accent, self.bg) < 3. {
+            self.accent = self.text;
+        }
+        self
+    }
+}
+
+/// WCAG relative luminance: 0 for black, 1 for white. Alpha is ignored.
+pub fn luminance(c: Hsla) -> f32 {
+    let c: gpui::Rgba = Hsla { a: 1., ..c }.into();
+    let linear = |v: f32| if v <= 0.039_28 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) };
+    0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+}
+
+/// WCAG contrast ratio, from 1 (none) to 21 (black on white).
+pub fn contrast(a: Hsla, b: Hsla) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+fn best_of_black_white(bg: Hsla, alpha: f32) -> Hsla {
+    let black = Hsla { h: 0., s: 0., l: 0.07, a: alpha };
+    if contrast(black, bg) > contrast(white_ish(1.), bg) { black } else { white_ish(alpha) }
+}
+
+/// `preferred` if it reads on `bg` (3:1, enough for icons and bold labels), otherwise near-black
+/// or white, whichever reads better. Artwork-tinted pages can make the accent almost white, so
+/// anything drawn on it goes through this.
+pub fn readable_on(bg: Hsla, preferred: Hsla) -> Hsla {
+    if contrast(preferred, bg) >= 3. { preferred } else { best_of_black_white(bg, preferred.a) }
 }
 
 fn white_ish(alpha: f32) -> Hsla {
@@ -160,5 +208,40 @@ impl Theme {
             accent: p.accent,
             ..*self
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contrast_matches_wcag() {
+        let (black, white): (Hsla, Hsla) = (rgb(0x000000).into(), rgb(0xffffff).into());
+        assert!((contrast(black, white) - 21.).abs() < 0.01);
+        assert!((contrast(white, white) - 1.).abs() < 0.01);
+    }
+
+    #[test]
+    fn readable_on_keeps_good_colors_and_swaps_bad_ones() {
+        let white: Hsla = rgb(0xffffff).into();
+        // The app's red accent keeps its white play icons.
+        for appearance in [WindowAppearance::Dark, WindowAppearance::Light] {
+            let accent = Theme::for_appearance(appearance).accent;
+            assert_eq!(readable_on(accent, white), white, "{accent:?}");
+        }
+        // A near-white accent from light artwork gets a dark icon instead.
+        let light: Hsla = rgb(0xe8e8e8).into();
+        assert!(luminance(readable_on(light, white)) < 0.1);
+    }
+
+    #[test]
+    fn tinted_palettes_keep_text_readable() {
+        // Apple's colors for a dark cover whose text colors are all low-contrast grays.
+        let colors = crate::model::ArtColors { bg: 0x101010, text: [0x303030, 0x2a2a2a, 0x282828, 0x252525] };
+        let p = Palette::from_art_colors(colors);
+        assert!(contrast(p.text, p.bg) >= 4.5);
+        assert!(contrast(p.accent, p.bg) >= 3.);
+        assert!(contrast(p.on_accent(), p.accent) >= 3.);
     }
 }

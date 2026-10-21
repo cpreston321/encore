@@ -696,7 +696,14 @@ impl MusicApp {
                             .opacity(hover)
                             .mb(px((1. - hover) * -4.))
                             .when(hover == 0., |d| d.invisible())
-                            .hover(|s| s.bg(t.accent))
+                            .hover(|s| {
+                                // A light accent would swallow the white icon; darken instead.
+                                if crate::theme::contrast(t.accent, white()) >= 3. {
+                                    s.bg(t.accent)
+                                } else {
+                                    s.bg(gpui::black().opacity(0.8))
+                                }
+                            })
                             .child(icon("play", 13., white()))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();

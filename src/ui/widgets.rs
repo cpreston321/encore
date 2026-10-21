@@ -28,7 +28,7 @@ pub(crate) fn pill_button(
     filled: bool,
 ) -> Stateful<Div> {
     if filled {
-        button(t, id, icon_name, label, t.accent.into(), white())
+        button(t, id, icon_name, label, t.accent.into(), crate::theme::readable_on(t.accent, white()))
     } else {
         button(t, id, icon_name, label, t.button.into(), t.accent)
     }

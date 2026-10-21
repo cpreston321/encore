@@ -1090,6 +1090,7 @@ impl MusicApp {
 
 /// Round icon button.
 fn circle(_t: &Theme, id: &'static str, icon_name: &'static str, size: f32, bg: Hsla, fg: Hsla) -> Stateful<Div> {
+    let fg = crate::theme::readable_on(bg, fg);
     div()
         .id(id)
         .size(px(size))
