@@ -1,7 +1,7 @@
 //! Browse pages: routing plus Home, New, Radio and Search.
 
 use super::*;
-use crate::app::SeeAllItems;
+use crate::{app::SeeAllItems, keys::TextFieldId};
 
 impl MusicApp {
     pub(crate) fn render_route(
@@ -473,7 +473,9 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let focused = focused && !self.palette_open;
-        let text = self.search.render_text(t, focused, "Artists, Songs, Albums, and More", 17.);
+        let text = tahoe::TextInput::new(cx.entity(), TextFieldId::Search, &self.search_focus, t)
+            .placeholder("Artists, Songs, Albums, and More")
+            .focused(focused);
 
         let field = div()
             .id("search-field")

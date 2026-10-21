@@ -10,7 +10,7 @@ use gpui::{
 
 use crate::{
     app::{Account, ContextMenu, MenuEntry, MusicApp},
-    keys::matches,
+    keys::{TextFieldId, matches},
     model::{Album, Song},
     theme::Theme,
     ui::{PAD, icon},
@@ -228,7 +228,9 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let (sort, focused) = (self.list_view(key).sort, self.filter_focused && self.filter_target == key);
-        let filter_text = self.list_view(key).filter.render_text(t, focused, "Filter", 14.);
+        let filter_text = tahoe::TextInput::new(cx.entity(), TextFieldId::Filter(key), &self.filter_focus, t)
+            .placeholder("Filter")
+            .focused(focused);
         let options = options.to_vec();
         let n_selected = self.multi.len();
         div()
@@ -238,20 +240,25 @@ impl MusicApp {
             .items_center()
             .gap_2()
             .child(
-                tahoe::textfield::text_input(t, SharedString::from(format!("filter-{key}")), Some("search"), focused)
-                    .key_context("SearchField")
-                    .track_focus(&self.filter_focus)
-                    .w(px(240.))
-                    .child(div().flex_1().min_w_0().text_size(px(13.)).child(filter_text))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            this.filter_target = key;
-                            window.focus(&this.filter_focus);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
+                tahoe::textfield::text_input_box(
+                    t,
+                    SharedString::from(format!("filter-{key}")),
+                    Some("search"),
+                    focused,
+                )
+                .key_context("SearchField")
+                .track_focus(&self.filter_focus)
+                .w(px(240.))
+                .child(div().flex_1().min_w_0().text_size(px(13.)).child(filter_text))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.filter_target = key;
+                        window.focus(&this.filter_focus);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                ),
             )
             .child(
                 div()
@@ -317,7 +324,7 @@ impl MusicApp {
         }
         let used = {
             let mut v = self.list_view(key);
-            v.filter.handle_key(k, cx)
+            v.filter.handle_key(k, window, cx)
         };
         if used {
             cx.notify();

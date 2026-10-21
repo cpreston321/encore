@@ -8,6 +8,7 @@ use gpui::{
 
 use crate::{
     app::{Account, ContextMenu, Load, MenuEntry, MusicApp},
+    keys::TextFieldId,
     model::Song,
     theme::Theme,
 };
@@ -122,7 +123,7 @@ impl MusicApp {
                 window.focus(&self.focus);
             }
             _ => {
-                if !sheet.name.handle_key(k, cx) {
+                if !sheet.name.handle_key(k, window, cx) {
                     return false;
                 }
             }
@@ -133,8 +134,9 @@ impl MusicApp {
 
     pub(crate) fn render_new_playlist(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sheet = self.new_playlist.as_ref()?;
-        let f = &sheet.name;
-        let field_text = f.render_text(t, true, "Playlist Name", 17.);
+        let field_text = tahoe::TextInput::new(cx.entity(), TextFieldId::NewPlaylistName, &self.new_playlist_focus, t)
+            .placeholder("Playlist Name")
+            .focused(true);
         let button = |id: &'static str, label: &'static str, primary: bool| {
             div()
                 .id(id)

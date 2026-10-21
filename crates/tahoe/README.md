@@ -13,6 +13,7 @@ TAHOE_APPEARANCE=light cargo run -p tahoe --example gallery
 | --- | --- |
 | `components` | `Button`, `IconButton`, `Link`, `SectionHeader`, `PageHeader`, `Card`, `Badge`, as Zed-style builders |
 | `primitives` | The same looks as plain, chainable gpui elements (`pill_button`, `circle_button`, `glass_button`, `toolbar_button`…) |
+| `textfield` | `TextField`, a single-line editing model, and `TextInput`, which draws it and takes text from macOS input methods (IME composition, dead keys, press-and-hold accents, dictation, the emoji picker) for any view that implements `TextFieldHost` |
 | `theme` | Light and dark color tokens, `Palette`s for surfaces tinted by artwork, and WCAG `contrast` / `readable_on` |
 | `anim` | `Presence` (open/close transitions that reverse mid-way), `ColorBlend`, and `reduce_motion()` |
 | `icons` | The embedded icon set as an `AssetSource` (`tahoe::Assets`) and `icon(name, size, color)` |

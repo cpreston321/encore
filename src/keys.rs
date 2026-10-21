@@ -70,6 +70,33 @@ pub fn bind(cx: &mut App) {
     ]);
 }
 
+/// The text fields `MusicApp` owns, for [`tahoe::TextInput`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TextFieldId {
+    Search,
+    /// A library list's filter, by list key.
+    Filter(&'static str),
+    NewPlaylistName,
+}
+
+impl tahoe::TextFieldHost for MusicApp {
+    type Field = TextFieldId;
+
+    fn text_field<R>(&mut self, field: TextFieldId, edit: impl FnOnce(&mut tahoe::TextField) -> R) -> Option<R> {
+        match field {
+            TextFieldId::Search => Some(edit(&mut self.search)),
+            TextFieldId::Filter(key) => Some(edit(&mut self.list_view(key).filter)),
+            TextFieldId::NewPlaylistName => self.new_playlist.as_mut().map(|sheet| edit(&mut sheet.name)),
+        }
+    }
+
+    fn text_field_changed(&mut self, field: TextFieldId, _: &mut Window, cx: &mut Context<Self>) {
+        if field == TextFieldId::Search {
+            self.search_edited(cx);
+        }
+    }
+}
+
 /// What ⌘K results and the Search page's "In Your Library" section show.
 #[derive(Default)]
 pub struct LocalMatches {
@@ -243,21 +270,29 @@ impl MusicApp {
                 self.move_selection(1, cx);
             }
             _ => {
-                if !self.search.handle_key(k, cx) {
+                if !self.search.handle_key(k, window, cx) {
                     return false;
                 }
             }
         }
         if self.search.text() != before {
-            self.palette_index = 0;
-            if !self.palette_open && self.route != Route::Search {
-                self.history.clear();
-                self.go_search_page(cx);
-            }
-            self.schedule_search(cx);
+            self.search_edited(cx);
         }
         cx.notify();
         true
+    }
+
+    /// After the query changes, from a key or the input handler.
+    pub(crate) fn search_edited(&mut self, cx: &mut Context<Self>) {
+        if self.search.is_composing() {
+            return;
+        }
+        self.palette_index = 0;
+        if !self.palette_open && self.route != Route::Search {
+            self.history.clear();
+            self.go_search_page(cx);
+        }
+        self.schedule_search(cx);
     }
 
     pub(crate) fn remember_search(&mut self) {

@@ -9,7 +9,7 @@
 //! - [`components`]: builders such as [`Button`], [`IconButton`], [`Link`], [`SectionHeader`],
 //!   [`PageHeader`], [`Card`], [`Badge`], [`SegmentedControl`], [`ToggleButton`], [`Avatar`],
 //!   [`Kbd`], [`EmptyState`] and [`ExpandableText`].
-//! - [`textfield`]: single-line text editing with macOS keys, and drawing it with a caret.
+//! - [`textfield`]: single-line text editing with macOS keys and input methods ([`TextInput`]).
 //! - [`primitives`]: the same looks as plain, chainable gpui elements.
 //! - [`anim`]: reversible open/close transitions, color blends and Reduce Motion.
 //! - [`icons`]: the embedded icon set; register [`Assets`] with your `Application`.
@@ -44,14 +44,14 @@ pub use components::{
     PageHeader, SectionHeader, SegmentedControl, SegmentedStyle, ToggleButton,
 };
 pub use icons::{Assets, icon};
-pub use textfield::TextField;
+pub use textfield::{TextField, TextFieldHost, TextInput};
 pub use theme::{Palette, Theme, contrast, luminance, readable_on};
 
 /// Everything for building Tahoe-style views.
 pub mod prelude {
     pub use crate::{
         Avatar, Badge, Button, ButtonStyle, Card, EmptyState, ExpandableText, IconButton, IconButtonStyle, Kbd, Link,
-        PageHeader, Palette, SectionHeader, SegmentedControl, SegmentedStyle, TextField, Theme, ToggleButton, icon,
-        readable_on,
+        PageHeader, Palette, SectionHeader, SegmentedControl, SegmentedStyle, TextField, TextFieldHost, TextInput,
+        Theme, ToggleButton, icon, readable_on,
     };
 }

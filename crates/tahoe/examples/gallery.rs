@@ -8,7 +8,7 @@ use gpui::{
 use tahoe::{
     prelude::*,
     primitives::skeleton_block,
-    textfield::text_input,
+    textfield::text_input_box,
     theme::{Appearance, force_appearance},
 };
 
@@ -43,6 +43,14 @@ fn swatch(label: &'static str, color: Hsla, t: &Theme) -> impl IntoElement {
         .gap_1()
         .child(div().size(px(44.)).rounded(px(10.)).bg(color).border_1().border_color(t.panel_border))
         .child(div().text_size(px(11.)).text_color(t.text_secondary).child(label))
+}
+
+impl TextFieldHost for Gallery {
+    type Field = ();
+
+    fn text_field<R>(&mut self, _: (), edit: impl FnOnce(&mut TextField) -> R) -> Option<R> {
+        Some(edit(&mut self.field))
+    }
 }
 
 impl Render for Gallery {
@@ -124,18 +132,27 @@ impl Gallery {
                     .child(Kbd::new("esc")),
             )
             .child(
-                row().pt_3().child(
-                    text_input(&t, "field", Some("search"), focused)
-                        .w(px(260.))
-                        .track_focus(&self.field_focus)
-                        .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| {
-                            if this.field.handle_key(&e.keystroke, cx) {
-                                cx.notify();
-                            }
-                        }))
-                        .on_click(cx.listener(|this, _, window, _| window.focus(&this.field_focus)))
-                        .child(div().flex_1().min_w_0().child(self.field.render_text(&t, focused, "Filter", 14.))),
-                ),
+                row()
+                    .pt_3()
+                    .child(
+                        text_input_box(&t, "field", Some("search"), focused)
+                            .w(px(260.))
+                            .track_focus(&self.field_focus)
+                            .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                                if this.field.handle_key(&e.keystroke, window, cx) {
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }
+                            }))
+                            .on_click(cx.listener(|this, _, window, _| window.focus(&this.field_focus)))
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    TextInput::new(cx.entity(), (), &self.field_focus, &t)
+                                        .placeholder("Type, compose or ⌃⌘Space"),
+                                ),
+                            ),
+                    )
+                    .child(div().text_color(t.text_secondary).child(format!("“{}”", self.field.text()))),
             )
             .child(SectionHeader::new("people", "Avatars and empty states"))
             .child(row().child(Avatar::new("Christian Preston").size(40.)).child(Avatar::new("Lana Del Rey").size(32.)))

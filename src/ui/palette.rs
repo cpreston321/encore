@@ -296,12 +296,13 @@ impl MusicApp {
             .border_color(t.separator)
             .text_size(px(17.))
             .child(icon("search", 17., t.text_secondary))
-            .child(div().flex_1().min_w_0().child(self.search.render_text(
-                t,
-                focused,
-                "Search songs, albums, artists…",
-                20.,
-            )))
+            .child(
+                div().flex_1().min_w_0().child(
+                    tahoe::TextInput::new(cx.entity(), TextFieldId::Search, &self.search_focus, t)
+                        .placeholder("Search songs, albums, artists…")
+                        .focused(focused),
+                ),
+            )
             .child(tahoe::primitives::kbd(t, "esc"));
 
         Some(
