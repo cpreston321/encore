@@ -1,6 +1,6 @@
 # Changes from gpui 0.2.2
 
-This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus seventeen changes. `git log vendor/gpui` shows when each one landed.
+This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus eighteen changes. `git log vendor/gpui` shows when each one landed.
 
 ## The display link sleeps when there's nothing to draw
 
@@ -135,3 +135,7 @@ GPUI left the `CAMetalLayer`'s `colorspace` unset, which tells the compositor no
 - **Backdrop blur** clamps its saturation boost to the range of the color it boosts, rather than to 0...1, so sRGB colors still can't leave sRGB but wide colors under a blur aren't clipped.
 - **Reading colors.** `convert_rgba_to_srgb` converts pixels tagged with a profile to sRGB, so a color averaged from an image matches GPUI's colors.
 - **Elsewhere** the Blade and DirectX renderers don't tag their surfaces. With `macos-blade`, wide-gamut images are clipped to sRGB instead; on other platforms color profiles are still ignored.
+
+## Windows can be snapshotted offscreen
+
+`Window::snapshot` draws the window and renders the frame into an offscreen texture, returning it as an 8-bit sRGB image (wide-gamut colors are clamped). The window draws nothing while the screen is locked or the display sleeps, and screen capture sees nothing then either; this works regardless, so tools and tests can look at the app. `PlatformWindow::snapshot` does the rendering; only macOS implements it. `DispatchEventResult` is now public, so code outside GPUI can call `Window::dispatch_event` to drive a window with synthetic input.
