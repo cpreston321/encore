@@ -32,6 +32,40 @@ jobs:
             exit 1
           fi
 
+      # The key stays in the repository's secrets; only a token signed with it goes into the
+      # app, valid for 180 days (Apple's limit is six months), so people can sign in without
+      # a key of their own. A tag can't be released without it.
+      - name: Sign a developer token
+        env:
+          MUSICKIT_TEAM_ID: ${{ secrets.MUSICKIT_TEAM_ID }}
+          MUSICKIT_KEY_ID: ${{ secrets.MUSICKIT_KEY_ID }}
+          MUSICKIT_PRIVATE_KEY: ${{ secrets.MUSICKIT_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MUSICKIT_TEAM_ID" ] || [ -z "$MUSICKIT_KEY_ID" ] || [ -z "$MUSICKIT_PRIVATE_KEY" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              echo "The MUSICKIT_TEAM_ID, MUSICKIT_KEY_ID and MUSICKIT_PRIVATE_KEY secrets are needed to release" >&2
+              exit 1
+            fi
+            echo "No MusicKit secrets; this build asks for a key of its own."
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/jwt"
+          "$RUNNER_TEMP/jwt/bin/pip" install --quiet "pyjwt[crypto]==2.10.1"
+          token=$("$RUNNER_TEMP/jwt/bin/python" - <<'PY'
+          import os, time, jwt
+          now = int(time.time())
+          print(jwt.encode(
+              {"iss": os.environ["MUSICKIT_TEAM_ID"], "iat": now, "exp": now + 180 * 24 * 60 * 60},
+              os.environ["MUSICKIT_PRIVATE_KEY"],
+              algorithm="ES256",
+              headers={"kid": os.environ["MUSICKIT_KEY_ID"]},
+          ))
+          PY
+          )
+          echo "::add-mask::$token"
+          echo "ENCORE_DEVELOPER_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "TOKEN_EXPIRES=$(date -u -v+180d +%Y-%m-%d)" >> "$GITHUB_ENV"
+
       # Signed ad hoc: there's no Developer ID certificate in CI, so people who download it
       # allow it once in Privacy & Security, or re-sign it with ./scripts/sign.sh.
       - name: Build Encore.app

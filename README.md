@@ -70,7 +70,7 @@ The script checks for the Xcode Command Line Tools and [Rust](https://rustup.rs)
 
 ### Install a release
 
-Each [release](https://github.com/cpreston321/encore/releases) has a zip of `Encore.app` for Apple silicon Macs, signed ad hoc rather than with a Developer ID.
+Each [release](https://github.com/cpreston321/encore/releases) has a zip of `Encore.app` for Apple silicon Macs, signed ad hoc rather than with a Developer ID. Releases can sign in to Apple Music without any setup (see [Sign in to Apple Music](#sign-in-to-apple-music)).
 
 1. Download and unzip it, and move `Encore.app` to Applications.
 2. Open it. macOS says it can't check the app for malicious software.
@@ -103,7 +103,9 @@ Encore works without any setup. It uses Apple's public charts and the iTunes Sea
 
 ### Sign in to Apple Music
 
-Signing in needs a MusicKit key from an Apple Developer account. [docs/musickit.md](docs/musickit.md) walks through creating one and pointing Encore at it. Once the key is set up:
+Releases come with a MusicKit developer token built in, so you can sign in straight away. Apple limits a token to six months, so each release's token lasts 180 days; after that, update to a newer release or connect a key of your own.
+
+Builds from source need a MusicKit key from an Apple Developer account. [docs/musickit.md](docs/musickit.md) walks through creating one and pointing Encore at it, and the app's welcome screen does the same. A key of your own always takes the place of a release's token. Then:
 
 1. Click **Sign In** at the bottom of the sidebar.
 2. Encore opens a one-page sign-in site on `localhost` in your browser. Your Apple ID password only goes to Apple.
@@ -158,7 +160,7 @@ cargo fmt
 ENCORE_PERF=1 cargo run --release   # frame times, request durations and startup milestones on stderr
 ```
 
-To release, bump `version` in `Cargo.toml` and push a matching tag (`v0.2.0`). The [release workflow](.github/workflows/release.yml) builds the app and attaches it to a draft release, which stays unpublished until you publish it.
+To release, bump `version` in `Cargo.toml` and push a matching tag (`v0.2.0`). The [release workflow](.github/workflows/release.yml) builds the app and attaches it to a draft release, which stays unpublished until you publish it. It needs the `MUSICKIT_TEAM_ID`, `MUSICKIT_KEY_ID` and `MUSICKIT_PRIVATE_KEY` (the `.p8` file's contents) repository secrets: it signs a 180-day developer token with them and builds it into the app, and the key itself goes no further. Release at least every six months, or sign-in stops working for people without a key of their own.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the debug tools, and [docs/architecture.md](docs/architecture.md) explains how the code is laid out.
 

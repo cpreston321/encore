@@ -1148,8 +1148,30 @@ struct MusicKitConfig {
     private_key_path: PathBuf,
 }
 
+/// A developer token compiled into release builds (`ENCORE_DEVELOPER_TOKEN` at build time),
+/// so people can sign in without a key of their own. Apple caps a token's life at six
+/// months, so an old build's token runs out; it's ignored once it has.
+fn built_in_token() -> Option<String> {
+    let token = option_env!("ENCORE_DEVELOPER_TOKEN")?.trim();
+    (!token.is_empty() && !token_expired(token, std::time::SystemTime::now())).then(|| token.to_string())
+}
+
+fn token_expired(token: &str, now: std::time::SystemTime) -> bool {
+    #[derive(Deserialize)]
+    struct Claims {
+        exp: u64,
+    }
+    let Ok(claims) = jsonwebtoken::dangerous::insecure_decode_claims::<Claims>(token) else {
+        return true;
+    };
+    let now = now.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    // A day's margin, so a token doesn't run out partway through a session.
+    claims.exp <= now + 24 * 60 * 60
+}
+
 /// Looks for, in order: `APPLE_MUSIC_DEVELOPER_TOKEN`; the `APPLE_MUSIC_TEAM_ID` /
-/// `APPLE_MUSIC_KEY_ID` / `APPLE_MUSIC_PRIVATE_KEY_PATH` trio; `<data dir>/musickit.json`.
+/// `APPLE_MUSIC_KEY_ID` / `APPLE_MUSIC_PRIVATE_KEY_PATH` trio; `<data dir>/musickit.json`;
+/// the token built into a release.
 fn musickit_token() -> Result<Option<String>> {
     if let Ok(token) = std::env::var("APPLE_MUSIC_DEVELOPER_TOKEN")
         && !token.trim().is_empty()
@@ -1165,7 +1187,7 @@ fn musickit_token() -> Result<Option<String>> {
         _ => {
             let path = musickit_config_path();
             if !path.exists() {
-                return Ok(None);
+                return Ok(built_in_token());
             }
             serde_json::from_slice(&std::fs::read(&path)?).with_context(|| format!("reading {}", path.display()))?
         }
@@ -1254,6 +1276,19 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn built_in_tokens_expire() {
+        let key = jsonwebtoken::EncodingKey::from_secret(b"test");
+        let token = |exp: u64| {
+            jsonwebtoken::encode(&jsonwebtoken::Header::default(), &serde_json::json!({ "exp": exp }), &key).unwrap()
+        };
+        let now = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000);
+        assert!(!token_expired(&token(1_800_000_000 + 30 * 24 * 60 * 60), now));
+        assert!(token_expired(&token(1_800_000_000 + 60 * 60), now));
+        assert!(token_expired(&token(1_700_000_000), now));
+        assert!(token_expired("not a token", now));
+    }
 
     #[test]
     fn reads_key_id_from_apples_file_name() {

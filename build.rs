@@ -6,6 +6,8 @@ use std::{env, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=native/EncoreNative.swift");
+    // The release workflow builds a developer token in (see `api::built_in_token`).
+    println!("cargo:rerun-if-env-changed=ENCORE_DEVELOPER_TOKEN");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
