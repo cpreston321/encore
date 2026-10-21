@@ -611,6 +611,7 @@ impl MusicApp {
     /// A volume change from the user. The first one with the native player turns on its
     /// volume control; if that's unavailable, the Mac's output volume changes instead.
     pub(crate) fn change_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        self.muted_volume = None;
         self.set_volume(volume, cx);
         self.ensure_native_volume(cx);
         let native = match self.audio.borrow().as_ref() {
@@ -621,6 +622,18 @@ impl MusicApp {
             && native.volume_control() == VolumeControl::Unavailable
         {
             native.set_system_volume(self.volume);
+        }
+    }
+
+    /// Mutes, or unmutes back to the volume before muting.
+    pub(crate) fn toggle_mute(&mut self, cx: &mut Context<Self>) {
+        let restore = self.muted_volume.take();
+        if self.volume < 0.01 {
+            self.change_volume(restore.unwrap_or(0.5), cx);
+        } else {
+            let before = self.volume;
+            self.change_volume(0., cx);
+            self.muted_volume = Some(before);
         }
     }
 
@@ -679,10 +692,10 @@ impl MusicApp {
             }
             Drag::Volume => {
                 let b = self.volume_bounds.get();
-                if b.size.height <= px(0.) {
+                if b.size.width <= px(0.) {
                     return;
                 }
-                (1. - (at.y - b.origin.y) / b.size.height).clamp(0., 1.)
+                ((at.x - b.origin.x) / b.size.width).clamp(0., 1.)
             }
         };
         match drag {

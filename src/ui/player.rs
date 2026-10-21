@@ -105,66 +105,86 @@ impl MusicApp {
                     format!("{} — {}", song.artist, song.album)
                 };
                 self.progress.read(cx).set_subtitle(subtitle.into());
+                // Like the Music app: art and text side by side with the menu at their right,
+                // and the bar running under all three.
+                const ART: f32 = 31.;
+                const MORE: f32 = 26.;
+                self.progress.read(cx).set_insets(ART + 10., MORE + 6.);
+                let (hover, _) = self.progress.read(cx).hover_amount();
+                let more = song.clone();
+                let more_keyboard = song.clone();
                 div()
                     .id("now-playing")
-                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                        this.progress.update(cx, |p, cx| {
-                            if p.set_hovered(*hovered) {
-                                cx.notify();
-                            }
-                        });
-                    }))
                     .flex_1()
                     .min_w_0()
+                    .relative()
                     .flex()
-                    .items_center()
-                    .gap_2p5()
+                    .flex_col()
                     .child(
                         div()
                             .id("np-art")
                             .accessibility_label("Show Now Playing")
-                            .flex_none()
+                            .opacity(1. - hover)
+                            .absolute()
+                            .top_0()
+                            .left_0()
                             .cursor_pointer()
-                            .rounded(px(6.))
+                            .rounded(px(5.))
                             .shadow_sm()
-                            .child(self.art(&song.artwork, 38., 6., t, cx))
+                            .child(self.art(&song.artwork, ART, 5., t, cx))
                             .on_click(cx.listener(|this, _, _, cx| this.open_now_playing(None, cx))),
                     )
                     .child(
+                        div().absolute().top_0().right_0().h(px(ART)).flex().items_center().opacity(1. - hover).child(
+                            icon_button(t, "player-more", "ellipsis", 15., dim)
+                                .size(px(MORE))
+                                .accessibility_label("More")
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                                        this.menu = Some(this.song_menu(&more, e.position));
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    }),
+                                )
+                                .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
+                                    if let ClickEvent::Keyboard(k) = e {
+                                        this.menu = Some(this.song_menu(&more_keyboard, k.bounds.origin));
+                                        cx.notify();
+                                    }
+                                })),
+                        ),
+                    )
+                    .child(
                         div()
-                            .relative()
-                            .flex_1()
-                            .min_w_0()
+                            .id("np-title")
+                            .opacity(1. - hover)
+                            .accessibility_role(Role::Link)
+                            .accessibility_label(format!("{}, Go to Album", song.title))
+                            .pl(px(ART + 10.))
+                            .pr(px(MORE + 6.))
                             .flex()
-                            .flex_col()
+                            .items_center()
+                            .gap_1()
+                            .min_w_0()
+                            .cursor_pointer()
                             .child(
                                 div()
-                                    .id("np-title")
-                                    .accessibility_role(Role::Link)
-                                    .accessibility_label(format!("{}, Go to Album", song.title))
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .min_w_0()
-                                    .cursor_pointer()
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .line_height(px(16.))
-                                            .text_color(t.text)
-                                            .child(song.title.clone()),
-                                    )
-                                    .when(song.explicit, |d| d.child(explicit_badge(t)))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if let Some(id) = &album {
-                                            this.push(Route::Album(id.clone()), cx);
-                                        }
-                                    })),
+                                    .truncate()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .line_height(px(16.))
+                                    .text_color(t.text)
+                                    .child(song.title.clone()),
                             )
-                            // Subtitle, times and bar animate together inside Progress.
-                            .child(self.progress.clone()),
+                            .when(song.explicit, |d| d.child(explicit_badge(t)))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(id) = &album {
+                                    this.push(Route::Album(id.clone()), cx);
+                                }
+                            })),
                     )
+                    // Subtitle, times and bar animate together inside Progress.
+                    .child(self.progress.clone())
                     .with_animation(
                         ElementId::Name(format!("np-{}", song.id).into()),
                         Animation::new(Duration::from_millis(320)).with_easing(ease_out_quint()),
@@ -174,33 +194,12 @@ impl MusicApp {
             }
         };
 
-        let more = current.clone();
         let volume_icon = if self.volume < 0.01 { "speaker" } else { "speaker-loud" };
         let tools = div()
             .flex()
             .flex_none()
             .items_center()
             .gap_0p5()
-            .child({
-                let more_keyboard = more.clone();
-                icon_button(t, "player-more", "ellipsis", 15., dim)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                            if let Some(song) = &more {
-                                this.menu = Some(this.song_menu(song, e.position));
-                                cx.stop_propagation();
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
-                        if let (ClickEvent::Keyboard(k), Some(song)) = (e, &more_keyboard) {
-                            this.menu = Some(this.song_menu(song, k.bounds.origin));
-                            cx.notify();
-                        }
-                    }))
-            })
             .child(
                 icon_button(t, "lyrics", "lyrics", 16., if self.show_now_playing { t.accent } else { t.icon })
                     .accessibility_role(Role::ToggleButton)
@@ -227,18 +226,41 @@ impl MusicApp {
                     })),
             )
             .child(
-                div().relative().child(capture_bounds(self.volume_button_bounds.clone())).child(
-                    icon_button(t, "volume", volume_icon, 17., if self.show_volume { t.accent } else { t.icon })
-                        .accessibility_label("Volume")
-                        .accessibility_value(format!("{}%", (self.volume * 100.).round()))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.show_volume = !this.show_volume;
-                            this.menu = None;
-                            cx.notify();
-                        })),
-                ),
+                icon_button(t, "volume", volume_icon, 17., t.icon)
+                    .accessibility_label("Volume")
+                    .accessibility_value(format!("{}%", (self.volume * 100.).round()))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_volume = true;
+                        this.menu = None;
+                        cx.notify();
+                    })),
             );
+        // The volume control opens in place of the tools, as in the Music app; its speaker
+        // mutes and unmutes.
+        let tools = if self.show_volume {
+            div()
+                .id("volume-control")
+                .flex_none()
+                .h(px(36.))
+                .pl_3()
+                .pr_0p5()
+                .rounded_full()
+                .bg(t.text.opacity(0.08))
+                .flex()
+                .items_center()
+                .gap_1p5()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(self.volume_slider(self.volume, px(118.), t, cx))
+                .child(
+                    icon_button(t, "mute", volume_icon, 17., t.icon)
+                        .accessibility_label(if self.volume < 0.01 { "Unmute" } else { "Mute" })
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_mute(cx))),
+                )
+                .into_any_element()
+        } else {
+            tools.into_any_element()
+        };
 
         div()
             .id("player")
@@ -259,52 +281,6 @@ impl MusicApp {
             .child(transport)
             .child(now_playing)
             .child(tools)
-    }
-
-    /// Small volume slider that opens above the player's speaker button.
-    pub(crate) fn render_volume_popover(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let presence = self.fx.borrow().volume;
-        if !presence.visible() {
-            return None;
-        }
-        let button = self.volume_button_bounds.get();
-        const W: f32 = 46.;
-        let card = div()
-            .id("volume-popover")
-            .occlude()
-            .w(px(W))
-            .py_3()
-            .rounded(px(23.))
-            .glass_style(panel_glass())
-            .bg(t.glass)
-            .border_1()
-            .border_color(t.panel_border)
-            .shadow_lg()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_2p5()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(icon("speaker-loud", 15., t.text_secondary))
-            .child(self.vertical_slider(self.volume, px(130.), t, cx))
-            .child(icon("speaker", 12., t.text_secondary));
-        Some(
-            deferred(
-                anchored()
-                    .anchor(gpui::Corner::BottomLeft)
-                    .position(gpui::point(
-                        button.origin.x + button.size.width / 2. - px(W / 2.),
-                        button.top() - px(14.),
-                    ))
-                    .snap_to_window_with_margin(px(8.))
-                    .child({
-                        let p = presence.value();
-                        card.opacity(p).mt(px((1. - p) * 6.))
-                    }),
-            )
-            .with_priority(1)
-            .into_any_element(),
-        )
     }
 
     pub(crate) fn render_queue(&self, t: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -426,11 +402,11 @@ impl MusicApp {
             )
     }
 
-    /// Vertical volume slider: fills from the bottom; drag or click anywhere on it.
-    pub(crate) fn vertical_slider(
+    /// Horizontal volume slider: fills from the left; drag or click anywhere on it.
+    pub(crate) fn volume_slider(
         &self,
         value: f32,
-        height: Pixels,
+        width: Pixels,
         t: &Theme,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -441,10 +417,10 @@ impl MusicApp {
             .accessibility_label("Volume")
             .accessibility_value(format!("{}%", (value * 100.).round()))
             .relative()
-            .w(px(22.))
-            .h(height)
+            .w(width)
+            .h(px(22.))
             .flex()
-            .justify_center()
+            .items_center()
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -455,14 +431,20 @@ impl MusicApp {
                 }),
             )
             .child(capture_bounds(self.volume_bounds.clone()))
-            .child(div().relative().w(px(5.)).h_full().rounded_full().bg(t.track_bg).child(
-                div().absolute().bottom_0().left_0().right_0().h(relative(value)).rounded_full().bg(t.track_fill),
-            ))
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(px(5.))
+                    .rounded_full()
+                    .bg(t.track_bg)
+                    .child(div().h_full().w(relative(value)).rounded_full().bg(t.track_fill)),
+            )
             .child(
                 div()
                     .absolute()
-                    .left(px(4.))
-                    .top((height - knob) * (1. - value))
+                    .top(px(4.))
+                    .left((width - knob) * value)
                     .size(knob)
                     .rounded_full()
                     .bg(rgb(0xf5f5f5))

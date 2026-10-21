@@ -54,6 +54,8 @@ pub struct Progress {
     /// "Artist — Album" line, which the times replace while hovering.
     subtitle: RefCell<SharedString>,
     hover: Cell<HoverAnim>,
+    /// Space kept clear left and right of the subtitle line, for the art and menu beside it.
+    insets: Cell<(f32, f32)>,
     /// The current song's spectrum (set by the app once analyzed).
     pub spectrum: RefCell<Option<std::sync::Arc<crate::spectrum::Spectrum>>>,
     shown_levels: RefCell<[f32; crate::spectrum::BANDS]>,
@@ -75,6 +77,7 @@ impl Progress {
             resume: Cell::new(None),
             subtitle: RefCell::default(),
             hover: Cell::new(HoverAnim { hovered: false, from: 0., at: Instant::now() }),
+            insets: Cell::new((0., 0.)),
             spectrum: RefCell::new(None),
             shown_levels: RefCell::new([0.; crate::spectrum::BANDS]),
             live: RefCell::new(crate::spectrum::Live::new()),
@@ -141,6 +144,15 @@ impl Progress {
         self.scrub.get()
     }
 
+    /// How far the hover has come (0 resting, 1 hovered), and whether it's still moving.
+    pub fn hover_amount(&self) -> (f32, bool) {
+        self.hover.get().amount()
+    }
+
+    pub fn set_insets(&self, left: f32, right: f32) {
+        self.insets.set((left, right));
+    }
+
     pub fn set_subtitle(&self, text: SharedString) {
         *self.subtitle.borrow_mut() = text;
     }
@@ -193,7 +205,7 @@ impl Progress {
 }
 
 impl Render for Progress {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (hover, animating) = self.hover.get().amount();
         let playing = self.audio.borrow().as_ref().is_some_and(Audio::is_playing);
         // Hovered, the times and visualizer show and update at the display's refresh rate.
@@ -216,6 +228,10 @@ impl Render for Progress {
         let app = self.app.clone();
         let time = |s: String| div().text_size(px(10.5)).text_color(label).child(s);
         let thickness = 2.5 + 3. * hover;
+        // Hovered, the art and menu beside the subtitle fade out and the times spread to the
+        // bar's ends.
+        let (inset_left, inset_right) = self.insets.get();
+        let (inset_left, inset_right) = (inset_left * (1. - hover), inset_right * (1. - hover));
 
         div()
             .flex()
@@ -224,6 +240,8 @@ impl Render for Progress {
             .child(
                 div()
                     .relative()
+                    .ml(px(inset_left))
+                    .mr(px(inset_right))
                     .h(px(15.))
                     .child(
                         div()
@@ -263,6 +281,13 @@ impl Render for Progress {
                     .relative()
                     .w_full()
                     .h(px(9.))
+                    // The player fades its art, title and menu with the hover, so it redraws too.
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if this.set_hovered(*hovered) {
+                            cx.notify();
+                            this.app.update(cx, |_, cx| cx.notify()).ok();
+                        }
+                    }))
                     .flex()
                     .items_center()
                     .cursor_pointer()

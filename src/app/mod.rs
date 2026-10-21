@@ -453,7 +453,8 @@ pub struct MusicApp {
     pub(crate) volume_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) show_volume: bool,
     /// The player's speaker button, which the volume popover opens above.
-    pub(crate) volume_button_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The volume before muting, which unmuting returns to.
+    pub(crate) muted_volume: Option<f32>,
     pub focus: FocusHandle,
     pub(crate) search_focus: FocusHandle,
     pub(crate) scroll: ScrollHandle,
@@ -582,7 +583,7 @@ impl MusicApp {
             progress_bounds,
             volume_bounds: Rc::default(),
             show_volume: false,
-            volume_button_bounds: Rc::default(),
+            muted_volume: None,
             focus: cx.focus_handle(),
             search_focus: cx.focus_handle(),
             scroll: ScrollHandle::new(),
@@ -839,7 +840,6 @@ impl Render for MusicApp {
             .when(key_help.visible(), |d| d.child(self.render_key_help(&t, cx).opacity(key_help.value())))
             .children(self.render_menu(&t, cx))
             .children(self.render_account_popover(&t, cx))
-            .children(self.render_volume_popover(&t, cx))
             .children(self.render_now_playing(&t, window, cx))
             .children(self.render_palette(&t, cx))
             .children(self.render_new_playlist(&t, cx))

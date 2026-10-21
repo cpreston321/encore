@@ -101,6 +101,9 @@ impl MusicApp {
             }
             Region::Player => {
                 let pill_w = (content_w - 48.).clamp(440., 780.);
+                if self.progress.read(cx).hover_amount().1 {
+                    window.request_animation_frame();
+                }
                 div()
                     .size_full()
                     .child(
