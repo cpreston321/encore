@@ -3,6 +3,7 @@
 use super::*;
 
 const PILL_ALPHA: f32 = 0.62;
+const PILL_RADIUS: f32 = 20.;
 
 /// The player's colors: a deep shade of the cover, or the theme's pill before anything plays,
 /// as glass over the page like the Music app's bar. The pill is as translucent as it can be
@@ -285,7 +286,7 @@ impl MusicApp {
             .h(px(58.))
             .pl_2()
             .pr_2p5()
-            .rounded_full()
+            .rounded(px(PILL_RADIUS))
             .glass_style(GlassStyle { blur: px(22.), ..GlassStyle::default() })
             .bg(self.fx.borrow_mut().pill_bg.update(t.pill))
             .border_1()
