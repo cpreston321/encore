@@ -79,6 +79,14 @@ impl Catalog {
         }
     }
 
+    /// Albums Apple suggests for fans of this one ("You Might Also Like"); none without MusicKit.
+    pub fn related_albums(&self, id: &str) -> Result<Vec<Album>> {
+        match self {
+            Self::Public => Ok(Vec::new()),
+            Self::MusicKit(auth) => musickit::related_albums(auth, id),
+        }
+    }
+
     /// `None` when the backend can't list playlist tracks (the public APIs can't).
     pub fn playlist_tracks(&self, id: &str) -> Result<Option<Vec<Song>>> {
         match self {
@@ -747,6 +755,11 @@ mod musickit {
         Ok((album, tracks))
     }
 
+    pub fn related_albums(auth: &Auth, id: &str) -> Result<Vec<Album>> {
+        let json = get(auth, &format!("albums/{id}/view/related-albums?limit=10"))?;
+        Ok(list(&json["data"], parse_album))
+    }
+
     pub fn playlist_tracks(auth: &Auth, id: &str) -> Result<Vec<Song>> {
         if id.starts_with("p.") {
             let tracks = get_me_all(auth, &format!("library/playlists/{id}/tracks?include=catalog&limit=100"), 1000)?;
@@ -1157,6 +1170,8 @@ mod tests {
         assert!(song.preview_url.is_some(), "{song:?}");
         let (album, tracks) = catalog.album(song.album_id.as_deref().unwrap()).unwrap();
         assert!(!tracks.is_empty(), "{album:?}");
+        let related = catalog.related_albums("1645278559").unwrap();
+        assert!(!related.is_empty() && related.iter().all(|a| !a.id.is_empty() && !a.title.is_empty()), "{related:?}");
         let playlist = &browse.top_playlists[0];
         assert!(!catalog.playlist_tracks(&playlist.id).unwrap().unwrap().is_empty());
         let results = catalog.search("taylor swift").unwrap();

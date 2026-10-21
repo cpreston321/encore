@@ -28,8 +28,6 @@ pub(crate) fn artist_hero_height(content_w: f32) -> f32 {
 
 /// Approximate height of the album/playlist header, for the compact bar threshold.
 const COVER_HEADER_H: f32 = 520.;
-/// Descriptions longer than this get a MORE toggle.
-const NOTES_PREVIEW_CHARS: usize = 160;
 
 /// Frosted circular button floating over artwork.
 fn glass_button(id: &'static str, icon_name: &'static str, size: f32) -> Stateful<Div> {
@@ -187,41 +185,22 @@ impl MusicApp {
             return None;
         }
         let expanded = self.expanded_notes.contains(key);
-        let long = text.chars().count() > NOTES_PREVIEW_CHARS;
         let key = key.to_string();
         Some(
             div()
                 .px(px(PAD))
                 .pt_4()
-                .max_w(px(860.))
-                .flex()
-                .flex_col()
-                .gap_1()
                 .child(
-                    div()
-                        .text_size(px(14.))
-                        .line_height(px(21.))
-                        .text_color(t.text_secondary)
-                        .when(!expanded, |d| d.line_clamp(2))
-                        .child(text),
+                    tahoe::ExpandableText::new(SharedString::from(format!("notes-{key}")), text)
+                        .expanded(expanded)
+                        .theme(*t)
+                        .on_toggle(cx.listener(move |this, _, _, cx| {
+                            if !this.expanded_notes.remove(&key) {
+                                this.expanded_notes.insert(key.clone());
+                            }
+                            cx.notify();
+                        })),
                 )
-                .when(long, |d| {
-                    d.child(
-                        div()
-                            .id(SharedString::from(format!("notes-{key}")))
-                            .text_size(px(12.))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(t.text)
-                            .cursor_pointer()
-                            .child(if expanded { "LESS" } else { "MORE" })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !this.expanded_notes.remove(&key) {
-                                    this.expanded_notes.insert(key.clone());
-                                }
-                                cx.notify();
-                            })),
-                    )
-                })
                 .into_any_element(),
         )
     }
@@ -833,7 +812,41 @@ impl MusicApp {
                 total_min
             )))
             .children(self.more_by_artist(t, album, cx))
+            .children(self.you_might_also_like(t, album, cx))
             .into_any_element()
+    }
+
+    /// Apple's related albums, as in the Music app.
+    fn you_might_also_like(&self, t: &Theme, album: &Album, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if album.id.starts_with("l.") {
+            return None;
+        }
+        self.ensure_related_albums(&album.id, cx);
+        let Some(Load::Ready(related)) = self.related_albums.get(&album.id) else {
+            return None;
+        };
+        if related.is_empty() {
+            return None;
+        }
+        let mut row = scroll_row("also-like");
+        for (i, a) in related.iter().enumerate() {
+            row = row.child(self.album_tile(t, "also-like", i, a, 170., cx));
+        }
+        let id = album.id.clone();
+        Some(
+            div()
+                .child(self.section_link(
+                    t,
+                    "You Might Also Like",
+                    move |this| match this.related_albums.get(&id) {
+                        Some(Load::Ready(albums)) => Some(SeeAllItems::Albums(Arc::new(albums.clone()))),
+                        _ => None,
+                    },
+                    cx,
+                ))
+                .child(row)
+                .into_any_element(),
+        )
     }
 
     /// "More by <artist>" row under an album; loads the artist in the background.

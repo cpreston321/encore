@@ -1,6 +1,6 @@
 # Changes from gpui 0.2.2
 
-This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus five changes. `git log vendor/gpui` shows each one on its own.
+This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus six changes. `git log vendor/gpui` shows each one on its own.
 
 ## The display link sleeps when there's nothing to draw
 
@@ -37,3 +37,7 @@ Content masks only had a rectangle, so a rounded element with `overflow_hidden` 
 - **Nesting.** Intersecting masks keeps a corner's radius wherever the intersection keeps that corner.
 - **The shaders.** Quads, shadows, underlines, glyphs and images multiply their coverage by the mask's rounded-rectangle distance in the fragment shader, which the generated wrappers around each fragment function do. Square masks skip it.
 - **Not covered:** paths and video surfaces still clip to the rectangle. Only the Metal renderer supports rounded masks.
+
+## `line_clamp` counts every line of multi-paragraph text
+
+`shape_text` counted only the wrap points within each paragraph toward `line_clamp`, not the paragraph's first line. Text with `\n` breaks therefore showed more lines than the clamp. Once the count ran out, the remaining paragraphs were laid out with no lines left, so they didn't wrap and were cut at the element's edge. Each paragraph now counts as one line plus its wraps, and paragraphs past the clamp aren't laid out.

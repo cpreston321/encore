@@ -661,3 +661,81 @@ impl RenderOnce for SegmentedControl {
         }))
     }
 }
+
+/// Long text, such as an album's notes, shown as a few lines with MORE to read the rest.
+/// Collapsed, paragraphs run together so the preview fills its lines; the owner keeps
+/// whether it's expanded and flips it in `on_toggle`.
+#[derive(IntoElement)]
+pub struct ExpandableText {
+    id: ElementId,
+    text: SharedString,
+    lines: usize,
+    expanded: bool,
+    theme: Option<Theme>,
+    on_toggle: Option<ClickHandler>,
+}
+
+impl ExpandableText {
+    pub fn new(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Self {
+        Self { id: id.into(), text: text.into(), lines: 2, expanded: false, theme: None, on_toggle: None }
+    }
+
+    /// Lines shown while collapsed (2 by default).
+    pub fn lines(mut self, lines: usize) -> Self {
+        self.lines = lines.max(1);
+        self
+    }
+
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = expanded;
+        self
+    }
+
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.theme = Some(theme);
+        self
+    }
+
+    pub fn on_toggle(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.on_toggle = Some(Box::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for ExpandableText {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let t = theme_for(self.theme, window);
+        // Roughly what fits in the collapsed lines; shorter text has nothing more to show.
+        let long = self.text.chars().count() > self.lines * 80 || (!self.expanded && self.text.contains('\n'));
+        let shown: SharedString =
+            if self.expanded { self.text } else { self.text.split_whitespace().collect::<Vec<_>>().join(" ").into() };
+        let lines = self.lines;
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .w_full()
+                    .text_size(px(14.))
+                    .line_height(px(21.))
+                    .text_color(t.text_secondary)
+                    .when(!self.expanded, |d| d.line_clamp(lines).text_ellipsis())
+                    .child(shown),
+            )
+            .when(long || self.expanded, |d| {
+                d.child(
+                    div()
+                        .id(self.id)
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(t.text)
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.7))
+                        .child(if self.expanded { "LESS" } else { "MORE" })
+                        .when_some(self.on_toggle, |d, f| d.on_click(f)),
+                )
+            })
+    }
+}

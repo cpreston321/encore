@@ -423,6 +423,11 @@ impl WindowTextSystem {
         let mut wrapped_lines = 0;
 
         let mut process_line = |line_text: SharedString| {
+            // Paragraphs past the clamp aren't shown, and laying them out with no lines left
+            // would leave them unwrapped.
+            if wrapped_lines >= max_wrap_lines {
+                return;
+            }
             font_runs.clear();
             let line_end = line_start + line_text.len();
 
@@ -483,7 +488,7 @@ impl WindowTextSystem {
                 wrap_width,
                 Some(max_wrap_lines - wrapped_lines),
             );
-            wrapped_lines += layout.wrap_boundaries.len();
+            wrapped_lines += layout.wrap_boundaries.len() + 1;
 
             lines.push(WrappedLine {
                 layout,

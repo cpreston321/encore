@@ -8,7 +8,7 @@
 //!   WCAG contrast helpers ([`readable_on`]) that keep text and icons legible on them.
 //! - [`components`]: builders such as [`Button`], [`IconButton`], [`Link`], [`SectionHeader`],
 //!   [`PageHeader`], [`Card`], [`Badge`], [`SegmentedControl`], [`ToggleButton`], [`Avatar`],
-//!   [`Kbd`] and [`EmptyState`].
+//!   [`Kbd`], [`EmptyState`] and [`ExpandableText`].
 //! - [`textfield`]: single-line text editing with macOS keys, and drawing it with a caret.
 //! - [`primitives`]: the same looks as plain, chainable gpui elements.
 //! - [`anim`]: reversible open/close transitions, color blends and Reduce Motion.
@@ -40,8 +40,8 @@ pub mod textfield;
 pub mod theme;
 
 pub use components::{
-    Avatar, Badge, Button, ButtonStyle, Card, EmptyState, IconButton, IconButtonStyle, Kbd, Link, PageHeader,
-    SectionHeader, SegmentedControl, SegmentedStyle, ToggleButton,
+    Avatar, Badge, Button, ButtonStyle, Card, EmptyState, ExpandableText, IconButton, IconButtonStyle, Kbd, Link,
+    PageHeader, SectionHeader, SegmentedControl, SegmentedStyle, ToggleButton,
 };
 pub use icons::{Assets, icon};
 pub use textfield::TextField;
@@ -50,7 +50,8 @@ pub use theme::{Palette, Theme, contrast, luminance, readable_on};
 /// Everything for building Tahoe-style views.
 pub mod prelude {
     pub use crate::{
-        Avatar, Badge, Button, ButtonStyle, Card, EmptyState, IconButton, IconButtonStyle, Kbd, Link, PageHeader,
-        Palette, SectionHeader, SegmentedControl, SegmentedStyle, TextField, Theme, ToggleButton, icon, readable_on,
+        Avatar, Badge, Button, ButtonStyle, Card, EmptyState, ExpandableText, IconButton, IconButtonStyle, Kbd, Link,
+        PageHeader, Palette, SectionHeader, SegmentedControl, SegmentedStyle, TextField, Theme, ToggleButton, icon,
+        readable_on,
     };
 }

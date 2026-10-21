@@ -12,6 +12,12 @@ use tahoe::{
     theme::{Appearance, force_appearance},
 };
 
+const NOTES: &str = "For a razor-toothed mixtape, the record is, to a surprising extent, a family affair. \
+It was announced before its release by the artist's mother, and the only feature across its 15 songs is \
+from a hometown friend.\n\nOne of the writer's great gifts is a keen understanding of how to manipulate \
+the stakes. Frequently in his records, a boast turns into a confession halfway through a verse, and the \
+beat drops out just long enough for you to notice.";
+
 struct Gallery {
     clicks: usize,
     last: &'static str,
@@ -19,6 +25,7 @@ struct Gallery {
     field_focus: FocusHandle,
     segment: usize,
     shuffle: bool,
+    notes_open: bool,
 }
 
 impl Gallery {
@@ -140,6 +147,13 @@ impl Gallery {
                     ),
                 ),
             )
+            .child(SectionHeader::new("text", "Expandable text"))
+            .child(div().px(px(32.)).child(ExpandableText::new("notes", NOTES).expanded(self.notes_open).on_toggle(
+                cx.listener(|this, _, _, cx| {
+                    this.notes_open = !this.notes_open;
+                    cx.notify();
+                }),
+            )))
             .child(SectionHeader::new("links", "Links and badges"))
             .child(
                 row()
@@ -237,6 +251,7 @@ fn main() {
                     field_focus: cx.focus_handle(),
                     segment: 0,
                     shuffle: false,
+                    notes_open: false,
                 })
             },
         )

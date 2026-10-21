@@ -17,10 +17,14 @@ impl MusicApp {
                 self.personal = Some(Load::Ready(Some(home)));
             }
         }
+        if self.catalog.is_musickit() {
+            *self.awaiting_token.borrow_mut() = Some(Vec::new());
+        }
         cx.spawn(async move |this, cx| {
             let token = cx.background_executor().spawn(async { auth::stored_user_token() }).await;
             crate::perf::milestone("keychain read");
             this.update(cx, |this, cx| {
+                let waiting = this.awaiting_token.borrow_mut().take().unwrap_or_default();
                 match token {
                     Some(token) => {
                         this.catalog.set_user_token(Some(token));
@@ -33,6 +37,9 @@ impl MusicApp {
                         this.account = Account::SignedOut;
                         this.remote = Load::Loading;
                     }
+                }
+                for fetch in waiting {
+                    fetch(this, cx);
                 }
                 cx.notify();
             })
@@ -155,6 +162,9 @@ impl MusicApp {
                 Ok(token) => {
                     this.catalog.set_user_token(Some(token));
                     this.account = Account::SignedIn;
+                    // Library playlists asked for while signed out failed; let them load now.
+                    this.playlist_tracks.retain(|_, load| !matches!(load, Load::Failed(_)));
+                    this.requested_playlists.borrow_mut().clear();
                     this.load_remote_library(cx);
                     this.load_personal_home(cx);
                     this.show_notice("Signed in to Apple Music".into(), cx);

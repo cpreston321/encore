@@ -294,6 +294,8 @@ impl Fx {
     }
 }
 
+pub(crate) type DeferredFetch = Box<dyn FnOnce(&mut MusicApp, &mut Context<MusicApp>)>;
+
 pub struct MusicApp {
     pub(crate) catalog: Catalog,
     pub(crate) catalog_note: Option<String>,
@@ -304,10 +306,15 @@ pub struct MusicApp {
     /// Up to four song covers per playlist without its own artwork, saved so the sidebar and
     /// mosaics show them at launch instead of waiting for every playlist's tracks.
     pub(crate) playlist_covers: RefCell<HashMap<String, Vec<crate::model::Artwork>>>,
+    /// Requests made while the Keychain is still being read for the user token. They wait for
+    /// it: sent without it, anything under `me/` fails with 403.
+    pub(crate) awaiting_token: RefCell<Option<Vec<DeferredFetch>>>,
     /// Playlists whose tracks were requested only to build a cover mosaic.
     requested_playlists: RefCell<std::collections::HashSet<String>>,
     /// Artists fetched in the background (e.g. for "More by" under an album).
     requested_artists: RefCell<std::collections::HashSet<String>>,
+    pub(crate) related_albums: HashMap<String, Load<Vec<Album>>>,
+    requested_related: RefCell<std::collections::HashSet<String>>,
     pub(crate) stations: Option<Load<Vec<Station>>>,
     /// Name of the artist selected in the library's Artists page.
     pub(crate) selected_library_artist: Option<String>,
@@ -461,8 +468,11 @@ impl MusicApp {
             artists: HashMap::new(),
             playlist_tracks: HashMap::new(),
             playlist_covers: RefCell::new(data::load_playlist_covers()),
+            awaiting_token: RefCell::new(None),
             requested_playlists: RefCell::default(),
             requested_artists: RefCell::default(),
+            related_albums: HashMap::new(),
+            requested_related: RefCell::default(),
             stations: None,
             selected_library_artist: None,
             expanded_notes: Default::default(),

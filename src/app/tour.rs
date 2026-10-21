@@ -271,6 +271,10 @@ impl MusicApp {
         let focus = std::env::var("ENCORE_TOUR_ARTIST").ok().map(|n| n.to_lowercase());
         let focus_album =
             focus.as_ref().and_then(|n| self.lib_albums().iter().find(|a| a.artist.to_lowercase() == *n).cloned());
+        // ENCORE_TOUR_ALBUM=<id> adds that album (catalog or library) as an "album" step.
+        if let Ok(id) = std::env::var("ENCORE_TOUR_ALBUM") {
+            steps.push(("album".into(), Route::Album(id), None));
+        }
         if let Some(album) = focus_album.or_else(|| self.lib_albums().first().cloned()) {
             steps.push(("library-album".into(), Route::Album(album.id.clone()), None));
         }

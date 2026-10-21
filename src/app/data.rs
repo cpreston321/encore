@@ -9,6 +9,10 @@ impl MusicApp {
         job: impl FnOnce(Catalog) -> Result<T> + Send + 'static,
         done: impl FnOnce(&mut Self, Load<T>, &mut Context<Self>) + 'static,
     ) {
+        if let Some(waiting) = self.awaiting_token.borrow_mut().as_mut() {
+            waiting.push(Box::new(move |this, cx| this.fetch(cx, job, done)));
+            return;
+        }
         let catalog = self.catalog.clone();
         cx.spawn(async move |this, cx| {
             let result = cx.background_executor().spawn(async move { job(catalog) }).await;
@@ -135,10 +139,9 @@ impl MusicApp {
     }
 
     pub(crate) fn ensure_playlist_tracks(&self, playlist: &Playlist, cx: &mut Context<Self>) {
-        // The saved library draws before the Keychain hands over the user token, and library
-        // playlists asked for without it fail (403) for good. Signing in redraws, asking again.
+        // Library playlists can't load signed out; signing in redraws, asking again.
         let library_playlist = playlist.id.starts_with("p.");
-        if (library_playlist && self.catalog.user_token().is_none())
+        if (library_playlist && self.account != Account::SignedIn)
             || self.playlist_tracks.contains_key(&playlist.id)
             || !self.requested_playlists.borrow_mut().insert(playlist.id.clone())
         {
@@ -185,6 +188,20 @@ impl MusicApp {
             move |c| c.artist(&id),
             move |this, load, _| {
                 this.artists.insert(key, load);
+            },
+        );
+    }
+
+    pub(crate) fn ensure_related_albums(&self, id: &str, cx: &mut Context<Self>) {
+        if self.related_albums.contains_key(id) || !self.requested_related.borrow_mut().insert(id.to_string()) {
+            return;
+        }
+        let (id, key) = (id.to_string(), id.to_string());
+        self.fetch(
+            cx,
+            move |c| c.related_albums(&id),
+            move |this, load, _| {
+                this.related_albums.insert(key, load);
             },
         );
     }
