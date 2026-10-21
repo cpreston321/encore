@@ -19,9 +19,9 @@ use core_video::{
     pixel_buffer::kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
 };
 use foreign_types::{ForeignType, ForeignTypeRef};
-use core_graphics::color_space::{CGColorSpace, kCGColorSpaceSRGB};
+use core_graphics::color_space::{CGColorSpace, kCGColorSpaceExtendedSRGB};
 use metal::{
-    CAMetalLayer, CommandQueue, MTLPixelFormat, MTLResourceOptions, NSRange,
+    CAMetalLayer, CommandQueue, MTLGPUFamily, MTLPixelFormat, MTLResourceOptions, NSRange,
     RenderPassColorAttachmentDescriptorRef,
 };
 use objc::{self, msg_send, sel, sel_impl};
@@ -184,9 +184,11 @@ impl MetalRenderer {
         layer.set_device(&device);
         // Without a colorspace the compositor doesn't color-match the drawable, so sRGB colors
         // show as the display's own primaries, oversaturated on wide-gamut displays.
-        if let Some(srgb) = CGColorSpace::create_with_name(unsafe { kCGColorSpaceSRGB }) {
+        if let Some(extended_srgb) =
+            CGColorSpace::create_with_name(unsafe { kCGColorSpaceExtendedSRGB })
+        {
             unsafe {
-                let _: () = msg_send![&*layer, setColorspace: srgb.as_ptr()];
+                let _: () = msg_send![&*layer, setColorspace: extended_srgb.as_ptr()];
             }
         }
         layer.set_maximum_drawable_count(3);
@@ -1642,11 +1644,16 @@ impl DrawablePipelines {
     }
 }
 
-/// The drawable holds sRGB, so wide-gamut images are clipped to it. An extended-range
-/// drawable (BGR10_XR) could show them in full, but the compositor then kept about 390 MB of
-/// conversion buffers for the window while it redrew, and almost no artwork leaves sRGB.
-fn drawable_format(_device: &metal::DeviceRef, _transparent: bool) -> MTLPixelFormat {
-    MTLPixelFormat::BGRA8Unorm
+/// The drawable holds extended sRGB: sRGB colors keep their values, and wide-gamut images
+/// reach outside 0...1. BGR10_XR is as small as BGRA8Unorm and holds every 8-bit sRGB value
+/// exactly, but it has no alpha and only Apple GPUs have it, so transparent windows and
+/// other GPUs use half floats, which take twice the memory.
+fn drawable_format(device: &metal::DeviceRef, transparent: bool) -> MTLPixelFormat {
+    if !transparent && device.supports_family(MTLGPUFamily::Apple3) {
+        MTLPixelFormat::BGR10_XR
+    } else {
+        MTLPixelFormat::RGBA16Float
+    }
 }
 
 fn has_alpha(format: MTLPixelFormat) -> bool {
@@ -1926,8 +1933,6 @@ mod tests {
                 if format == MTLPixelFormat::RGBA16Float {
                     let half = |i: usize| f16_to_f32(u16::from_le_bytes([pixel[2 * i], pixel[2 * i + 1]]));
                     [half(0), half(1), half(2)]
-                } else if format == MTLPixelFormat::BGRA8Unorm {
-                    [pixel[2] as f32 / 255., pixel[1] as f32 / 255., pixel[0] as f32 / 255.]
                 } else {
                     // BGR10_XR: 384 is 0 and 894 is 1.
                     let packed = u32::from_le_bytes(pixel.try_into().unwrap());
@@ -1964,7 +1969,7 @@ mod tests {
             fn CFRelease(object: *mut c_void);
         }
         let p3 = CGColorSpace::create_with_name(unsafe { kCGColorSpaceDisplayP3 }).unwrap();
-        let extended = CGColorSpace::create_with_name(unsafe { core_graphics::color_space::kCGColorSpaceExtendedSRGB }).unwrap();
+        let extended = CGColorSpace::create_with_name(unsafe { kCGColorSpaceExtendedSRGB }).unwrap();
         unsafe {
             let components = [rgb[0] as f64, rgb[1] as f64, rgb[2] as f64, 1.];
             let color = CGColorCreate(p3.as_ptr(), components.as_ptr());
@@ -1978,7 +1983,7 @@ mod tests {
     }
 
     #[test]
-    fn srgb_colors_keep_their_values_and_p3_images_are_color_matched() {
+    fn srgb_colors_keep_their_values_and_p3_images_leave_srgb() {
         let ui_colors = [0x3478f6, 0xff0000, 0x1c1c1e, 0xfa2d48, 0x808080, 0xffffff];
         let p3_pixels: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [204, 77, 51], [128, 128, 128]];
         for transparent in [false, true] {
@@ -2011,18 +2016,16 @@ mod tests {
             }
             for (i, pixel) in p3_pixels.iter().enumerate() {
                 let got = pixels[ui_colors.len() + i];
-                let expected =
-                    reference_p3_to_extended_srgb(pixel.map(|c| c as f32 / 255.)).map(|c| c.clamp(0., 1.));
+                let expected = reference_p3_to_extended_srgb(pixel.map(|c| c as f32 / 255.));
                 for channel in 0..3 {
                     assert!(
-                        (got[channel] - expected[channel]).abs() < 1.5 / 255.,
+                        (got[channel] - expected[channel]).abs() < 2.5 / 510.,
                         "{format:?}: P3 {pixel:?} came out as {got:?}, ColorSync says {expected:?}"
                     );
                 }
             }
-            // The drawable holds sRGB, so P3's red is clipped to sRGB's.
             let p3_red = pixels[ui_colors.len()];
-            assert_eq!(p3_red, [1., 0., 0.], "{format:?}: P3 red is {p3_red:?}");
+            assert!(p3_red[0] > 1.05 && p3_red[1] < -0.1, "{format:?}: P3 red is {p3_red:?}");
             let srgb_red = pixels[ui_colors.len() + p3_pixels.len()];
             assert_eq!(srgb_red, [1., 0., 0.], "{format:?}");
         }
