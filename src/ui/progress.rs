@@ -59,6 +59,8 @@ pub struct Progress {
     /// Where the native fill layer expects the song to be, while it's drawing the fill
     /// instead of this view (see `native_fill`).
     native: Cell<Option<(f32, Instant)>>,
+    /// Where the pointer is along the bar (0–1) while hovering it, previewing a click.
+    pointer: Cell<Option<f32>>,
     /// The current song's spectrum (set by the app once analyzed).
     pub spectrum: RefCell<Option<std::sync::Arc<crate::spectrum::Spectrum>>>,
     shown_levels: RefCell<[f32; crate::spectrum::BANDS]>,
@@ -82,6 +84,7 @@ impl Progress {
             hover: Cell::new(HoverAnim { hovered: false, from: 0., at: Instant::now() }),
             insets: Cell::new((0., 0.)),
             native: Cell::new(None),
+            pointer: Cell::new(None),
             spectrum: RefCell::new(None),
             shown_levels: RefCell::new([0.; crate::spectrum::BANDS]),
             live: RefCell::new(crate::spectrum::Live::new()),
@@ -253,7 +256,8 @@ impl Render for Progress {
         let (track, fill, label) = self.colors.get();
         let app = self.app.clone();
         let time = |s: String| div().text_size(px(10.5)).text_color(label).child(s);
-        let thickness = 2.5 + 3. * hover;
+        let thickness = 2.5 + 5.5 * hover;
+        let pointer = self.pointer.get().filter(|_| hover > 0. && self.scrub.get().is_none());
         // Hovered, the art and menu beside the subtitle fade out and the times spread to the
         // bar's ends.
         let (inset_left, inset_right) = self.insets.get();
@@ -306,9 +310,12 @@ impl Render for Progress {
                     .id("progress")
                     .relative()
                     .w_full()
-                    .h(px(9.))
+                    .h(px(12.))
                     // The player fades its art, title and menu with the hover, so it redraws too.
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if !*hovered {
+                            this.pointer.set(None);
+                        }
                         if this.set_hovered(*hovered) {
                             cx.notify();
                             this.app.update(cx, |_, cx| cx.notify()).ok();
@@ -325,15 +332,47 @@ impl Render for Progress {
                         })
                         .ok();
                     })
+                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, cx| {
+                        let b = this.bounds.get();
+                        if b.size.width <= px(0.) {
+                            return;
+                        }
+                        let at = ((e.position.x - b.origin.x) / b.size.width).clamp(0., 1.);
+                        if this.pointer.replace(Some(at)).is_none_or(|was| (was - at).abs() > 0.001) {
+                            cx.notify();
+                        }
+                    }))
                     .child(capture_bounds(self.bounds.clone()))
-                    .child(
+                    .child({
+                        // A click jumps to the pointer: ahead of the playhead, the stretch it
+                        // would skip shows lighter; behind, the part it would undo dims.
+                        let (solid, preview) = match pointer {
+                            Some(at) if at > fraction => (fraction, Some((fraction, at - fraction, 0.45))),
+                            Some(at) => (at, Some((at, fraction - at, 0.5))),
+                            None => (fraction, None),
+                        };
                         div()
+                            .relative()
                             .w_full()
                             .h(px(thickness))
                             .rounded_full()
                             .bg(track)
-                            .child(div().h_full().rounded_full().w(relative(fraction)).bg(fill)),
-                    ),
+                            .overflow_hidden()
+                            .when_some(preview, |d, (start, width, alpha)| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_0()
+                                        .left(relative(start))
+                                        .w(relative(width))
+                                        .bg(fill.opacity(alpha)),
+                                )
+                            })
+                            .child(
+                                div().absolute().top_0().bottom_0().left_0().w(relative(solid)).rounded_full().bg(fill),
+                            )
+                    }),
             )
     }
 }
