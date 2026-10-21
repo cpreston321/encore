@@ -92,7 +92,7 @@ impl MusicApp {
                     }
                 }
             }
-            // ENCORE_TOUR_OVERLAY=palette|shortcuts: show that overlay on top of the tour.
+            // ENCORE_TOUR_OVERLAY=palette|shortcuts|volume|account|menu: show that overlay on top of the tour.
             match std::env::var("ENCORE_TOUR_OVERLAY").as_deref() {
                 Ok(overlay @ ("palette" | "palette-selected")) => {
                     let select = overlay == "palette-selected";
@@ -131,6 +131,28 @@ impl MusicApp {
                 Ok("shortcuts") => {
                     this.update(cx, |this, cx| {
                         this.show_shortcuts = true;
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok("volume") => {
+                    this.update(cx, |this, cx| {
+                        this.show_volume = true;
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok("account") => {
+                    this.update(cx, |this, cx| {
+                        this.show_account = true;
+                        cx.notify();
+                    })
+                    .ok();
+                }
+                Ok("menu") => {
+                    this.update(cx, |this, cx| {
+                        let song = this.browse.ready().and_then(|b| b.top_songs.first().cloned());
+                        this.menu = song.map(|s| this.song_menu(&s, point(px(420.), px(240.))));
                         cx.notify();
                     })
                     .ok();

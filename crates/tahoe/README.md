@@ -5,6 +5,7 @@ macOS 26 Tahoe-style components for [GPUI](https://www.gpui.rs), extracted from 
 ```sh
 cargo run -p tahoe --example gallery    # every component, in your system appearance
 TAHOE_APPEARANCE=light cargo run -p tahoe --example gallery
+TAHOE_GLASS=reduce-transparency cargo run -p tahoe --example gallery   # or increase-contrast
 ```
 
 ## What's inside
@@ -12,9 +13,9 @@ TAHOE_APPEARANCE=light cargo run -p tahoe --example gallery
 | Module | What it gives you |
 | --- | --- |
 | `components` | `Button`, `IconButton`, `Link`, `SectionHeader`, `PageHeader`, `Card`, `Badge`, as Zed-style builders |
-| `primitives` | The same looks as plain, chainable gpui elements (`pill_button`, `circle_button`, `glass_button`, `toolbar_button`…) |
+| `primitives` | The same looks as plain, chainable gpui elements (`pill_button`, `circle_button`, `glass_button`, `toolbar_button`, `floating_toolbar_button`…) |
 | `textfield` | `TextField`, a single-line editing model, and `TextInput`, which draws it and takes text from macOS input methods (IME composition, dead keys, press-and-hold accents, dictation, the emoji picker) for any view that implements `TextFieldHost` |
-| `theme` | Light and dark color tokens, `Palette`s for surfaces tinted by artwork, and WCAG `contrast` / `readable_on` |
+| `theme` | Light and dark color tokens, `Palette`s for surfaces tinted by artwork, WCAG `contrast` / `readable_on`, and `glass_fill`, the most translucent glass fill whose text still reads over a white or black backdrop |
 | `typography` | `text_shadow_on_art()` for white text on artwork |
 | `anim` | `Presence` (open/close transitions that reverse mid-way), `ColorBlend`, and `reduce_motion()` |
 | `icons` | The embedded icon set as an `AssetSource` (`tahoe::Assets`) and `icon(name, size, color)` |
@@ -49,6 +50,7 @@ Components pick the light or dark theme from their window. On a surface tinted b
 - **Text hover styles.** gpui applies `.hover()` styles at paint time, after text is laid out, so an underline or text color set there never reaches the glyphs. `Link` keeps its hover state per element (`window.use_keyed_state`) and styles itself while rendering instead.
 - **Rounded clipping.** `overflow_hidden` on a rounded element clips its children to the rounded shape only with the patched gpui in `vendor/gpui` (see its `PATCHES.md`). Stock gpui clips to the rectangle.
 - **Tracking, shadows and clamped ellipses.** `.tracking(..)`, `.text_shadow(..)`, and an ellipsis that ends the last line of `line_clamp` text exactly, need the patched gpui too.
+- **Liquid Glass.** `.glass()` and the glass buttons need the patched gpui's glass (macOS only). It follows Reduce Transparency and Increase Contrast; `gpui::DisplayAccessibility::set_override` fakes them.
 - **Overrides for testing.** `theme::force_appearance` and `anim::force_reduce_motion` let an app offer flags like Encore's `ENCORE_APPEARANCE` and `ENCORE_REDUCE_MOTION`.
 
 ## License
