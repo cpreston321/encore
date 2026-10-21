@@ -257,6 +257,10 @@ pub struct Style {
     /// The mouse cursor style shown when the mouse pointer is over an element.
     pub mouse_cursor: Option<CursorStyle>,
 
+    /// Blurs what's behind this element, as frosted glass (macOS only). Pair it with a
+    /// translucent background.
+    pub backdrop_blur: Option<Pixels>,
+
     /// The opacity of this element
     pub opacity: Option<f32>,
 
@@ -655,6 +659,10 @@ impl Style {
 
         window.paint_shadows(bounds, corner_radii, &self.box_shadow);
 
+        if let Some(radius) = self.backdrop_blur {
+            window.paint_backdrop_blur(bounds, corner_radii, radius, 1.8);
+        }
+
         let background_color = self.background.as_ref().and_then(Fill::color);
         if background_color.is_some_and(|color| !color.is_transparent()) {
             let mut border_color = match background_color {
@@ -791,6 +799,7 @@ impl Default for Style {
             box_shadow: Default::default(),
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
+            backdrop_blur: None,
             opacity: None,
             grid_rows: None,
             grid_cols: None,

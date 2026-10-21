@@ -648,6 +648,13 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Blurs what's behind the element like frosted glass (macOS only), with `radius` as the
+    /// blur's standard deviation. Give the element a translucent background to tint it.
+    fn backdrop_blur(mut self, radius: impl Into<crate::Pixels>) -> Self {
+        self.style().backdrop_blur = Some(radius.into());
+        self
+    }
+
     /// Sets the opacity of this element and its children.
     fn opacity(mut self, opacity: f32) -> Self {
         self.style().opacity = Some(opacity);

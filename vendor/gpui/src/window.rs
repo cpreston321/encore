@@ -12,7 +12,7 @@ use crate::{
     MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
     PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, PromptButton, PromptLevel, Quad,
     Render, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
-    SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow,
+    SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, BackdropBlur,
     SharedString, Size, StrikethroughStyle, Style, SubscriberSet, Subscription, SystemWindowTab,
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
@@ -2970,6 +2970,33 @@ impl Window {
                 color: shadow.color.opacity(opacity),
             });
         }
+    }
+
+    /// Blurs what has been painted behind `bounds` so far, clipped to its rounded corners, as
+    /// frosted glass. Paint a translucent fill over it to tint it. `radius` is the blur's
+    /// standard deviation. Only macOS draws it; other platforms skip it.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_backdrop_blur(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        radius: Pixels,
+        saturation: f32,
+    ) {
+        self.invalidator.debug_assert_paint();
+
+        let scale_factor = self.scale_factor();
+        let content_mask = self.content_mask();
+        self.next_frame.scene.insert_primitive(BackdropBlur {
+            order: 0,
+            bounds: bounds.dilate(radius * 3.).scale(scale_factor),
+            shape: bounds.scale(scale_factor),
+            corner_radii: corner_radii.scale(scale_factor),
+            content_mask: content_mask.scale(scale_factor),
+            radius: radius.scale(scale_factor),
+            saturation,
+        });
     }
 
     /// Paint one or more quads into the scene for the next frame at the current stacking context.

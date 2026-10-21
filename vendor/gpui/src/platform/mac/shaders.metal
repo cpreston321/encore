@@ -1298,3 +1298,104 @@ float content_mask_alpha(float2 position, ContentMask_ScaledPixels mask) {
   }
   return saturate(0.5 - quad_sdf(position, mask.bounds, r));
 }
+
+// Backdrop blur: the renderer copies the drawable under a blur into a texture, shrinks it,
+// blurs it in two passes, then draws it back clipped to the blur's rounded shape.
+
+struct BlurPass {
+  // Source pixels per destination pixel, and the valid source area in pixels.
+  float2 source_scale;
+  float2 source_max;
+  float2 direction;
+  float sigma;
+  float _pad;
+};
+
+struct BlurPassOutput {
+  float4 position [[position]];
+};
+
+vertex BlurPassOutput blur_pass_vertex(uint vertex_id [[vertex_id]]) {
+  float2 uv = float2((vertex_id << 1) & 2, vertex_id & 2);
+  return BlurPassOutput{float4(uv * float2(2., -2.) + float2(-1., 1.), 0., 1.)};
+}
+
+fragment float4 blur_downsample_fragment(BlurPassOutput input [[stage_in]],
+                                         texture2d<float> source [[texture(0)]],
+                                         constant BlurPass *pass [[buffer(0)]]) {
+  constexpr sampler s(filter::linear, address::clamp_to_edge, coord::pixel);
+  float2 center = input.position.xy * pass->source_scale;
+  float2 q = pass->source_scale * 0.25;
+  float2 lo = float2(0.5);
+  float2 hi = pass->source_max - 0.5;
+  float4 sum = source.sample(s, clamp(center + float2(-q.x, -q.y), lo, hi)) +
+               source.sample(s, clamp(center + float2(q.x, -q.y), lo, hi)) +
+               source.sample(s, clamp(center + float2(-q.x, q.y), lo, hi)) +
+               source.sample(s, clamp(center + float2(q.x, q.y), lo, hi));
+  return float4(sum.rgb * 0.25, 1.);
+}
+
+fragment float4 blur_gaussian_fragment(BlurPassOutput input [[stage_in]],
+                                       texture2d<float> source [[texture(0)]],
+                                       constant BlurPass *pass [[buffer(0)]]) {
+  constexpr sampler s(filter::linear, address::clamp_to_edge, coord::pixel);
+  float sigma = max(pass->sigma, 0.5);
+  int taps = min(int(ceil(sigma * 3.)), 64);
+  float2 lo = float2(0.5);
+  float2 hi = pass->source_max - 0.5;
+  float3 sum = float3(0.);
+  float total = 0.;
+  for (int i = -taps; i <= taps; i++) {
+    float weight = exp(-0.5 * float(i * i) / (sigma * sigma));
+    float2 p = clamp(input.position.xy + pass->direction * float(i), lo, hi);
+    sum += source.sample(s, p).rgb * weight;
+    total += weight;
+  }
+  return float4(sum / total, 1.);
+}
+
+struct BackdropComposite {
+  // Where the blurred texture's first pixel sits in the drawable, and its scale and size.
+  float2 origin;
+  float2 low_max;
+  float downsample;
+  float _pad;
+};
+
+struct BackdropVertexOutput {
+  float4 position [[position]];
+  float clip_distance [[clip_distance]][4];
+};
+
+struct BackdropFragmentInput {
+  float4 position [[position]];
+};
+
+vertex BackdropVertexOutput backdrop_blur_vertex(
+    uint unit_vertex_id [[vertex_id]],
+    constant float2 *unit_vertices [[buffer(0)]],
+    constant BackdropBlur *blur [[buffer(1)]],
+    constant Size_DevicePixels *viewport_size [[buffer(2)]]) {
+  float2 unit_vertex = unit_vertices[unit_vertex_id];
+  float4 device_position = to_device_position(unit_vertex, blur->shape, viewport_size);
+  float4 clip_distance =
+      distance_from_clip_rect(unit_vertex, blur->shape, blur->content_mask.bounds);
+  return BackdropVertexOutput{
+      device_position,
+      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+}
+
+fragment float4 backdrop_blur_fragment(BackdropFragmentInput input [[stage_in]],
+                                       constant BackdropBlur *blur [[buffer(0)]],
+                                       constant BackdropComposite *composite [[buffer(1)]],
+                                       texture2d<float> blurred [[texture(0)]]) {
+  constexpr sampler s(filter::linear, address::clamp_to_edge, coord::pixel);
+  float2 p = (input.position.xy - composite->origin) / composite->downsample;
+  p = clamp(p, float2(0.5), composite->low_max - 0.5);
+  float3 color = blurred.sample(s, p).rgb;
+  float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
+  color = saturate(mix(float3(luma), color, blur->saturation));
+  float alpha = saturate(0.5 - quad_sdf(input.position.xy, blur->shape, blur->corner_radii));
+  alpha *= content_mask_alpha(input.position.xy, blur->content_mask);
+  return float4(color, alpha);
+}

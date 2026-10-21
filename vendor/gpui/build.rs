@@ -132,6 +132,7 @@ mod macos {
             "PathRasterizationVertex".into(),
             "ShadowInputIndex".into(),
             "Shadow".into(),
+            "BackdropBlur".into(),
             "QuadInputIndex".into(),
             "Underline".into(),
             "UnderlineInputIndex".into(),

@@ -32,6 +32,7 @@ pub(crate) struct Scene {
     pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
     pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
     pub(crate) surfaces: Vec<PaintSurface>,
+    pub(crate) backdrop_blurs: Vec<BackdropBlur>,
     /// A visible sprite has `motion`, so the window keeps presenting this scene.
     pub(crate) has_motion: bool,
     /// Seconds of motion so far, read by the shader for sprites with `motion`. Set by the
@@ -51,6 +52,7 @@ impl Scene {
         self.monochrome_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.backdrop_blurs.clear();
         self.has_motion = false;
     }
 
@@ -120,6 +122,10 @@ impl Scene {
                 surface.order = order;
                 self.surfaces.push(surface.clone());
             }
+            Primitive::BackdropBlur(blur) => {
+                blur.order = order;
+                self.backdrop_blurs.push(blur.clone());
+            }
         }
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
@@ -145,6 +151,7 @@ impl Scene {
         self.polychrome_sprites
             .sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.surfaces.sort_by_key(|surface| surface.order);
+        self.backdrop_blurs.sort_by_key(|blur| blur.order);
     }
 
     #[cfg_attr(
@@ -177,6 +184,9 @@ impl Scene {
             surfaces: &self.surfaces,
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
+            backdrop_blurs: &self.backdrop_blurs,
+            backdrop_blurs_start: 0,
+            backdrop_blurs_iter: self.backdrop_blurs.iter().peekable(),
         }
     }
 }
@@ -190,6 +200,8 @@ impl Scene {
     allow(dead_code)
 )]
 pub(crate) enum PrimitiveKind {
+    // First, so a blur draws before anything else at its order.
+    BackdropBlur,
     Shadow,
     #[default]
     Quad,
@@ -215,6 +227,7 @@ pub(crate) enum Primitive {
     MonochromeSprite(MonochromeSprite),
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
+    BackdropBlur(BackdropBlur),
 }
 
 impl Primitive {
@@ -227,6 +240,7 @@ impl Primitive {
             Primitive::MonochromeSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
+            Primitive::BackdropBlur(blur) => &blur.bounds,
         }
     }
 
@@ -239,6 +253,7 @@ impl Primitive {
             Primitive::MonochromeSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
+            Primitive::BackdropBlur(blur) => &blur.content_mask,
         }
     }
 }
@@ -272,6 +287,9 @@ struct BatchIterator<'a> {
     surfaces: &'a [PaintSurface],
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
+    backdrop_blurs: &'a [BackdropBlur],
+    backdrop_blurs_start: usize,
+    backdrop_blurs_iter: Peekable<slice::Iter<'a, BackdropBlur>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -300,6 +318,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.surfaces_iter.peek().map(|s| s.order),
                 PrimitiveKind::Surface,
+            ),
+            (
+                self.backdrop_blurs_iter.peek().map(|b| b.order),
+                PrimitiveKind::BackdropBlur,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -431,6 +453,20 @@ impl<'a> Iterator for BatchIterator<'a> {
                     &self.surfaces[surfaces_start..surfaces_end],
                 ))
             }
+            PrimitiveKind::BackdropBlur => {
+                let start = self.backdrop_blurs_start;
+                let mut end = start + 1;
+                self.backdrop_blurs_iter.next();
+                while self
+                    .backdrop_blurs_iter
+                    .next_if(|blur| (blur.order, batch_kind) < max_order_and_kind)
+                    .is_some()
+                {
+                    end += 1;
+                }
+                self.backdrop_blurs_start = end;
+                Some(PrimitiveBatch::BackdropBlurs(&self.backdrop_blurs[start..end]))
+            }
         }
     }
 }
@@ -457,6 +493,7 @@ pub(crate) enum PrimitiveBatch<'a> {
         sprites: &'a [PolychromeSprite],
     },
     Surfaces(&'a [PaintSurface]),
+    BackdropBlurs(&'a [BackdropBlur]),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -493,6 +530,30 @@ pub(crate) struct Underline {
 impl From<Underline> for Primitive {
     fn from(underline: Underline) -> Self {
         Primitive::Underline(underline)
+    }
+}
+
+/// Blurs what's already drawn behind `shape`, like a frosted-glass backdrop. Only the Metal
+/// renderer draws it; the others skip it.
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub(crate) struct BackdropBlur {
+    pub order: DrawOrder,
+    /// The area the blur reads: `shape` plus room for the blur to spread in from around it.
+    /// It decides draw order, so everything under that area is drawn first.
+    pub bounds: Bounds<ScaledPixels>,
+    pub shape: Bounds<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    /// Gaussian standard deviation.
+    pub radius: ScaledPixels,
+    /// 1 keeps the colors; Apple's materials use about 1.8.
+    pub saturation: f32,
+}
+
+impl From<BackdropBlur> for Primitive {
+    fn from(blur: BackdropBlur) -> Self {
+        Primitive::BackdropBlur(blur)
     }
 }
 

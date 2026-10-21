@@ -1,6 +1,6 @@
 # Changes from gpui 0.2.2
 
-This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus six changes. `git log vendor/gpui` shows each one on its own.
+This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus seven changes. `git log vendor/gpui` shows each one on its own.
 
 ## The display link sleeps when there's nothing to draw
 
@@ -41,3 +41,10 @@ Content masks only had a rectangle, so a rounded element with `overflow_hidden` 
 ## `line_clamp` counts every line of multi-paragraph text
 
 `shape_text` counted only the wrap points within each paragraph toward `line_clamp`, not the paragraph's first line. Text with `\n` breaks therefore showed more lines than the clamp. Once the count ran out, the remaining paragraphs were laid out with no lines left, so they didn't wrap and were cut at the element's edge. Each paragraph now counts as one line plus its wraps, and paragraphs past the clamp aren't laid out.
+
+## Backdrop blur
+
+`Styled::backdrop_blur(radius)` (or `Window::paint_backdrop_blur`) blurs what has already been drawn behind an element, clipped to its rounded corners, for frosted-glass bars and panels. Pair it with a translucent background.
+- **The primitive.** `BackdropBlur` carries the shape, its corner radii and a larger area it reads from. That larger area decides its draw order, so everything under it is drawn first. It sorts ahead of other primitives at the same order.
+- **Metal.** The layer is no longer framebuffer-only, so the renderer can read the drawable back. For each blur it ends the render pass, copies the area into a scratch texture, shrinks it (by 4 for wide blurs), blurs it with two Gaussian passes, and draws it back inside the shape with a saturation boost (1.8, like Apple's materials). The scratch textures are kept between frames and only grow.
+- **Elsewhere** the Blade and DirectX renderers skip it.

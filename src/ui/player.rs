@@ -2,6 +2,8 @@
 
 use super::*;
 
+const PILL_ALPHA: f32 = 0.62;
+
 impl MusicApp {
     /// Floating player laid out like the macOS Music app (transport · now playing · tools),
     /// tinted by the current cover.
@@ -11,13 +13,14 @@ impl MusicApp {
         let playing = matches!(self.state, PlayState::Playing | PlayState::Loading);
 
         // Pill colors: a deep shade of the cover, or the theme's pill before anything plays.
+        // Translucent over a blur of the page, like the Music app's frosted bar.
         let tint =
             current.as_ref().and_then(|s| self.art_color(&s.artwork, cx)).map(crate::theme::Palette::from_average);
         let pt = match tint {
             Some(p) => {
                 let ink = |a: f32| Hsla { h: 0., s: 0., l: 1., a };
                 Theme {
-                    pill: Hsla { l: (p.bg.l + 0.05).min(0.3), a: 1., ..p.bg },
+                    pill: Hsla { l: (p.bg.l + 0.05).min(0.3), a: PILL_ALPHA, ..p.bg },
                     text: ink(0.96),
                     text_secondary: ink(0.62),
                     text_tertiary: ink(0.35),
@@ -31,7 +34,7 @@ impl MusicApp {
                     ..*t
                 }
             }
-            None => Theme { pill: Hsla { a: 1., ..t.pill }, ..*t },
+            None => Theme { pill: Hsla { a: PILL_ALPHA, ..t.pill }, ..*t },
         };
         self.progress.read(cx).set_colors(pt.track_bg, pt.track_fill, pt.text_secondary);
         let t = &pt;
@@ -201,6 +204,7 @@ impl MusicApp {
             .pl_2()
             .pr_2p5()
             .rounded_full()
+            .backdrop_blur(px(22.))
             .bg(self.fx.borrow_mut().pill_bg.update(t.pill))
             .border_1()
             .border_color(t.panel_border)

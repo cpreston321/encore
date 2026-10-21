@@ -813,6 +813,7 @@ impl BladeRenderer {
                     );
                     encoder.draw(0, 4, 0, sprites.len() as u32);
                 }
+                PrimitiveBatch::BackdropBlurs(_) => {}
                 PrimitiveBatch::Surfaces(surfaces) => {
                     let mut _encoder = pass.with(&self.pipelines.surfaces);
 
