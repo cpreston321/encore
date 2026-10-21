@@ -257,9 +257,8 @@ pub struct Style {
     /// The mouse cursor style shown when the mouse pointer is over an element.
     pub mouse_cursor: Option<CursorStyle>,
 
-    /// Blurs what's behind this element, as frosted glass (macOS only). Pair it with a
-    /// translucent background.
-    pub backdrop_blur: Option<Pixels>,
+    /// Blurs what's behind this element as glass (macOS only), tinted by its background.
+    pub glass: Option<GlassStyle>,
 
     /// The opacity of this element
     pub opacity: Option<f32>,
@@ -305,6 +304,124 @@ pub enum Visibility {
     Visible,
     /// The element should not be drawn, but should still take up space in the layout.
     Hidden,
+}
+
+/// A Liquid Glass surface: the backdrop blurred, lifted and tinted, bent inward along the
+/// edge like thick glass, with a specular rim lit from the top left. Set with
+/// [`Styled::glass`](crate::Styled::glass). Only the Metal renderer draws it.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GlassStyle {
+    /// The blur's standard deviation.
+    pub blur: Pixels,
+    /// The fill over the blur. `None` uses the element's background when it's a solid color.
+    pub tint: Option<Hsla>,
+    /// Strength of the rim highlight and of the shade on the opposite edge, 0 to 1.
+    pub rim: f32,
+    /// Width of the band along the edge where the backdrop bends inward.
+    pub refraction: Pixels,
+    /// 1 keeps the backdrop's colors; higher makes them more vivid.
+    pub saturation: f32,
+    /// Multiplies the backdrop's colors.
+    pub brightness: f32,
+    /// The opaque fill drawn instead with Reduce Transparency. `None` makes the background,
+    /// or else the tint, opaque.
+    pub fallback: Option<Hsla>,
+}
+
+impl Default for GlassStyle {
+    fn default() -> Self {
+        Self {
+            blur: Pixels(20.),
+            tint: None,
+            rim: 1.,
+            refraction: Pixels(12.),
+            saturation: 1.6,
+            brightness: 1.04,
+            fallback: None,
+        }
+    }
+}
+
+impl GlassStyle {
+    /// A plain frosted blur, without a rim or refraction.
+    pub fn frosted(blur: Pixels) -> Self {
+        Self { blur, tint: None, rim: 0., refraction: Pixels::ZERO, saturation: 1.8, brightness: 1., fallback: None }
+    }
+}
+
+fn opaque_background(mut background: Background) -> Background {
+    background.solid.a = 1.;
+    for stop in &mut background.colors {
+        stop.color.a = 1.;
+    }
+    background
+}
+
+/// The system's Reduce Transparency and Increase Contrast settings. Glass draws an opaque fill
+/// with Reduce Transparency, and a solid border without the rim with Increase Contrast.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DisplayAccessibility {
+    /// Reduce Transparency.
+    pub reduce_transparency: bool,
+    /// Increase Contrast.
+    pub increase_contrast: bool,
+}
+
+static DISPLAY_ACCESSIBILITY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+const DISPLAY_ACCESSIBILITY_KNOWN: u8 = 1;
+const REDUCE_TRANSPARENCY: u8 = 2;
+const INCREASE_CONTRAST: u8 = 4;
+
+impl DisplayAccessibility {
+    /// The current settings, read from the system once, or the override.
+    pub fn current() -> Self {
+        use std::sync::atomic::Ordering;
+        let mut bits = DISPLAY_ACCESSIBILITY.load(Ordering::Relaxed);
+        if bits & DISPLAY_ACCESSIBILITY_KNOWN == 0 {
+            bits = Self::read_system().bits();
+            DISPLAY_ACCESSIBILITY.store(bits, Ordering::Relaxed);
+        }
+        Self {
+            reduce_transparency: bits & REDUCE_TRANSPARENCY != 0,
+            increase_contrast: bits & INCREASE_CONTRAST != 0,
+        }
+    }
+
+    /// Replaces the system's settings for this process, for testing; `None` reads them again.
+    /// Views painted before the change keep their look until they repaint.
+    pub fn set_override(settings: Option<Self>) {
+        DISPLAY_ACCESSIBILITY.store(
+            settings.map_or(0, |s| s.bits()),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    fn bits(self) -> u8 {
+        DISPLAY_ACCESSIBILITY_KNOWN
+            | if self.reduce_transparency { REDUCE_TRANSPARENCY } else { 0 }
+            | if self.increase_contrast { INCREASE_CONTRAST } else { 0 }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn read_system() -> Self {
+        use objc::{class, msg_send, sel, sel_impl};
+        unsafe {
+            let workspace: cocoa::base::id = msg_send![class!(NSWorkspace), sharedWorkspace];
+            let reduce_transparency: cocoa::base::BOOL =
+                msg_send![workspace, accessibilityDisplayShouldReduceTransparency];
+            let increase_contrast: cocoa::base::BOOL =
+                msg_send![workspace, accessibilityDisplayShouldIncreaseContrast];
+            Self {
+                reduce_transparency: reduce_transparency == cocoa::base::YES,
+                increase_contrast: increase_contrast == cocoa::base::YES,
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn read_system() -> Self {
+        Self::default()
+    }
 }
 
 /// The possible values of the box-shadow property
@@ -679,13 +796,44 @@ impl Style {
 
         window.paint_shadows(bounds, corner_radii, &self.box_shadow);
 
-        if let Some(radius) = self.backdrop_blur {
-            window.paint_backdrop_blur(bounds, corner_radii, radius, 1.8);
+        let mut background_color = self.background.as_ref().and_then(Fill::color);
+        let mut border_color = self.border_color;
+        if let Some(glass) = self.glass {
+            let settings = DisplayAccessibility::current();
+            if settings.reduce_transparency {
+                background_color = glass
+                    .fallback
+                    .map(Background::from)
+                    .or(background_color)
+                    .or(glass.tint.map(Background::from))
+                    .map(opaque_background);
+            } else {
+                let solid = background_color
+                    .filter(|b| b.tag == BackgroundTag::Solid)
+                    .map(|b| b.solid);
+                // Only Metal draws glass, so elsewhere the background stays a quad.
+                let tint = match glass.tint {
+                    Some(tint) => tint,
+                    None if cfg!(target_os = "macos") && solid.is_some() => {
+                        background_color = None;
+                        solid.unwrap_or_default()
+                    }
+                    None => Hsla::default(),
+                };
+                let glass = if settings.increase_contrast {
+                    GlassStyle { rim: 0., refraction: Pixels::ZERO, ..glass }
+                } else {
+                    glass
+                };
+                window.paint_glass(bounds, corner_radii, glass, tint);
+            }
+            if settings.increase_contrast {
+                border_color = border_color.map(|c| Hsla { a: 1., ..c });
+            }
         }
 
-        let background_color = self.background.as_ref().and_then(Fill::color);
         if background_color.is_some_and(|color| !color.is_transparent()) {
-            let mut border_color = match background_color {
+            let mut edge_color = match background_color {
                 Some(color) => match color.tag {
                     BackgroundTag::Solid => color.solid,
                     BackgroundTag::LinearGradient => color
@@ -697,13 +845,13 @@ impl Style {
                 },
                 None => Hsla::default(),
             };
-            border_color.a = 0.;
+            edge_color.a = 0.;
             window.paint_quad(quad(
                 bounds,
                 corner_radii,
                 background_color.unwrap_or_default(),
                 Edges::default(),
-                border_color,
+                edge_color,
                 self.border_style,
             ));
         }
@@ -732,14 +880,14 @@ impl Style {
                 bottom_bounds.top_right(),
             );
 
-            let mut background = self.border_color.unwrap_or_default();
+            let mut background = border_color.unwrap_or_default();
             background.a = 0.;
             let quad = quad(
                 bounds,
                 corner_radii,
                 background,
                 border_widths,
-                self.border_color.unwrap_or_default(),
+                border_color.unwrap_or_default(),
                 self.border_style,
             );
 
@@ -819,7 +967,7 @@ impl Default for Style {
             box_shadow: Default::default(),
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
-            backdrop_blur: None,
+            glass: None,
             opacity: None,
             grid_rows: None,
             grid_cols: None,

@@ -52,8 +52,7 @@ impl MusicApp {
             .child(self.sidebar_section(t, "Library", library, cx))
             .child(self.sidebar_section(t, "Playlists", playlists, cx));
 
-        // Floats over the page, which runs underneath it to the window edge. gpui can't
-        // blur, so the panel stays mostly opaque to keep its text legible over art.
+        // Floats over the page, which runs underneath it to the window edge, as glass.
         div().absolute().top_0().left_0().bottom_0().p(px(8.)).pr_0().child(
             div()
                 .id("sidebar-panel")
@@ -64,13 +63,15 @@ impl MusicApp {
                 .relative()
                 // Concentric with the window's corners: Tahoe's ~26pt radius minus the 8pt inset.
                 .rounded(px(PANEL_RADIUS))
-                // Frosted glass: a lighter, see-through shade of whatever is behind (the
-                // page's tint on artwork pages), with a soft highlight along the top.
-                .bg(self.fx.borrow_mut().sidebar_bg.update(Hsla {
-                    l: (t.window.l + 0.07).min(0.92),
-                    a: 0.74,
-                    ..t.window
-                }))
+                // A lighter shade of the page (its tint on artwork pages), with a soft highlight
+                // along the top.
+                .glass_style(GlassStyle { blur: px(30.), ..GlassStyle::default() })
+                .bg(self.fx.borrow_mut().sidebar_bg.update(crate::theme::glass_fill(
+                    Hsla { l: (t.window.l + 0.07).min(0.92), ..t.window },
+                    t.text,
+                    t.text_secondary,
+                    crate::theme::GLASS_MIN_ALPHA,
+                )))
                 .border_1()
                 .border_color(t.text.opacity(0.12))
                 .shadow_lg()
@@ -258,7 +259,8 @@ impl MusicApp {
             .w(px(280.))
             .pb_1p5()
             .rounded(px(16.))
-            .bg(t.menu)
+            .glass_style(panel_glass())
+            .bg(t.glass)
             .border_1()
             .border_color(t.panel_border)
             .shadow_lg()
@@ -622,7 +624,8 @@ impl MusicApp {
                             .px_3()
                             .py_1p5()
                             .rounded_full()
-                            .bg(t.menu)
+                            .glass_style(panel_glass())
+                            .bg(t.glass)
                             .border_1()
                             .border_color(t.panel_border)
                             .shadow_md()
@@ -665,7 +668,8 @@ impl MusicApp {
                     .w(px(460.))
                     .p_6()
                     .rounded(px(16.))
-                    .bg(t.menu)
+                    .glass_style(panel_glass())
+                    .bg(t.glass)
                     .border_1()
                     .border_color(t.panel_border)
                     .shadow_lg()
@@ -709,7 +713,8 @@ impl MusicApp {
             .w(px(230.))
             .py_1()
             .rounded(px(10.))
-            .bg(t.menu)
+            .glass_style(panel_glass())
+            .bg(t.glass)
             .border_1()
             .border_color(t.panel_border)
             .shadow_lg()

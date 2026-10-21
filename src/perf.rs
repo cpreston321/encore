@@ -133,8 +133,15 @@ pub fn frame_end() {
                 } else {
                     String::new()
                 };
+                let blurs_reused: u32 = phases.iter().map(|p| p.blurs_reused).sum();
+                let blurs = blurs_reused + phases.iter().map(|p| p.blurs_drawn).sum::<u32>();
+                let blurs = if blurs > 0 {
+                    format!(", {blurs_reused} of {blurs} blurs reused")
+                } else {
+                    String::new()
+                };
                 format!(
-                    "; while animating: render {:.2}, layout {:.2}, prepaint {:.2}, paint {:.2}, draw {:.2}, encode {:.2}, gpu {:.2} ms{replayed}",
+                    "; while animating: render {:.2}, layout {:.2}, prepaint {:.2}, paint {:.2}, draw {:.2}, encode {:.2}, gpu {:.2} ms{replayed}{blurs}",
                     mean(|p| p.render),
                     mean(|p| p.layout),
                     mean(|p| p.prepaint),

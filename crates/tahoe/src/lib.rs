@@ -5,7 +5,8 @@
 //! Zed keeps its own `ui` crate.
 //!
 //! - [`theme`]: light and dark color tokens, palettes for surfaces tinted by artwork, and
-//!   WCAG contrast helpers ([`readable_on`]) that keep text and icons legible on them.
+//!   WCAG contrast helpers ([`readable_on`], [`glass_fill`]) that keep text and icons legible
+//!   on them and on glass.
 //! - [`components`]: builders such as [`Button`], [`IconButton`], [`Link`], [`SectionHeader`],
 //!   [`PageHeader`], [`Card`], [`Badge`], [`SegmentedControl`], [`ToggleButton`], [`Avatar`],
 //!   [`Kbd`], [`EmptyState`] and [`ExpandableText`].
@@ -47,7 +48,7 @@ pub use components::{
 };
 pub use icons::{Assets, icon};
 pub use textfield::{TextField, TextFieldHost, TextInput};
-pub use theme::{Palette, Theme, contrast, luminance, readable_on};
+pub use theme::{Palette, Theme, contrast, glass_fill, luminance, over, readable_on};
 pub use typography::text_shadow_on_art;
 
 /// Everything for building Tahoe-style views.

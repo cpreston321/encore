@@ -3,13 +3,13 @@
 //! built on these; use whichever reads better at the call site.
 
 use gpui::{
-    Div, ElementId, Fill, FontWeight, Hsla, InteractiveElement, ParentElement, Role, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, div, px, white,
+    Div, ElementId, Fill, FontWeight, GlassStyle, Hsla, InteractiveElement, ParentElement, Role, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, div, px, rgb, white,
 };
 
 use crate::{
     icons::{icon, icon_label},
-    theme::{Theme, readable_on},
+    theme::{Theme, over, readable_on},
 };
 
 /// A capsule button with an icon and a label. The icon follows the label color.
@@ -103,7 +103,12 @@ pub fn circle_button(
         .child(icon(icon_name, size * 0.38, fg))
 }
 
-/// A frosted round button for floating over artwork or photos.
+/// Glass for a small control: a lighter blur, and refraction scaled to its size.
+pub fn control_glass(size: f32) -> GlassStyle {
+    GlassStyle { blur: px(10.), refraction: px((size * 0.22).clamp(4., 10.)), ..GlassStyle::default() }
+}
+
+/// A round Liquid Glass button for floating over artwork or photos, with a white icon.
 pub fn glass_button(id: impl Into<ElementId>, icon_name: &'static str, size: f32) -> Stateful<Div> {
     div()
         .id(id)
@@ -112,6 +117,8 @@ pub fn glass_button(id: impl Into<ElementId>, icon_name: &'static str, size: f32
         .size(px(size))
         .flex_none()
         .rounded_full()
+        // With Reduce Transparency, a dark gray that the white icon reads on.
+        .glass_style(GlassStyle { fallback: Some(rgb(0x48484a).into()), ..control_glass(size) })
         .bg(white().opacity(0.16))
         .border_1()
         .border_color(white().opacity(0.22))
@@ -121,6 +128,19 @@ pub fn glass_button(id: impl Into<ElementId>, icon_name: &'static str, size: f32
         .items_center()
         .justify_center()
         .child(icon(icon_name, size * 0.42, white()))
+}
+
+/// [`toolbar_button`] in Liquid Glass, for toolbars that float over scrolling content.
+pub fn floating_toolbar_button(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    icon_name: &'static str,
+    size: f32,
+) -> Stateful<Div> {
+    toolbar_button(t, id, icon_name, size)
+        .glass_style(GlassStyle { fallback: Some(over(t.button, t.window)), ..control_glass(size) })
+        .bg(Hsla { a: 0.5, ..t.glass })
+        .hover(|s| s.bg(Hsla { a: 0.7, ..t.glass }))
 }
 
 /// The round, translucent toolbar button of macOS Tahoe: a soft fill and hairline border

@@ -6,8 +6,8 @@
 
 extern crate self as gpui;
 
-#[macro_use]
 mod accessibility;
+#[macro_use]
 mod action;
 mod app;
 

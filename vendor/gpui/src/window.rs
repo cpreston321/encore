@@ -2101,8 +2101,11 @@ impl Window {
 
     /// Where the last frame spent its time, for profiling.
     pub fn frame_timings(&self) -> crate::FrameTimings {
+        let (blurs_reused, blurs_drawn) = crate::frame_timings::last_blurs();
         crate::FrameTimings {
             gpu: crate::frame_timings::last_gpu_time(),
+            blurs_reused,
+            blurs_drawn,
             ..self.frame_timings.get()
         }
     }
@@ -3237,18 +3240,42 @@ impl Window {
         radius: Pixels,
         saturation: f32,
     ) {
+        let glass = crate::GlassStyle { saturation, ..crate::GlassStyle::frosted(radius) };
+        self.paint_glass(bounds, corner_radii, glass, Hsla::transparent_black());
+    }
+
+    /// Paints Liquid Glass behind `bounds`: a backdrop blur with `tint` over it, refraction
+    /// along the edge and a rim highlight, as `glass` describes. `glass.tint` is ignored in
+    /// favor of `tint`, and this doesn't check the accessibility settings, which
+    /// [`Styled::glass`](crate::Styled::glass) does. Only macOS draws it.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_glass(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        glass: crate::GlassStyle,
+        tint: Hsla,
+    ) {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
         let content_mask = self.content_mask();
+        let opacity = self.element_opacity();
         self.next_frame.scene.insert_primitive(BackdropBlur {
             order: 0,
-            bounds: bounds.dilate(radius * 3.).scale(scale_factor),
+            bounds: bounds.dilate(glass.blur * 3.).scale(scale_factor),
             shape: bounds.scale(scale_factor),
             corner_radii: corner_radii.scale(scale_factor),
             content_mask: content_mask.scale(scale_factor),
-            radius: radius.scale(scale_factor),
-            saturation,
+            radius: glass.blur.scale(scale_factor),
+            saturation: glass.saturation,
+            brightness: glass.brightness,
+            tint,
+            rim: glass.rim.clamp(0., 1.),
+            rim_width: px(1.25).scale(scale_factor),
+            refraction: glass.refraction.min(bounds.size.width.min(bounds.size.height) / 2.).scale(scale_factor),
+            opacity,
         });
     }
 

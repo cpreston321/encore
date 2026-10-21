@@ -3,10 +3,11 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use gpui::{Hsla, WindowAppearance, rgb, rgba};
+use gpui::{Hsla, Rgba, WindowAppearance, rgb, rgba};
 
 /// Semantic colors. `window` is the page background; `pill` floating bars and toolbars;
-/// `button` a tinted control's fill; `accent` filled controls and selection.
+/// `glass` the fill of glass menus, popovers and sheets; `button` a tinted control's fill;
+/// `accent` filled controls and selection.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
     pub window: Hsla,
@@ -14,6 +15,7 @@ pub struct Theme {
     pub panel_border: Hsla,
     pub pill: Hsla,
     pub menu: Hsla,
+    pub glass: Hsla,
     pub placeholder: Hsla,
     pub text: Hsla,
     pub text_secondary: Hsla,
@@ -84,6 +86,7 @@ impl Theme {
             panel_border: rgba(0xffffff1a).into(),
             pill: rgba(0x2c2c2ef2).into(),
             menu: rgb(0x2c2c2e).into(),
+            glass: rgb(0x2c2c2e).into(),
             placeholder: rgba(0xffffff12).into(),
             text: rgba(0xffffffeb).into(),
             text_secondary: rgba(0xffffff8c).into(),
@@ -99,6 +102,7 @@ impl Theme {
             track_bg: rgba(0xffffff26).into(),
             track_fill: rgba(0xffffffb3).into(),
         }
+        .with_glass()
     }
 
     pub fn light() -> Self {
@@ -108,6 +112,7 @@ impl Theme {
             panel_border: rgba(0x0000001a).into(),
             pill: rgba(0xf8f8faf2).into(),
             menu: rgb(0xf6f6f6).into(),
+            glass: rgb(0xf6f6f6).into(),
             placeholder: rgba(0x0000000d).into(),
             text: rgba(0x000000e0).into(),
             text_secondary: rgba(0x0000008c).into(),
@@ -123,6 +128,11 @@ impl Theme {
             track_bg: rgba(0x0000001f).into(),
             track_fill: rgba(0x00000099).into(),
         }
+        .with_glass()
+    }
+
+    fn with_glass(self) -> Self {
+        Self { glass: glass_fill(self.menu, self.text, self.text_secondary, GLASS_MIN_ALPHA), ..self }
     }
 }
 
@@ -225,6 +235,37 @@ pub fn readable_on(bg: Hsla, preferred: Hsla) -> Hsla {
     if contrast(preferred, bg) >= 3. { preferred } else { best_of_black_white(bg, preferred.a) }
 }
 
+/// `top` drawn over `bottom`, blended in sRGB as the renderer does.
+pub fn over(top: Hsla, bottom: Hsla) -> Hsla {
+    let (t, b): (Rgba, Rgba) = (top.into(), bottom.into());
+    let a = t.a + b.a * (1. - t.a);
+    if a <= 0. {
+        return Hsla::transparent_black();
+    }
+    let mix = |x: f32, y: f32| (x * t.a + y * b.a * (1. - t.a)) / a;
+    Rgba { r: mix(t.r, b.r), g: mix(t.g, b.g), b: mix(t.b, b.b), a }.into()
+}
+
+/// The most translucent a glass fill gets, enough for the blur to show through.
+pub const GLASS_MIN_ALPHA: f32 = 0.7;
+
+/// `fill` as translucent as it can be, down to `min_alpha`, while `text` keeps 4.5:1 and
+/// `secondary` 3:1 over it whatever the glass blurs. A blur averages its backdrop and the
+/// glass lifts it only slightly, so a white or a black backdrop is the worst case.
+pub fn glass_fill(fill: Hsla, text: Hsla, secondary: Hsla, min_alpha: f32) -> Hsla {
+    let reads = |fill: Hsla| {
+        [gpui::white(), gpui::black()].into_iter().all(|backdrop| {
+            let bg = over(fill, backdrop);
+            contrast(over(text, bg), bg) >= 4.5 && contrast(over(secondary, bg), bg) >= 3.
+        })
+    };
+    let mut alpha = min_alpha.clamp(0., 1.);
+    while alpha < 1. && !reads(Hsla { a: alpha, ..fill }) {
+        alpha = (alpha + 0.02).min(1.);
+    }
+    Hsla { a: alpha, ..fill }
+}
+
 /// A 135° gradient between two RGB hex colors, the fill for avatars and placeholder art.
 pub fn gradient(from: u32, to: u32) -> gpui::Background {
     gpui::linear_gradient(135., gpui::linear_color_stop(rgb(from), 0.), gpui::linear_color_stop(rgb(to), 1.))
@@ -238,9 +279,11 @@ impl Theme {
     /// This theme recolored for a page whose background is the palette's tint.
     pub fn tinted(&self, p: Palette) -> Theme {
         let ink = |a: f32| Hsla { a, ..p.text };
+        let panel = Hsla { l: (p.bg.l + 0.05).min(1.), ..p.bg };
         Theme {
             window: p.bg,
-            panel: Hsla { l: (p.bg.l + 0.05).min(1.), ..p.bg },
+            panel,
+            glass: glass_fill(panel, p.text, p.text2, GLASS_MIN_ALPHA),
             placeholder: ink(0.08),
             text: p.text,
             text_secondary: p.text2,
@@ -292,6 +335,27 @@ mod tests {
             let solid = Hsla { a: 1., ..thumb };
             assert!(contrast(solid, Hsla { a: 1., ..t.window }) >= 4.5, "{:?} on {:?}", thumb, t.window);
         }
+    }
+
+    #[test]
+    fn glass_reads_over_white_and_black_art() {
+        let tinted = [0x101010, 0xf4e9d0, 0x2b4d7a, 0xc0392b]
+            .map(|bg| Theme::dark().tinted(Palette::from_art_colors(bg, [0xffffff, 0xeeeeee, 0x111111, 0x222222])));
+        for t in [Theme::light(), Theme::dark()].into_iter().chain(tinted) {
+            for backdrop in [rgb(0xffffff).into(), rgb(0x000000).into(), rgb(0x808080).into()] {
+                let bg = over(t.glass, backdrop);
+                assert!(contrast(over(t.text, bg), bg) >= 4.5, "{:?} on {:?} over {backdrop:?}", t.text, t.glass);
+                assert!(contrast(over(t.text_secondary, bg), bg) >= 3., "{:?} on {:?}", t.text_secondary, t.glass);
+            }
+        }
+        assert!(Theme::light().glass.a <= 0.8 && Theme::dark().glass.a <= 0.85);
+    }
+
+    #[test]
+    fn over_blends_like_the_renderer() {
+        let half_white = Hsla { a: 0.5, ..gpui::white() };
+        let c: Rgba = over(half_white, gpui::black()).into();
+        assert!((c.r - 0.5).abs() < 0.01 && (c.a - 1.).abs() < 0.001);
     }
 
     #[test]

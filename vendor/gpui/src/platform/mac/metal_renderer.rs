@@ -114,8 +114,13 @@ pub(crate) struct MetalRenderer {
     blur_gaussian_pipeline_state: metal::RenderPipelineState,
     backdrop_blur_pipeline_state: metal::RenderPipelineState,
     /// Scratch textures for backdrop blurs, kept between frames: the copy of the drawable,
-    /// and two shrunken ones to blur back and forth.
+    /// and a shrunken one for the first of the two blur passes.
     blur_textures: Option<BlurTextures>,
+    /// Each blur of the last frame, blurred, for the next frame to reuse while its backdrop
+    /// is unchanged.
+    blur_cache: Vec<CachedBlur>,
+    /// Textures of blurs that went away, to blur into again.
+    blur_spares: Vec<CachedBlur>,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
@@ -129,9 +134,19 @@ pub(crate) struct MetalRenderer {
 struct BlurTextures {
     capture: metal::Texture,
     capture_size: (u64, u64),
-    low: [metal::Texture; 2],
+    low: metal::Texture,
     low_size: (u64, u64),
 }
+
+struct CachedBlur {
+    /// The blur's geometry and backdrop signature; `None` when it can't be reused.
+    key: Option<u64>,
+    texture: metal::Texture,
+    size: (u64, u64),
+}
+
+/// Frames that reuse at most this many textures of blurs that went away.
+const MAX_SPARE_BLURS: usize = 4;
 
 /// Matches `BlurPass` in shaders.metal.
 #[repr(C)]
@@ -331,6 +346,8 @@ impl MetalRenderer {
             blur_gaussian_pipeline_state,
             backdrop_blur_pipeline_state,
             blur_textures: None,
+            blur_cache: Vec::new(),
+            blur_spares: Vec::new(),
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -497,6 +514,14 @@ impl MetalRenderer {
         let command_buffer = command_queue.new_command_buffer();
         let alpha = if self.layer.is_opaque() { 1. } else { 0. };
         let mut instance_offset = 0;
+        let signatures = if scene.backdrop_blurs.is_empty() {
+            Vec::new()
+        } else {
+            scene.backdrop_signatures()
+        };
+        let mut previous_blurs = mem::take(&mut self.blur_cache);
+        let mut blur_index = 0;
+        let mut blurs_reused = 0;
 
         let mut command_encoder = new_command_encoder(
             command_buffer,
@@ -596,7 +621,17 @@ impl MetalRenderer {
                 PrimitiveBatch::BackdropBlurs(blurs) => {
                     command_encoder.end_encoding();
                     for blur in blurs {
-                        self.draw_backdrop_blur(blur, command_buffer, drawable, viewport_size);
+                        let signature = signatures.get(blur_index).copied().flatten();
+                        blur_index += 1;
+                        let reused = self.draw_backdrop_blur(
+                            blur,
+                            signature,
+                            &mut previous_blurs,
+                            command_buffer,
+                            drawable,
+                            viewport_size,
+                        );
+                        blurs_reused += reused as u32;
                     }
                     command_encoder = new_command_encoder(
                         command_buffer,
@@ -611,6 +646,8 @@ impl MetalRenderer {
             };
             if !ok {
                 command_encoder.end_encoding();
+                // This command buffer is never committed, so the blurs it encoded never happen.
+                self.blur_cache.clear();
                 anyhow::bail!(
                     "scene too large: {} paths, {} shadows, {} quads, {} underlines, {} mono, {} poly, {} surfaces",
                     scene.paths.len(),
@@ -626,6 +663,12 @@ impl MetalRenderer {
 
         command_encoder.end_encoding();
 
+        self.blur_spares.extend(previous_blurs);
+        self.blur_spares
+            .sort_by_key(|b| std::cmp::Reverse(b.size.0 * b.size.1));
+        self.blur_spares.truncate(MAX_SPARE_BLURS);
+        crate::frame_timings::record_blurs(blurs_reused, blur_index as u32 - blurs_reused);
+
         instance_buffer.metal_buffer.did_modify_range(NSRange {
             location: 0,
             length: instance_offset as NSUInteger,
@@ -633,15 +676,18 @@ impl MetalRenderer {
         Ok(command_buffer.to_owned())
     }
 
-    /// Copies the drawable under `blur`, shrinks and blurs the copy, and draws it back
-    /// inside the blur's shape.
+    /// Draws `blur` inside its shape. Unless last frame drew a blur with the same geometry
+    /// and `signature`, whose blurred backdrop it reuses, it first copies the drawable under
+    /// it and shrinks and blurs the copy. Returns whether it reused one.
     fn draw_backdrop_blur(
         &mut self,
         blur: &BackdropBlur,
+        signature: Option<u64>,
+        previous: &mut Vec<CachedBlur>,
         command_buffer: &metal::CommandBufferRef,
         drawable: &metal::MetalDrawableRef,
         viewport_size: Size<DevicePixels>,
-    ) {
+    ) -> bool {
         let (vw, vh) = (
             i32::from(viewport_size.width).max(0) as f32,
             i32::from(viewport_size.height).max(0) as f32,
@@ -652,7 +698,7 @@ impl MetalRenderer {
         let x1 = (b.origin.x.0 + b.size.width.0).ceil().clamp(0., vw);
         let y1 = (b.origin.y.0 + b.size.height.0).ceil().clamp(0., vh);
         if x1 - x0 < 1. || y1 - y0 < 1. {
-            return;
+            return false;
         }
         let (w, h) = ((x1 - x0) as u64, (y1 - y0) as u64);
         // A wide blur loses nothing at lower resolution, and costs a fraction as much.
@@ -665,6 +711,77 @@ impl MetalRenderer {
             1
         };
         let (lw, lh) = (w.div_ceil(downsample), h.div_ceil(downsample));
+        let d = downsample as f32;
+        let sigma = radius / d;
+        let low_max = [lw as f32, lh as f32];
+
+        let key = signature.map(|signature| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = collections::FxHasher::default();
+            (signature, [x0, y0, vw, vh, sigma].map(f32::to_bits), w, h, downsample).hash(&mut hasher);
+            hasher.finish()
+        });
+        let reused = key.and_then(|key| previous.iter().position(|c| c.key == Some(key)));
+        let cached = match reused {
+            Some(i) => previous.swap_remove(i),
+            None => {
+                let mut cached = self.take_blur_texture(lw, lh);
+                cached.key = key;
+                self.blur_backdrop(&cached.texture, (w, h), (lw, lh), [x0, y0], downsample, sigma, command_buffer, drawable);
+                cached
+            }
+        };
+
+        let encoder =
+            new_command_encoder(command_buffer, drawable, viewport_size, |color_attachment| {
+                color_attachment.set_load_action(metal::MTLLoadAction::Load);
+            });
+        encoder.set_render_pipeline_state(&self.backdrop_blur_pipeline_state);
+        encoder.set_vertex_buffer(0, Some(&self.unit_vertices), 0);
+        encoder.set_vertex_bytes(
+            1,
+            mem::size_of::<BackdropBlur>() as u64,
+            blur as *const BackdropBlur as *const c_void,
+        );
+        encoder.set_vertex_bytes(
+            2,
+            mem::size_of_val(&viewport_size) as u64,
+            &viewport_size as *const Size<DevicePixels> as *const _,
+        );
+        let composite = BackdropComposite { origin: [x0, y0], low_max, downsample: d, _pad: 0. };
+        encoder.set_fragment_bytes(
+            0,
+            mem::size_of::<BackdropBlur>() as u64,
+            blur as *const BackdropBlur as *const c_void,
+        );
+        encoder.set_fragment_bytes(
+            1,
+            mem::size_of::<BackdropComposite>() as u64,
+            &composite as *const BackdropComposite as *const c_void,
+        );
+        encoder.set_fragment_texture(0, Some(&cached.texture));
+        encoder.draw_primitives(metal::MTLPrimitiveType::Triangle, 0, 6);
+        encoder.end_encoding();
+
+        self.blur_cache.push(cached);
+        reused.is_some()
+    }
+
+    /// Copies the `w` × `h` pixels of the drawable at `origin`, shrinks them by `downsample`
+    /// into `target`, and blurs them there.
+    #[allow(clippy::too_many_arguments)]
+    fn blur_backdrop(
+        &mut self,
+        target: &metal::TextureRef,
+        (w, h): (u64, u64),
+        (lw, lh): (u64, u64),
+        origin: [f32; 2],
+        downsample: u64,
+        sigma: f32,
+        command_buffer: &metal::CommandBufferRef,
+        drawable: &metal::MetalDrawableRef,
+    ) {
+        let (x0, y0) = (origin[0], origin[1]);
         self.ensure_blur_textures(w, h, lw, lh);
         let Some(textures) = &self.blur_textures else {
             return;
@@ -713,12 +830,11 @@ impl MetalRenderer {
             encoder.end_encoding();
         };
         let d = downsample as f32;
-        let sigma = radius / d;
         let low_max = [lw as f32, lh as f32];
         pass(
             &self.blur_downsample_pipeline_state,
             &textures.capture,
-            &textures.low[0],
+            target,
             BlurPass {
                 source_scale: [d, d],
                 source_max: [w as f32, h as f32],
@@ -727,45 +843,35 @@ impl MetalRenderer {
                 _pad: 0.,
             },
         );
-        for (source, target, direction) in [(0, 1, [1., 0.]), (1, 0, [0., 1.])] {
+        for (source, destination, direction) in
+            [(target, &*textures.low, [1., 0.]), (&*textures.low, target, [0., 1.])]
+        {
             pass(
                 &self.blur_gaussian_pipeline_state,
-                &textures.low[source],
-                &textures.low[target],
+                source,
+                destination,
                 BlurPass { source_scale: [1., 1.], source_max: low_max, direction, sigma, _pad: 0. },
             );
         }
+    }
 
-        let encoder =
-            new_command_encoder(command_buffer, drawable, viewport_size, |color_attachment| {
-                color_attachment.set_load_action(metal::MTLLoadAction::Load);
-            });
-        encoder.set_render_pipeline_state(&self.backdrop_blur_pipeline_state);
-        encoder.set_vertex_buffer(0, Some(&self.unit_vertices), 0);
-        encoder.set_vertex_bytes(
-            1,
-            mem::size_of::<BackdropBlur>() as u64,
-            blur as *const BackdropBlur as *const c_void,
-        );
-        encoder.set_vertex_bytes(
-            2,
-            mem::size_of_val(&viewport_size) as u64,
-            &viewport_size as *const Size<DevicePixels> as *const _,
-        );
-        let composite = BackdropComposite { origin: [x0, y0], low_max, downsample: d, _pad: 0. };
-        encoder.set_fragment_bytes(
-            0,
-            mem::size_of::<BackdropBlur>() as u64,
-            blur as *const BackdropBlur as *const c_void,
-        );
-        encoder.set_fragment_bytes(
-            1,
-            mem::size_of::<BackdropComposite>() as u64,
-            &composite as *const BackdropComposite as *const c_void,
-        );
-        encoder.set_fragment_texture(0, Some(&textures.low[0]));
-        encoder.draw_primitives(metal::MTLPrimitiveType::Triangle, 0, 6);
-        encoder.end_encoding();
+    /// A texture of at least `lw` × `lh` to blur into: a spare that fits, or a new one.
+    fn take_blur_texture(&mut self, lw: u64, lh: u64) -> CachedBlur {
+        if let Some(i) = self.blur_spares.iter().position(|c| c.size.0 >= lw && c.size.1 >= lh) {
+            return self.blur_spares.swap_remove(i);
+        }
+        let size = (lw.div_ceil(64) * 64, lh.div_ceil(64) * 64);
+        CachedBlur { key: None, texture: self.new_blur_texture(size), size }
+    }
+
+    fn new_blur_texture(&self, (width, height): (u64, u64)) -> metal::Texture {
+        let descriptor = metal::TextureDescriptor::new();
+        descriptor.set_width(width);
+        descriptor.set_height(height);
+        descriptor.set_pixel_format(metal::MTLPixelFormat::BGRA8Unorm);
+        descriptor.set_storage_mode(metal::MTLStorageMode::Private);
+        descriptor.set_usage(metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead);
+        self.device.new_texture(&descriptor)
     }
 
     /// Grows the blur scratch textures to fit, in steps so a resizing window doesn't
@@ -781,20 +887,10 @@ impl MetalRenderer {
         let previous = self.blur_textures.as_ref().map_or(((0, 0), (0, 0)), |t| (t.capture_size, t.low_size));
         let capture_size = (round(w).max(previous.0.0), round(h).max(previous.0.1));
         let low_size = (round(lw).max(previous.1.0), round(lh).max(previous.1.1));
-        let texture = |(width, height): (u64, u64)| {
-            let descriptor = metal::TextureDescriptor::new();
-            descriptor.set_width(width);
-            descriptor.set_height(height);
-            descriptor.set_pixel_format(metal::MTLPixelFormat::BGRA8Unorm);
-            descriptor.set_storage_mode(metal::MTLStorageMode::Private);
-            descriptor
-                .set_usage(metal::MTLTextureUsage::RenderTarget | metal::MTLTextureUsage::ShaderRead);
-            self.device.new_texture(&descriptor)
-        };
         self.blur_textures = Some(BlurTextures {
-            capture: texture(capture_size),
+            capture: self.new_blur_texture(capture_size),
             capture_size,
-            low: [texture(low_size), texture(low_size)],
+            low: self.new_blur_texture(low_size),
             low_size,
         });
     }

@@ -4,6 +4,33 @@ use super::*;
 
 const PILL_ALPHA: f32 = 0.62;
 
+/// The player's colors: a deep shade of the cover, or the theme's pill before anything plays,
+/// as glass over the page like the Music app's bar. The pill is as translucent as it can be
+/// while its text reads over any page.
+fn player_theme(t: &Theme, tint: Option<crate::theme::Palette>) -> Theme {
+    let pt = match tint {
+        Some(p) => {
+            let ink = |a: f32| Hsla { h: 0., s: 0., l: 1., a };
+            Theme {
+                pill: Hsla { l: (p.bg.l + 0.05).min(0.3), a: 1., ..p.bg },
+                text: ink(0.96),
+                text_secondary: ink(0.62),
+                text_tertiary: ink(0.35),
+                icon: ink(0.92),
+                hover: ink(0.1),
+                placeholder: ink(0.1),
+                panel_border: ink(0.12),
+                track_bg: ink(0.2),
+                track_fill: ink(0.9),
+                accent: t.accent,
+                ..*t
+            }
+        }
+        None => *t,
+    };
+    Theme { pill: crate::theme::glass_fill(pt.pill, pt.text, pt.text_secondary, PILL_ALPHA), ..pt }
+}
+
 impl MusicApp {
     /// Floating player laid out like the macOS Music app (transport · now playing · tools),
     /// tinted by the current cover.
@@ -12,30 +39,9 @@ impl MusicApp {
         let has_track = current.is_some();
         let playing = matches!(self.state, PlayState::Playing | PlayState::Loading);
 
-        // Pill colors: a deep shade of the cover, or the theme's pill before anything plays.
-        // Translucent over a blur of the page, like the Music app's frosted bar.
         let tint =
             current.as_ref().and_then(|s| self.art_color(&s.artwork, cx)).map(crate::theme::Palette::from_average);
-        let pt = match tint {
-            Some(p) => {
-                let ink = |a: f32| Hsla { h: 0., s: 0., l: 1., a };
-                Theme {
-                    pill: Hsla { l: (p.bg.l + 0.05).min(0.3), a: PILL_ALPHA, ..p.bg },
-                    text: ink(0.96),
-                    text_secondary: ink(0.62),
-                    text_tertiary: ink(0.35),
-                    icon: ink(0.92),
-                    hover: ink(0.1),
-                    placeholder: ink(0.1),
-                    panel_border: ink(0.12),
-                    track_bg: ink(0.2),
-                    track_fill: ink(0.9),
-                    accent: t.accent,
-                    ..*t
-                }
-            }
-            None => Theme { pill: Hsla { a: PILL_ALPHA, ..t.pill }, ..*t },
-        };
+        let pt = player_theme(t, tint);
         self.progress.read(cx).set_colors(pt.track_bg, pt.track_fill, pt.text_secondary);
         let t = &pt;
         let dim = if has_track { t.icon } else { t.text_tertiary };
@@ -242,7 +248,7 @@ impl MusicApp {
             .pl_2()
             .pr_2p5()
             .rounded_full()
-            .backdrop_blur(px(22.))
+            .glass_style(GlassStyle { blur: px(22.), ..GlassStyle::default() })
             .bg(self.fx.borrow_mut().pill_bg.update(t.pill))
             .border_1()
             .border_color(t.panel_border)
@@ -269,7 +275,8 @@ impl MusicApp {
             .w(px(W))
             .py_3()
             .rounded(px(23.))
-            .bg(t.menu)
+            .glass_style(panel_glass())
+            .bg(t.glass)
             .border_1()
             .border_color(t.panel_border)
             .shadow_lg()
@@ -319,7 +326,8 @@ impl MusicApp {
             .bottom(px(82.))
             .w(px(QUEUE_W))
             .rounded(px(PANEL_RADIUS))
-            .bg(t.panel)
+            .glass_style(panel_glass())
+            .bg(crate::theme::glass_fill(t.panel, t.text, t.text_secondary, crate::theme::GLASS_MIN_ALPHA))
             .border_1()
             .border_color(t.panel_border)
             .shadow_lg()
@@ -460,5 +468,28 @@ impl MusicApp {
                     .bg(rgb(0xf5f5f5))
                     .shadow_sm(),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::{Palette, contrast, over};
+
+    #[test]
+    fn player_text_reads_over_white_and_black_pages() {
+        let covers =
+            [0xffffff, 0x000000, 0xf4d03f, 0x1f3a93, 0xc0392b].map(|c| Some(Palette::from_average(rgb(c).into())));
+        for base in [Theme::light(), Theme::dark()] {
+            for tint in covers.into_iter().chain([None]) {
+                let t = player_theme(&base, tint);
+                assert!(t.pill.a < 1., "{:?}", t.pill);
+                for page in [rgb(0xffffff).into(), rgb(0x000000).into()] {
+                    let bg = over(t.pill, page);
+                    assert!(contrast(over(t.text, bg), bg) >= 4.5, "{:?} on {:?}", t.text, t.pill);
+                    assert!(contrast(over(t.text_secondary, bg), bg) >= 3., "{:?} on {:?}", t.text_secondary, t.pill);
+                }
+            }
+        }
     }
 }

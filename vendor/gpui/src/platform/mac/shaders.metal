@@ -1390,12 +1390,53 @@ fragment float4 backdrop_blur_fragment(BackdropFragmentInput input [[stage_in]],
                                        constant BackdropComposite *composite [[buffer(1)]],
                                        texture2d<float> blurred [[texture(0)]]) {
   constexpr sampler s(filter::linear, address::clamp_to_edge, coord::pixel);
-  float2 p = (input.position.xy - composite->origin) / composite->downsample;
+  float2 position = input.position.xy;
+  float distance = quad_sdf(position, blur->shape, blur->corner_radii);
+  float alpha = saturate(0.5 - distance) * blur->opacity;
+  alpha *= content_mask_alpha(position, blur->content_mask);
+
+  // Outward normal of the rounded shape, from the SDF's gradient.
+  float2 normal = float2(0.);
+  if (blur->rim > 0. || blur->refraction > 0.) {
+    float2 e = float2(0.5, 0.);
+    normal = float2(quad_sdf(position + e.xy, blur->shape, blur->corner_radii) -
+                        quad_sdf(position - e.xy, blur->shape, blur->corner_radii),
+                    quad_sdf(position + e.yx, blur->shape, blur->corner_radii) -
+                        quad_sdf(position - e.yx, blur->shape, blur->corner_radii));
+    float n = length(normal);
+    normal = n > 1e-4 ? normal / n : float2(0.);
+  }
+  float depth = max(-distance, 0.);
+
+  // Thick glass bends light at its curved edge: near the rim, sample from further in, so the
+  // backdrop looks magnified and pulled toward the edge.
+  float2 sample_position = position;
+  float lens = 0.;
+  if (blur->refraction > 0.) {
+    lens = saturate(1. - depth / blur->refraction);
+    sample_position -= normal * (lens * lens * blur->refraction * 0.6);
+  }
+
+  float2 p = (sample_position - composite->origin) / composite->downsample;
   p = clamp(p, float2(0.5), composite->low_max - 0.5);
   float3 color = blurred.sample(s, p).rgb;
   float luma = dot(color, float3(0.2126, 0.7152, 0.0722));
-  color = saturate(mix(float3(luma), color, blur->saturation));
-  float alpha = saturate(0.5 - quad_sdf(input.position.xy, blur->shape, blur->corner_radii));
-  alpha *= content_mask_alpha(input.position.xy, blur->content_mask);
+  color = saturate(mix(float3(luma), color, blur->saturation) * blur->brightness);
+
+  float4 tint = hsla_to_rgba(blur->tint);
+  color = mix(color, tint.rgb, tint.a);
+
+  if (blur->rim > 0.) {
+    // Light from the top left: a bright rim on the edges facing it, fading around the
+    // shape, and a faint shade inside the opposite edge.
+    float facing = dot(normal, normalize(float2(-1., -1.4)));
+    float rim_band = saturate(1. - depth / blur->rim_width);
+    float lit = 0.22 + 0.78 * pow(saturate(facing), 1.5) + 0.18 * pow(saturate(-facing), 2.);
+    float highlight = rim_band * rim_band * lit * 0.7;
+    float sheen = lens * lens * saturate(facing) * 0.07;
+    float shade = saturate(1. - depth / (blur->rim_width * 5.)) * saturate(-facing) * 0.1;
+    color = mix(color, float3(1.), saturate((highlight + sheen) * blur->rim));
+    color *= 1. - shade * blur->rim;
+  }
   return float4(color, alpha);
 }

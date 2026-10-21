@@ -127,7 +127,9 @@ pub enum IconButtonStyle {
     /// The translucent round toolbar button of macOS Tahoe.
     #[default]
     Toolbar,
-    /// Frosted white, over artwork and photos.
+    /// The toolbar button in Liquid Glass, for toolbars floating over content.
+    FloatingToolbar,
+    /// White Liquid Glass, over artwork and photos.
     Glass,
     /// A solid circle, like a play button. The icon picks dark or white to contrast.
     Filled(Hsla),
@@ -194,6 +196,7 @@ impl RenderOnce for IconButton {
         let t = theme_for(self.theme, window);
         let el = match self.style {
             IconButtonStyle::Toolbar => primitives::toolbar_button(&t, self.id, self.icon, self.size),
+            IconButtonStyle::FloatingToolbar => primitives::floating_toolbar_button(&t, self.id, self.icon, self.size),
             IconButtonStyle::Glass => primitives::glass_button(self.id, self.icon, self.size),
             IconButtonStyle::Filled(bg) => primitives::circle_button(self.id, self.icon, self.size, bg, white()),
             IconButtonStyle::Plain => {

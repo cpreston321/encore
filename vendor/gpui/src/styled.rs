@@ -673,7 +673,22 @@ pub trait Styled: Sized {
     /// Blurs what's behind the element like frosted glass (macOS only), with `radius` as the
     /// blur's standard deviation. Give the element a translucent background to tint it.
     fn backdrop_blur(mut self, radius: impl Into<crate::Pixels>) -> Self {
-        self.style().backdrop_blur = Some(radius.into());
+        self.style().glass = Some(crate::GlassStyle::frosted(radius.into()));
+        self
+    }
+
+    /// Makes the element Liquid Glass (macOS only) with the default [`GlassStyle`]: its
+    /// backdrop blurred and bent along the edge, tinted by its background, with a specular
+    /// rim. Give it a translucent background.
+    ///
+    /// [`GlassStyle`]: crate::GlassStyle
+    fn glass(self) -> Self {
+        self.glass_style(crate::GlassStyle::default())
+    }
+
+    /// Makes the element Liquid Glass with the given style. See [`Styled::glass`].
+    fn glass_style(mut self, glass: crate::GlassStyle) -> Self {
+        self.style().glass = Some(glass);
         self
     }
 

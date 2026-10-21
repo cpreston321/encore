@@ -27,6 +27,11 @@ pub struct FrameTimings {
     pub scroll_replays: u32,
     /// Scroll-cached views that rendered instead.
     pub scroll_renders: u32,
+    /// Backdrop blurs in the last presented frame that reused the previous frame's blur
+    /// because nothing under them changed (Metal only).
+    pub blurs_reused: u32,
+    /// Backdrop blurs in the last presented frame that blurred their backdrop again.
+    pub blurs_drawn: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -82,4 +87,17 @@ pub(crate) fn record_gpu_time(took: Duration) {
 
 pub(crate) fn last_gpu_time() -> Duration {
     Duration::from_nanos(LAST_GPU_NANOS.load(Ordering::Relaxed))
+}
+
+static LAST_BLURS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn record_blurs(reused: u32, drawn: u32) {
+    LAST_BLURS.store((reused as u64) << 32 | drawn as u64, Ordering::Relaxed);
+}
+
+/// Reused and drawn backdrop blurs of the last encoded frame.
+pub(crate) fn last_blurs() -> (u32, u32) {
+    let bits = LAST_BLURS.load(Ordering::Relaxed);
+    ((bits >> 32) as u32, bits as u32)
 }

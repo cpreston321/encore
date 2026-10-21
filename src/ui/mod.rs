@@ -4,9 +4,10 @@
 use std::{ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClickEvent, Context, Div, ElementId, FontWeight, Hsla, MouseButton,
-    MouseDownEvent, ObjectFit, Pixels, Role, SharedString, Stateful, Svg, anchored, deferred, div, ease_out_quint, img,
-    linear_color_stop, linear_gradient, prelude::*, pulsating_between, px, relative, rgb, uniform_list, white,
+    Animation, AnimationExt, AnyElement, ClickEvent, Context, Div, ElementId, FontWeight, GlassStyle, Hsla,
+    MouseButton, MouseDownEvent, ObjectFit, Pixels, Role, SharedString, Stateful, Svg, anchored, deferred, div,
+    ease_out_quint, img, linear_color_stop, linear_gradient, prelude::*, pulsating_between, px, relative, rgb,
+    uniform_list, white,
 };
 
 use crate::{
@@ -27,6 +28,12 @@ pub(crate) const VIRTUAL_GRID_MIN: usize = 60;
 /// Floating panels sit 8pt inside the window, so their corners are the window's minus 8.
 pub(crate) const PANEL_RADIUS: f32 = 18.;
 pub(crate) const GAP: f32 = 20.;
+
+/// Liquid Glass for floating panels, menus, popovers and sheets. Fill them with `Theme::glass`,
+/// or a color through `tahoe::glass_fill`, so text reads whatever is behind.
+pub(crate) fn panel_glass() -> GlassStyle {
+    GlassStyle { blur: px(24.), ..GlassStyle::default() }
+}
 
 pub(crate) mod components;
 pub(crate) mod detail;

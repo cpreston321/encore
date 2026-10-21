@@ -226,6 +226,134 @@ impl Scene {
         self.backdrop_blurs.sort_by_key(|blur| blur.order);
     }
 
+    /// For each backdrop blur, in `backdrop_blurs` order, a hash of everything drawn under its
+    /// sample area before it, so a renderer can reuse last frame's blur while it's unchanged.
+    /// `None` means the backdrop can change while the scene doesn't: GPU-animated sprites
+    /// (`motion`) or video surfaces are under it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn backdrop_signatures(&self) -> Vec<Option<u64>> {
+        let mut signatures: Vec<Option<u64>> = Vec::with_capacity(self.backdrop_blurs.len());
+        for blur in &self.backdrop_blurs {
+            signatures.push(self.backdrop_signature(blur, &signatures));
+        }
+        signatures
+    }
+
+    fn backdrop_signature(&self, blur: &BackdropBlur, earlier: &[Option<u64>]) -> Option<u64> {
+        use std::hash::Hasher;
+        let area = blur.bounds;
+        let below = blur.order;
+        let under = |bounds: Bounds<ScaledPixels>, mask: &ContentMask<ScaledPixels>| {
+            bounds.intersect(&mask.bounds).intersects(&area)
+        };
+        let mut h = collections::FxHasher::default();
+        let mut sig = Sig(&mut h);
+        for shadow in self.shadows.iter().take_while(|p| p.order < below) {
+            if under(shadow.bounds.dilate(shadow.blur_radius * 3.), &shadow.content_mask) {
+                sig.u(1);
+                sig.bounds(&shadow.bounds);
+                sig.mask(&shadow.content_mask);
+                sig.corners(&shadow.corner_radii);
+                sig.hsla(&shadow.color);
+                sig.f(shadow.blur_radius.0);
+            }
+        }
+        for quad in self.quads.iter().take_while(|p| p.order < below) {
+            if under(quad.bounds, &quad.content_mask) {
+                sig.u(2);
+                sig.bounds(&quad.bounds);
+                sig.mask(&quad.content_mask);
+                sig.background(&quad.background);
+                sig.hsla(&quad.border_color);
+                sig.corners(&quad.corner_radii);
+                let e = &quad.border_widths;
+                sig.fs(&[e.top.0, e.right.0, e.bottom.0, e.left.0]);
+                sig.u(quad.border_style as u32);
+            }
+        }
+        for path in self.paths.iter().take_while(|p| p.order < below) {
+            if under(path.bounds, &path.content_mask) {
+                sig.u(3);
+                sig.bounds(&path.bounds);
+                sig.mask(&path.content_mask);
+                sig.background(&path.color);
+                for v in &path.vertices {
+                    sig.fs(&[v.xy_position.x.0, v.xy_position.y.0, v.st_position.x, v.st_position.y]);
+                }
+            }
+        }
+        for underline in self.underlines.iter().take_while(|p| p.order < below) {
+            if under(underline.bounds, &underline.content_mask) {
+                sig.u(4);
+                sig.bounds(&underline.bounds);
+                sig.mask(&underline.content_mask);
+                sig.hsla(&underline.color);
+                sig.f(underline.thickness.0);
+                sig.u(underline.wavy);
+            }
+        }
+        for sprite in self.monochrome_sprites.iter().take_while(|p| p.order < below) {
+            // A transformed sprite can draw outside its bounds, but not outside its mask.
+            if under(sprite.content_mask.bounds, &sprite.content_mask) {
+                sig.u(5);
+                sig.bounds(&sprite.bounds);
+                sig.mask(&sprite.content_mask);
+                sig.hsla(&sprite.color);
+                sig.tile(&sprite.tile);
+                let m = &sprite.transformation;
+                sig.fs(&[
+                    m.rotation_scale[0][0],
+                    m.rotation_scale[0][1],
+                    m.rotation_scale[1][0],
+                    m.rotation_scale[1][1],
+                    m.translation[0],
+                    m.translation[1],
+                ]);
+            }
+        }
+        for sprite in self.polychrome_sprites.iter().take_while(|p| p.order < below) {
+            if under(sprite.bounds, &sprite.content_mask) {
+                if sprite.motion.strength > 0. {
+                    return None;
+                }
+                sig.u(6);
+                sig.bounds(&sprite.bounds);
+                sig.mask(&sprite.content_mask);
+                sig.corners(&sprite.corner_radii);
+                sig.tile(&sprite.tile);
+                sig.bounds(&sprite.texture_crop);
+                sig.u(sprite.grayscale as u32);
+                sig.f(sprite.opacity);
+            }
+        }
+        for surface in self.surfaces.iter().take_while(|p| p.order < below) {
+            if under(surface.bounds, &surface.content_mask) {
+                return None;
+            }
+        }
+        for (other, signature) in self.backdrop_blurs.iter().zip(earlier) {
+            if other.order < below && under(other.bounds, &other.content_mask) {
+                sig.u(7);
+                sig.u64((*signature)?);
+                sig.bounds(&other.bounds);
+                sig.bounds(&other.shape);
+                sig.mask(&other.content_mask);
+                sig.corners(&other.corner_radii);
+                sig.hsla(&other.tint);
+                sig.fs(&[
+                    other.radius.0,
+                    other.saturation,
+                    other.brightness,
+                    other.rim,
+                    other.rim_width.0,
+                    other.refraction.0,
+                    other.opacity,
+                ]);
+            }
+        }
+        Some(h.finish())
+    }
+
     #[cfg_attr(
         all(
             any(target_os = "linux", target_os = "freebsd"),
@@ -282,6 +410,57 @@ pub(crate) enum PrimitiveKind {
     MonochromeSprite,
     PolychromeSprite,
     Surface,
+}
+
+struct Sig<'a, H: std::hash::Hasher>(&'a mut H);
+
+impl<H: std::hash::Hasher> Sig<'_, H> {
+    fn u(&mut self, v: u32) {
+        self.0.write_u32(v);
+    }
+    fn u64(&mut self, v: u64) {
+        self.0.write_u64(v);
+    }
+    fn f(&mut self, v: f32) {
+        self.0.write_u32(v.to_bits());
+    }
+    fn fs(&mut self, vs: &[f32]) {
+        for v in vs {
+            self.f(*v);
+        }
+    }
+    fn bounds(&mut self, b: &Bounds<ScaledPixels>) {
+        self.fs(&[b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0]);
+    }
+    fn corners(&mut self, c: &Corners<ScaledPixels>) {
+        self.fs(&[c.top_left.0, c.top_right.0, c.bottom_right.0, c.bottom_left.0]);
+    }
+    fn mask(&mut self, m: &ContentMask<ScaledPixels>) {
+        self.bounds(&m.bounds);
+        self.corners(&m.corner_radii);
+    }
+    fn hsla(&mut self, c: &Hsla) {
+        self.fs(&[c.h, c.s, c.l, c.a]);
+    }
+    fn background(&mut self, b: &Background) {
+        self.u(b.tag as u32);
+        self.u(b.color_space as u32);
+        self.hsla(&b.solid);
+        self.f(b.gradient_angle_or_pattern_height);
+        for stop in &b.colors {
+            self.hsla(&stop.color);
+            self.f(stop.percentage);
+        }
+    }
+    fn tile(&mut self, t: &AtlasTile) {
+        self.u(t.texture_id.index);
+        self.u(t.texture_id.kind as u32);
+        self.u(t.tile_id.0);
+        let b = &t.bounds;
+        for v in [b.origin.x, b.origin.y, b.size.width, b.size.height] {
+            self.u(i32::from(v) as u32);
+        }
+    }
 }
 
 pub(crate) enum PaintOperation {
@@ -698,6 +877,16 @@ pub(crate) struct BackdropBlur {
     pub radius: ScaledPixels,
     /// 1 keeps the colors; Apple's materials use about 1.8.
     pub saturation: f32,
+    /// Multiplies the blurred colors.
+    pub brightness: f32,
+    /// Drawn over the blur inside the shape, below the rim.
+    pub tint: Hsla,
+    /// Strength of the specular rim and the shade on the far edge; 0 draws neither.
+    pub rim: f32,
+    pub rim_width: ScaledPixels,
+    /// Width of the band along the edge where the backdrop bends inward; 0 for none.
+    pub refraction: ScaledPixels,
+    pub opacity: f32,
 }
 
 impl From<BackdropBlur> for Primitive {
@@ -1075,5 +1264,111 @@ impl PathVertex<Pixels> {
             st_position: self.st_position,
             content_mask: self.content_mask.scale(factor),
         }
+    }
+}
+
+#[cfg(test)]
+mod backdrop_signature_tests {
+    use super::*;
+    use crate::{TileId, bounds, point, size};
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> Bounds<ScaledPixels> {
+        bounds(point(ScaledPixels(x), ScaledPixels(y)), size(ScaledPixels(w), ScaledPixels(h)))
+    }
+
+    fn quad(b: Bounds<ScaledPixels>, color: Hsla) -> Quad {
+        Quad {
+            bounds: b,
+            content_mask: ContentMask { bounds: rect(0., 0., 1000., 1000.), ..Default::default() },
+            background: color.into(),
+            ..Default::default()
+        }
+    }
+
+    fn blur(shape: Bounds<ScaledPixels>) -> BackdropBlur {
+        BackdropBlur {
+            order: 0,
+            bounds: shape.dilate(ScaledPixels(30.)),
+            shape,
+            corner_radii: Corners::default(),
+            content_mask: ContentMask { bounds: rect(0., 0., 1000., 1000.), ..Default::default() },
+            radius: ScaledPixels(10.),
+            saturation: 1.6,
+            brightness: 1.,
+            tint: Hsla::default(),
+            rim: 1.,
+            rim_width: ScaledPixels(2.),
+            refraction: ScaledPixels(12.),
+            opacity: 1.,
+        }
+    }
+
+    fn signatures(build: impl FnOnce(&mut Scene)) -> Vec<Option<u64>> {
+        let mut scene = Scene::default();
+        build(&mut scene);
+        scene.finish();
+        scene.backdrop_signatures()
+    }
+
+    #[test]
+    fn only_what_is_under_a_blur_changes_its_signature() {
+        let bar = rect(100., 100., 200., 50.);
+        let base = |color: Hsla, far: Hsla, above: Hsla| {
+            signatures(|scene| {
+                scene.insert_primitive(quad(rect(0., 0., 400., 400.), color));
+                scene.insert_primitive(quad(rect(800., 800., 50., 50.), far));
+                scene.insert_primitive(blur(bar));
+                scene.insert_primitive(quad(bar, above));
+            })
+        };
+        let a = base(crate::red(), crate::blue(), crate::white());
+        assert!(a[0].is_some());
+        assert_eq!(a, base(crate::red(), crate::blue(), crate::white()));
+        assert_eq!(a, base(crate::red(), crate::green(), crate::black()));
+        assert_ne!(a, base(crate::yellow(), crate::blue(), crate::white()));
+    }
+
+    #[test]
+    fn moved_backdrops_change_the_signature() {
+        let bar = rect(100., 100., 200., 50.);
+        let at = |x: f32| {
+            signatures(|scene| {
+                scene.insert_primitive(quad(rect(x, 90., 40., 40.), crate::red()));
+                scene.insert_primitive(blur(bar));
+            })
+        };
+        assert_ne!(at(120.), at(140.));
+    }
+
+    #[test]
+    fn moving_sprites_and_nested_blurs() {
+        let bar = rect(100., 100., 200., 50.);
+        let sprite = |motion: f32| PolychromeSprite {
+            order: 0,
+            pad: 0,
+            grayscale: false,
+            opacity: 1.,
+            bounds: rect(120., 90., 60., 60.),
+            content_mask: ContentMask { bounds: rect(0., 0., 1000., 1000.), ..Default::default() },
+            corner_radii: Corners::default(),
+            tile: AtlasTile {
+                texture_id: AtlasTextureId { index: 0, kind: crate::AtlasTextureKind::Polychrome },
+                tile_id: TileId(1),
+                padding: 0,
+                bounds: Default::default(),
+            },
+            texture_crop: PolychromeSprite::WHOLE_TEXTURE,
+            motion: SpriteMotion { phase: 0., strength: motion },
+        };
+        let with = |motion: f32| {
+            signatures(|scene| {
+                scene.insert_primitive(sprite(motion));
+                scene.insert_primitive(blur(bar));
+                scene.insert_primitive(blur(rect(150., 120., 60., 60.)));
+            })
+        };
+        let still = with(0.);
+        assert!(still.iter().all(Option::is_some));
+        assert_eq!(with(0.1), vec![None, None], "a blur over a moving one changes with it");
     }
 }
