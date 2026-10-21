@@ -100,17 +100,17 @@ impl MusicApp {
         let hero_w = ((content_w - 2. * PAD - GAP) / 2.).clamp(320., 620.).floor();
         let releases = browse.new_releases();
 
-        let mut heroes = scroll_row("heroes");
+        let mut heroes = self.shelf("heroes", cx);
         for (i, album) in releases.iter().take(6).enumerate() {
             heroes = heroes.child(self.hero_card(t, i, album, hero_w, cx));
         }
 
-        let mut new_albums = scroll_row("new-releases");
+        let mut new_albums = self.shelf("new-releases", cx);
         for (i, album) in releases.iter().skip(6).take(20).enumerate() {
             new_albums = new_albums.child(self.album_tile(t, "new-album", i, album, 180., cx));
         }
 
-        let mut playlists = scroll_row("new-playlists");
+        let mut playlists = self.shelf("new-playlists", cx);
         for (i, playlist) in browse.top_playlists.iter().take(20).enumerate() {
             playlists = playlists.child(self.playlist_tile(t, "new-playlist", i, playlist, 180., cx));
         }
@@ -157,7 +157,7 @@ impl MusicApp {
         songs: &Arc<Vec<Song>>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let mut row = scroll_row(id).pt_1();
+        let mut row = self.shelf(id, cx).pt_1();
         for (i, item) in items.iter().enumerate() {
             row = row.child(self.mixed_card(t, id, i, item, songs, 160., cx));
         }
@@ -301,7 +301,7 @@ impl MusicApp {
             );
         }
 
-        let mut albums = scroll_row("top-albums");
+        let mut albums = self.shelf("top-albums", cx);
         for (i, album) in browse.top_albums.iter().take(24).enumerate() {
             albums = albums.child(self.album_tile(t, "top-album", i, album, 180., cx));
         }
@@ -340,7 +340,7 @@ impl MusicApp {
 
         let recently_added = self.lib_recently_added();
         if !recently_added.is_empty() {
-            let mut recent = scroll_row("home-library");
+            let mut recent = self.shelf("home-library", cx);
             for (i, album) in recently_added.iter().take(20).enumerate() {
                 recent = recent.child(self.album_tile(t, "home-library-album", i, album, 180., cx));
             }
@@ -418,7 +418,7 @@ impl MusicApp {
         let mut page = div().child(page_title("Radio")).child(div().px(px(PAD)).child(hero));
 
         if stations.len() > 1 {
-            let mut row = scroll_row("live-stations");
+            let mut row = self.shelf("live-stations", cx);
             for (i, station) in stations.iter().enumerate().skip(1) {
                 let url = station.url.clone();
                 row = row.child(
@@ -594,7 +594,7 @@ impl MusicApp {
                 page = page.child(self.song_columns(t, "local-songs", local.songs.clone(), col_w, false, cx));
             }
             if !local.albums.is_empty() || !local.playlists.is_empty() {
-                let mut row = scroll_row("local-albums").pt_2();
+                let mut row = self.shelf("local-albums", cx).pt_2();
                 for (i, album) in local.albums.iter().enumerate() {
                     row = row.child(self.album_tile(t, "local-album", i, album, 150., cx));
                 }
@@ -653,7 +653,7 @@ impl MusicApp {
         // Results fade in as a group whenever a new search lands.
         let mut found = div();
         if !results.artists.is_empty() {
-            let mut row = scroll_row("artist-results");
+            let mut row = self.shelf("artist-results", cx);
             for (i, artist) in results.artists.iter().enumerate() {
                 let id = artist.id.clone();
                 row = row.child(
@@ -703,7 +703,7 @@ impl MusicApp {
                 .child(self.song_columns(t, "song-results", results.songs.clone(), col_w, false, cx));
         }
         if !results.albums.is_empty() {
-            let mut row = scroll_row("album-results");
+            let mut row = self.shelf("album-results", cx);
             for (i, album) in results.albums.iter().enumerate() {
                 row = row.child(self.album_tile(t, "album-result", i, album, 180., cx));
             }

@@ -96,6 +96,7 @@ impl MusicApp {
                     .into_any_element()
             }
             Region::Content => {
+                self.step_shelf_snaps(window);
                 let search_focused = self.search_focus.is_focused(window);
                 self.render_page_content(&t, content_w, search_focused, cx)
             }

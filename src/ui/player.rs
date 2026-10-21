@@ -113,8 +113,12 @@ impl MusicApp {
                 let (hover, _) = self.progress.read(cx).hover_amount();
                 let more = song.clone();
                 let more_keyboard = song.clone();
+                let swipe = self.player_swipe.offset;
                 div()
                     .id("now-playing")
+                    .on_scroll_wheel(cx.listener(|this, e: &gpui::ScrollWheelEvent, _, cx| this.player_swiped(e, cx)))
+                    .left(px(swipe * 0.4))
+                    .opacity((1. - swipe.abs() / 260.).max(0.3))
                     .flex_1()
                     .min_w_0()
                     .relative()
@@ -227,6 +231,7 @@ impl MusicApp {
             )
             .child(
                 icon_button(t, "volume", volume_icon, 17., t.icon)
+                    .on_scroll_wheel(cx.listener(|this, e: &gpui::ScrollWheelEvent, _, cx| this.volume_scrolled(e, cx)))
                     .accessibility_label("Volume")
                     .accessibility_value(format!("{}%", (self.volume * 100.).round()))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -251,6 +256,7 @@ impl MusicApp {
                 .items_center()
                 .gap_1p5()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_scroll_wheel(cx.listener(|this, e: &gpui::ScrollWheelEvent, _, cx| this.volume_scrolled(e, cx)))
                 .child(self.volume_slider(self.volume, px(118.), t, cx))
                 .child(
                     icon_button(t, "mute", volume_icon, 17., t.icon)

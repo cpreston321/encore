@@ -220,10 +220,6 @@ pub(crate) fn overlay_scrollbar<E: InteractiveElement>(element: E, t: &Theme, re
     tahoe::layout::overlay_scrollbar(element, t, insets)
 }
 
-pub(crate) fn scroll_row(id: &'static str) -> Stateful<Div> {
-    div().id(id).px(px(PAD)).pb_2().flex().gap(px(GAP)).overflow_x_scroll().map(lock_scroll_axis)
-}
-
 pub(crate) fn grid_container() -> Div {
     div().px(px(PAD)).flex().flex_wrap().gap_x(px(GAP)).gap_y(px(26.))
 }

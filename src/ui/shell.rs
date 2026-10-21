@@ -590,6 +590,8 @@ impl MusicApp {
             .min_w_0()
             .h_full()
             .relative()
+            .left(px(self.page_swipe_offset()))
+            .on_scroll_wheel(cx.listener(|this, e: &gpui::ScrollWheelEvent, _, cx| this.page_swiped(e, cx)))
             .child(if self.route_scrolls_itself() {
                 div()
                     .id("content")

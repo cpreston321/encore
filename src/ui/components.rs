@@ -377,7 +377,7 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let list = Arc::new(songs);
-        let mut row = scroll_row(id);
+        let mut row = self.shelf(id, cx);
         for (c, chunk) in list.chunks(4).enumerate() {
             let mut col = div().w(px(col_w)).flex_none().flex().flex_col();
             for r in 0..chunk.len() {

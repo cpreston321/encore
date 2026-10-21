@@ -13,8 +13,7 @@ use crate::{
     model::{Album, ArtColors, Artwork, Playlist, Song, format_date},
     theme::{Palette, Theme},
     ui::{
-        GAP, PAD, explicit_badge, icon, icon_button, pill_button, scroll_row, skeleton_detail, skeleton_rows,
-        text_shadow_on_art,
+        GAP, PAD, explicit_badge, icon, icon_button, pill_button, skeleton_detail, skeleton_rows, text_shadow_on_art,
     },
 };
 
@@ -368,7 +367,7 @@ impl MusicApp {
             if list.is_empty() {
                 continue;
             }
-            let mut row = scroll_row(prefix);
+            let mut row = self.shelf(prefix, cx);
             for (i, album) in list.iter().enumerate() {
                 row = row.child(self.album_tile(t, prefix, i, album, 180., cx));
             }
@@ -392,7 +391,7 @@ impl MusicApp {
                 .child(row);
         }
         if !detail.similar.is_empty() {
-            let mut row = scroll_row("similar-artists");
+            let mut row = self.shelf("similar-artists", cx);
             for (i, artist) in detail.similar.iter().enumerate() {
                 let id = artist.id.clone();
                 row = row.child(
@@ -836,7 +835,7 @@ impl MusicApp {
         if related.is_empty() {
             return None;
         }
-        let mut row = scroll_row("also-like");
+        let mut row = self.shelf("also-like", cx);
         for (i, a) in related.iter().enumerate() {
             row = row.child(self.album_tile(t, "also-like", i, a, 170., cx));
         }
@@ -868,7 +867,7 @@ impl MusicApp {
         if others.is_empty() {
             return None;
         }
-        let mut row = scroll_row("more-by-artist");
+        let mut row = self.shelf("more-by-artist", cx);
         for (i, a) in others.into_iter().enumerate() {
             row = row.child(self.album_tile(t, "more-by", i, a, 170., cx));
         }

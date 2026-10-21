@@ -347,6 +347,14 @@ pub struct MusicApp {
     pub(crate) local_matches_cache:
         RefCell<Option<((String, (usize, usize, usize, usize, usize)), Arc<crate::keys::LocalMatches>)>>,
     pub(crate) forward_history: Vec<Route>,
+    /// Horizontal shelves by id, for settling them on a tile after a swipe.
+    pub(crate) shelves: RefCell<HashMap<&'static str, crate::ui::gestures::Shelf>>,
+    /// A two-finger swipe toward the previous or next page, while it's in progress.
+    pub(crate) nav_swipe: Option<crate::ui::gestures::Swipe>,
+    /// A swipe on the player's song, to skip it.
+    pub(crate) player_swipe: crate::ui::gestures::Swipe,
+    /// When the swipe in progress last moved, to abandon one whose gesture goes quiet.
+    pub(crate) swipe_seen: Option<std::time::Instant>,
     pub(crate) search_results: Option<(String, Load<SearchResults>)>,
     search_task: Option<Task<()>>,
     pub(crate) library: Library,
@@ -506,6 +514,10 @@ impl MusicApp {
             song_list_scroll: gpui::UniformListScrollHandle::new(),
             local_matches_cache: RefCell::default(),
             forward_history: Vec::new(),
+            shelves: RefCell::default(),
+            nav_swipe: None,
+            player_swipe: Default::default(),
+            swipe_seen: None,
             search_results: None,
             search_task: None,
             library: Library::load(api::data_dir().join("library.json")),
@@ -883,6 +895,12 @@ fn drag_tracker(app: gpui::WeakEntity<MusicApp>) -> impl IntoElement {
                         }
                     })
                     .ok();
+            });
+            let on_scroll = app.clone();
+            window.on_mouse_event(move |e: &gpui::ScrollWheelEvent, phase, _, cx| {
+                if phase == gpui::DispatchPhase::Bubble {
+                    on_scroll.update(cx, |this, cx| this.swipe_ended(e, cx)).ok();
+                }
             });
             let on_up = app.clone();
             window.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, _, cx| {

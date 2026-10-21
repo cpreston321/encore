@@ -3521,7 +3521,7 @@ thread_local! {
 /// favors, held through the gesture and its momentum until the next gesture begins. Without
 /// it, the sideways drift in a vertical swipe scrolls any horizontal list under the pointer.
 /// Every scroll view sees the same event, so locking on the first movement agrees for all.
-fn gesture_axis(event: &ScrollWheelEvent) -> Option<Axis> {
+pub fn gesture_axis(event: &ScrollWheelEvent) -> Option<Axis> {
     if !event.delta.precise() {
         return None;
     }

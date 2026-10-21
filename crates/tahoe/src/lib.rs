@@ -35,6 +35,7 @@
 pub mod anim;
 pub mod chrome;
 pub mod components;
+pub mod haptics;
 pub mod icons;
 pub mod layout;
 pub mod primitives;

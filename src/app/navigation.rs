@@ -66,6 +66,9 @@ impl MusicApp {
         drop(fx);
         self.route = route;
         self.route_generation += 1;
+        // Shelves of the page being left would otherwise still claim the swipes over where
+        // they were.
+        self.shelves.borrow_mut().clear();
         self.menu = None;
         self.scroll.set_offset(point(px(0.), px(0.)));
         self.ensure_route_data(cx);
