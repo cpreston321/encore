@@ -2,13 +2,16 @@
 //! that view is notified, so a progress tick redraws only the player, and scrolling or
 //! hovering a page leaves the sidebar alone. Each frame then fits a 120Hz refresh.
 
-use gpui::{AnyView, Entity, StyleRefinement, Subscription, Window};
+use gpui::{AnyView, Entity, StyleRefinement, Subscription, Window, size};
 
 use super::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Region {
     Page,
+    /// What scrolls inside the page. Scrolling notifies only the page, so this view replays
+    /// its last frame moved by the scroll instead of rendering (`AnyView::scroll_cached`).
+    Content,
     Sidebar,
     Player,
 }
@@ -37,6 +40,7 @@ impl Render for RegionView {
 
 pub(crate) struct Regions {
     page: Entity<RegionView>,
+    content: Entity<RegionView>,
     sidebar: Entity<RegionView>,
     player: Entity<RegionView>,
 }
@@ -45,7 +49,12 @@ impl Regions {
     pub(crate) fn new(cx: &mut Context<MusicApp>) -> Self {
         let app = cx.entity();
         let mut make = |region| cx.new(|cx| RegionView::new(app.clone(), region, cx));
-        Self { page: make(Region::Page), player: make(Region::Player), sidebar: make(Region::Sidebar) }
+        Self {
+            page: make(Region::Page),
+            content: make(Region::Content),
+            player: make(Region::Player),
+            sidebar: make(Region::Sidebar),
+        }
     }
 
     /// Back to front: the page, the player floating over it, then the sidebar.
@@ -54,6 +63,17 @@ impl Regions {
             AnyView::from(view.clone()).cached(StyleRefinement::default().absolute().inset_0())
         };
         [cached(&self.page), cached(&self.player), cached(&self.sidebar)]
+    }
+}
+
+impl MusicApp {
+    /// The page content as a scroll replay. It draws a viewport beyond the page above and
+    /// below, and renders again while scroll-dependent parts (parallax headers) are on screen.
+    fn content_view(&self, window: &Window) -> AnyView {
+        let view = self.regions.as_ref().map(|r| r.content.clone()).expect("regions exist before they render");
+        let scrolled = -f32::from(self.scroll.offset().y);
+        let translate = scrolled >= self.scroll_dependent_until.get();
+        AnyView::from(view).scroll_cached(size(px(0.), window.viewport_size().height), translate)
     }
 }
 
@@ -68,7 +88,16 @@ impl MusicApp {
                 #[cfg(any(debug_assertions, feature = "tour"))]
                 self.step_tour_scroll(window);
                 let search_focused = self.search_focus.is_focused(window);
-                div().size_full().flex().child(self.render_main(&t, content_w, search_focused, cx)).into_any_element()
+                let content = self.content_view(window);
+                div()
+                    .size_full()
+                    .flex()
+                    .child(self.render_main(&t, content_w, search_focused, content, cx))
+                    .into_any_element()
+            }
+            Region::Content => {
+                let search_focused = self.search_focus.is_focused(window);
+                self.render_page_content(&t, content_w, search_focused, cx)
             }
             Region::Player => {
                 let pill_w = (content_w - 48.).clamp(440., 780.);

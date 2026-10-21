@@ -286,6 +286,7 @@ impl Fx {
         let hovers = |sidebar: bool| self.hovers.iter().any(|(k, h)| k.starts_with("nav-") == sidebar && h.animating());
         match region {
             Region::Page => self.page_bg.animating() || hovers(false),
+            Region::Content => hovers(false),
             Region::Sidebar => {
                 self.sidebar_bg.animating() || self.sections.values().any(|s| s.animating()) || hovers(true)
             }
@@ -381,6 +382,9 @@ pub struct MusicApp {
     first_frame_logged: Cell<bool>,
     #[cfg(any(debug_assertions, feature = "tour"))]
     pub(crate) tour_scroll: Cell<Option<std::time::Instant>>,
+    /// How far down the page (in scrolled pixels) something drawn depends on the scroll
+    /// offset, such as a parallax header. Set while the page content renders.
+    pub(crate) scroll_dependent_until: std::rc::Rc<Cell<f32>>,
     pub(crate) tour_scroll_cpu: Cell<Duration>,
     pub(crate) queue: Queue<Song>,
     pub(crate) state: PlayState,
@@ -504,6 +508,7 @@ impl MusicApp {
             first_frame_logged: Cell::new(false),
             #[cfg(any(debug_assertions, feature = "tour"))]
             tour_scroll: Cell::new(None),
+            scroll_dependent_until: Default::default(),
             tour_scroll_cpu: Cell::new(Duration::ZERO),
             show_now_playing: false,
             artist_ids: RefCell::default(),

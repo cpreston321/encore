@@ -298,7 +298,7 @@ impl Interactivity {
                     (listener)(
                         &DragMoveEvent {
                             event: event.clone(),
-                            bounds: hitbox.bounds,
+                            bounds: window.current_hitbox_bounds(hitbox),
                             drag: PhantomData,
                             dragged_item: Arc::clone(&drag.value),
                         },
@@ -2324,7 +2324,8 @@ impl Interactivity {
                             && let Some((drag_value, drag_listener)) = drag_listener.take()
                         {
                             *clicked_state.borrow_mut() = ElementClickedState::default();
-                            let cursor_offset = event.position - hitbox.origin;
+                            let cursor_offset =
+                                event.position - window.current_hitbox_bounds(&hitbox).origin;
                             let drag =
                                 (drag_listener)(drag_value.as_ref(), cursor_offset, window, cx);
                             cx.active_drag = Some(AnyDrag {

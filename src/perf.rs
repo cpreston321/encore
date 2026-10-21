@@ -126,8 +126,15 @@ pub fn frame_end() {
                 let mean = |pick: fn(&gpui::FrameTimings) -> Duration| {
                     ms(phases.iter().map(pick).sum::<Duration>() / phases.len() as u32)
                 };
+                let replays: u32 = phases.iter().map(|p| p.scroll_replays).sum();
+                let drawn: u32 = replays + phases.iter().map(|p| p.scroll_renders).sum::<u32>();
+                let replayed = if drawn > 0 {
+                    format!(", {:.0}% of page content moved rather than drawn", replays as f32 / drawn as f32 * 100.)
+                } else {
+                    String::new()
+                };
                 format!(
-                    "; while animating: render {:.2}, layout {:.2}, prepaint {:.2}, paint {:.2}, draw {:.2}, encode {:.2}, gpu {:.2} ms",
+                    "; while animating: render {:.2}, layout {:.2}, prepaint {:.2}, paint {:.2}, draw {:.2}, encode {:.2}, gpu {:.2} ms{replayed}",
                     mean(|p| p.render),
                     mean(|p| p.layout),
                     mean(|p| p.prepaint),

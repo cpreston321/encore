@@ -42,7 +42,7 @@ src/
 │   ├── shell.rs     Window frame: sidebar, account popover, main area, context menus
 │   ├── player.rs    Floating player bar, volume popover, Playing Next panel
 │   ├── progress.rs  Progress bar view, which decides when playback needs a redraw
-│   ├── regions.rs   Page, player and sidebar as cached views
+│   ├── regions.rs   Page, page content, player and sidebar as cached views
 │   ├── pages.rs     Routing plus Home, New, Radio and Search
 │   ├── library.rs   Recently Added, Albums, Artists, Songs, playlists
 │   ├── detail.rs    Album / artist / playlist pages tinted from the artwork, with parallax
@@ -116,6 +116,10 @@ Apple only issues Music User Tokens through MusicKit JS's `authorize()` in a bro
   - App state changes still redraw every region, because each region observes `MusicApp`.
   - A notify on any view also dirties its ancestors, so the player lives beside the page rather than inside it.
   - Transitions that belong to one region request that region's frames (`Fx::region_animating`). Overlays drawn by the root request the root's frames.
+- **Scrolling moves the last frame.** What scrolls inside the page is a fourth cached view, `Region::Content`, drawn with `AnyView::scroll_cached` from the vendored GPUI. A scroll notifies only the page, which redraws its own frame (the background, compact bar and toasts), while the content replays its previous frame moved by the scroll, without rendering or laying out.
+  - It draws a window's height beyond the page above and below, so content scrolling in is already drawn. It renders again once a scroll runs past that, when the move would change what the mouse hovers, or when app state changes.
+  - Album, playlist and artist headers move with parallax, so the content renders on every frame while one is on screen. They record how far down they reach in `scroll_dependent_until`.
+  - Pages that scroll themselves (`route_scrolls_itself`: the virtualized song lists and grids) render inside the page as before.
 - **Playback redraws when something moves.** The progress bar redraws only when its fill advances half a point, a few times a second. When it's hovered, the times and visualizer update at the display's refresh rate. Now Playing and the Mini Player move with a 200 to 250 ms tick.
 - **Virtualized lists.** Libraries with thousands of songs use `uniform_list`. Grids switch to virtual rows above `VIRTUAL_GRID_MIN` items.
 - **Artwork.** Images are downloaded once to `~/Library/Caches/Encore/art` on the background executor. Each artwork's tint color is averaged from a small thumbnail, also in the background, and kept in memory.

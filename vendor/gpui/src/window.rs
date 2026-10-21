@@ -570,6 +570,9 @@ pub struct Hitbox {
     pub content_mask: ContentMask<Pixels>,
     /// Flags that specify hitbox behavior.
     pub behavior: HitboxBehavior,
+    /// `content_mask` before clipping to an enclosing scroll replay's container, which the
+    /// replay reveals more of as it moves the hitbox.
+    pub(crate) replay_mask: ContentMask<Pixels>,
 }
 
 impl Hitbox {
@@ -881,6 +884,7 @@ pub struct Window {
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
+    scroll_clip_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     pub(crate) rendered_frame: Frame,
@@ -913,6 +917,10 @@ pub struct Window {
     pub(crate) accessibility_enabled: bool,
     pub(crate) accessibility_builder: crate::AccessibilityBuilder,
     pub(crate) accessibility_sent: Vec<crate::AccessibilityNode>,
+    /// `refreshing` is only set because a cached view above is rendering, not because the
+    /// whole window is.
+    refresh_from_cache_miss: bool,
+    draw_count: u64,
     pub(crate) activation_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) focus: Option<FocusId>,
     focus_enabled: bool,
@@ -1341,6 +1349,7 @@ impl Window {
             rendered_entity_stack: Vec::new(),
             element_offset_stack: Vec::new(),
             content_mask_stack: Vec::new(),
+            scroll_clip_stack: Vec::new(),
             element_opacity: 1.0,
             requested_autoscroll: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
@@ -1373,6 +1382,8 @@ impl Window {
             accessibility_enabled: false,
             accessibility_builder: Default::default(),
             accessibility_sent: Vec::new(),
+            refresh_from_cache_miss: false,
+            draw_count: 0,
             activation_observers: SubscriberSet::new(),
             focus: None,
             focus_enabled: true,
@@ -2076,11 +2087,55 @@ impl Window {
         self.capslock
     }
 
+    /// The bounds and content masks of the quads the last frame draws, for tests.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn drawn_quads(&self) -> Vec<(Bounds<Pixels>, Bounds<Pixels>)> {
+        let unscale = |b: Bounds<ScaledPixels>| b.map(|v| px(v.0 / self.scale_factor));
+        self.rendered_frame
+            .scene
+            .quads
+            .iter()
+            .map(|q| (unscale(q.bounds), unscale(q.content_mask.bounds)))
+            .collect()
+    }
+
     /// Where the last frame spent its time, for profiling.
     pub fn frame_timings(&self) -> crate::FrameTimings {
         crate::FrameTimings {
             gpu: crate::frame_timings::last_gpu_time(),
             ..self.frame_timings.get()
+        }
+    }
+
+    /// Renders everything below as if refreshing, as a cached view does when it renders.
+    pub(crate) fn begin_cache_miss(&mut self) -> (bool, bool) {
+        let previous = (self.refreshing, self.refresh_from_cache_miss);
+        if !self.refreshing {
+            self.refresh_from_cache_miss = true;
+        }
+        self.refreshing = true;
+        previous
+    }
+
+    pub(crate) fn end_cache_miss(&mut self, previous: (bool, bool)) {
+        (self.refreshing, self.refresh_from_cache_miss) = previous;
+    }
+
+    /// The whole window is redrawing, not just a cached view above.
+    pub(crate) fn refreshing_all(&self) -> bool {
+        self.refreshing && !self.refresh_from_cache_miss
+    }
+
+    pub(crate) fn draw_count(&self) -> u64 {
+        self.draw_count
+    }
+
+    pub(crate) fn count_scroll_draw(&mut self, replayed: bool) {
+        let totals = &mut self.phase_clock.totals;
+        if replayed {
+            totals.scroll_replays += 1;
+        } else {
+            totals.scroll_renders += 1;
         }
     }
 
@@ -2100,6 +2155,7 @@ impl Window {
     #[profiling::function]
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
         let draw_start = Instant::now();
+        self.draw_count += 1;
         self.phase_clock.totals = Default::default();
         self.invalidate_entities();
         cx.entities.clear_accessed();
@@ -2510,7 +2566,106 @@ impl Window {
         }
     }
 
+    /// Draws what `f` draws with content `drawn` beyond the current mask, while clipping
+    /// what's shown (and hit-tested) to the current mask. Used by scroll replays.
+    pub(crate) fn with_scroll_clip<R>(
+        &mut self,
+        drawn: Bounds<Pixels>,
+        paint: bool,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let clip = self.scroll_clip_for(&self.content_mask());
+        if paint {
+            let scale_factor = self.scale_factor();
+            self.next_frame.scene.push_clip(clip.scale(scale_factor));
+        }
+        self.scroll_clip_stack.push(clip);
+        self.content_mask_stack.push(ContentMask::new(drawn));
+        let result = f(self);
+        self.content_mask_stack.pop();
+        self.scroll_clip_stack.pop();
+        if paint {
+            self.next_frame.scene.pop_clip();
+        }
+        result
+    }
+
+    /// What a scroll replay inside `content_mask` shows: the mask, also clipped by any
+    /// enclosing replay's container.
+    pub(crate) fn scroll_clip_for(&self, content_mask: &ContentMask<Pixels>) -> ContentMask<Pixels> {
+        match self.scroll_clip_stack.last() {
+            Some(outer) => content_mask.intersect(outer),
+            None => content_mask.clone(),
+        }
+    }
+
+    /// Whether a scroll replay can move `range` of the last frame by `delta` instead of
+    /// drawing it again: nothing in it is positioned outside the scene and hitboxes (deferred
+    /// draws, input handlers), nothing is being dragged, and the mouse hovers the same
+    /// hitboxes after the move.
+    pub(crate) fn can_replay_translated(
+        &self,
+        prepaint: &Range<PrepaintStateIndex>,
+        paint: &Range<PaintIndex>,
+        delta: Point<Pixels>,
+        clip: &ContentMask<Pixels>,
+        cx: &App,
+    ) -> bool {
+        if prepaint.start.deferred_draws_index != prepaint.end.deferred_draws_index
+            || paint.start.input_handlers_index != paint.end.input_handlers_index
+            || cx.has_active_drag()
+        {
+            return false;
+        }
+        let mouse = self.mouse_position;
+        let hit = |bounds: Bounds<Pixels>, mask: &ContentMask<Pixels>| {
+            bounds.intersect(&mask.bounds).contains(&mouse)
+        };
+        self.rendered_frame.hitboxes
+            [prepaint.start.hitboxes_index..prepaint.end.hitboxes_index]
+            .iter()
+            .all(|hitbox| {
+                let moved_mask = ContentMask {
+                    bounds: hitbox.replay_mask.bounds + delta,
+                    corner_radii: hitbox.replay_mask.corner_radii,
+                }
+                .intersect(clip);
+                hit(hitbox.bounds, &hitbox.content_mask) == hit(hitbox.bounds + delta, &moved_mask)
+            })
+    }
+
+    /// Like `reuse_prepaint`, moving the reused hitboxes by `delta` and clipping them to
+    /// `clip`.
+    pub(crate) fn reuse_prepaint_translated(
+        &mut self,
+        range: Range<PrepaintStateIndex>,
+        delta: Point<Pixels>,
+        clip: &ContentMask<Pixels>,
+    ) {
+        let start = self.next_frame.hitboxes.len();
+        self.reuse_prepaint(range);
+        for hitbox in &mut self.next_frame.hitboxes[start..] {
+            hitbox.bounds = hitbox.bounds + delta;
+            hitbox.replay_mask.bounds = hitbox.replay_mask.bounds + delta;
+            hitbox.content_mask = hitbox.replay_mask.intersect(clip);
+        }
+    }
+
+    /// The bounds `hitbox` has in the last frame, which differ from its own when a scroll
+    /// replay has moved it since it was inserted.
+    pub(crate) fn current_hitbox_bounds(&self, hitbox: &Hitbox) -> Bounds<Pixels> {
+        self.rendered_frame
+            .hitboxes
+            .iter()
+            .find(|h| h.id == hitbox.id)
+            .map_or(hitbox.bounds, |h| h.bounds)
+    }
+
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        self.reuse_paint_translated(range, Point::default());
+    }
+
+    pub(crate) fn reuse_paint_translated(&mut self, range: Range<PaintIndex>, delta: Point<Pixels>) {
         self.next_frame.cursor_styles.extend(
             self.rendered_frame.cursor_styles
                 [range.start.cursor_styles_index..range.end.cursor_styles_index]
@@ -2548,9 +2703,11 @@ impl Window {
 
         self.text_system
             .reuse_layouts(range.start.line_layout_index..range.end.line_layout_index);
-        self.next_frame.scene.replay(
+        let delta = delta.scale(self.scale_factor());
+        self.next_frame.scene.replay_translated(
             range.start.scene_index..range.end.scene_index,
             &self.rendered_frame.scene,
+            delta,
         );
     }
 
@@ -2845,6 +3002,21 @@ impl Window {
             cx,
             init,
         )
+    }
+
+    /// Reads an element's state from this frame or the last without taking it.
+    pub(crate) fn peek_element_state<S: 'static, R>(
+        &self,
+        global_id: &GlobalElementId,
+        f: impl FnOnce(&S) -> R,
+    ) -> Option<R> {
+        let key = (GlobalElementId(global_id.0.clone()), TypeId::of::<S>());
+        let any = self
+            .next_frame
+            .element_states
+            .get(&key)
+            .or_else(|| self.rendered_frame.element_states.get(&key))?;
+        any.inner.downcast_ref::<Option<S>>()?.as_ref().map(f)
     }
 
     /// Updates or initializes state for an element with the given id that lives across multiple
@@ -3774,7 +3946,11 @@ impl Window {
     pub fn insert_hitbox(&mut self, bounds: Bounds<Pixels>, behavior: HitboxBehavior) -> Hitbox {
         self.invalidator.debug_assert_prepaint();
 
-        let content_mask = self.content_mask();
+        let replay_mask = self.content_mask();
+        let content_mask = match self.scroll_clip_stack.last() {
+            Some(clip) => replay_mask.intersect(clip),
+            None => replay_mask.clone(),
+        };
         let mut id = self.next_hitbox_id;
         self.next_hitbox_id = self.next_hitbox_id.next();
         let hitbox = Hitbox {
@@ -3782,6 +3958,7 @@ impl Window {
             bounds,
             content_mask,
             behavior,
+            replay_mask,
         };
         self.next_frame.hitboxes.push(hitbox.clone());
         hitbox

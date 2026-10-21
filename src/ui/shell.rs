@@ -534,11 +534,36 @@ impl MusicApp {
             .on_click(cx.listener(move |this, _, window, cx| this.go_root(route.clone(), window, cx)))
     }
 
+    /// What scrolls in the page: the route and room to scroll it clear of the player.
+    pub(crate) fn render_page_content(
+        &self,
+        t: &Theme,
+        content_w: f32,
+        search_focused: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let page_theme = self.page_palette(cx).map(|p| t.tinted(p));
+        let page_t = page_theme.as_ref().unwrap_or(t);
+        self.scroll_dependent_until.set(0.);
+        div()
+            .child(page_transition(
+                self.route_generation,
+                self.nav_direction,
+                false,
+                self.render_route(page_t, content_w, search_focused, cx),
+            ))
+            .child(div().h(px(110.)))
+            .into_any_element()
+    }
+
+    /// The page beside the floating sidebar. `content` is the scrolling page's content as
+    /// its own view (see `Region::Content`); pages that scroll themselves render inline.
     pub(crate) fn render_main(
         &self,
         t: &Theme,
         content_w: f32,
         search_focused: bool,
+        content: gpui::AnyView,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let page_theme = self.page_palette(cx).map(|p| t.tinted(p));
@@ -580,13 +605,7 @@ impl MusicApp {
                     .map(lock_scroll_axis)
                     .track_scroll(&self.scroll)
                     .map(|d| overlay_scrollbar(d, page_t, true))
-                    .child(page_transition(
-                        self.route_generation,
-                        direction,
-                        false,
-                        self.render_route(page_t, content_w, search_focused, cx),
-                    ))
-                    .child(div().h(px(110.)))
+                    .child(content)
             })
             .children(self.render_compact_bar(page_t, content_w, cx))
             .when(queue.visible(), |d| {

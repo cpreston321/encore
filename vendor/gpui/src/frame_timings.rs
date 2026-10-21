@@ -23,6 +23,10 @@ pub struct FrameTimings {
     pub present: Duration,
     /// GPU time of the most recently completed frame (Metal only; zero elsewhere).
     pub gpu: Duration,
+    /// Views drawn by moving their last frame (`AnyView::scroll_cached`).
+    pub scroll_replays: u32,
+    /// Scroll-cached views that rendered instead.
+    pub scroll_renders: u32,
 }
 
 #[derive(Clone, Copy)]

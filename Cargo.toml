@@ -32,6 +32,10 @@ serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.154"
 ureq = { version = "3", features = ["json"] }
 
+[dev-dependencies]
+# The scroll replay tests drive gpui's test platform.
+gpui = { version = "0.2.2", features = ["test-support"] }
+
 [features]
 # Debug-only page tour (ENCORE_TOUR=1), also available in optimized builds for profiling.
 tour = []

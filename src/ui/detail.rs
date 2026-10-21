@@ -241,6 +241,7 @@ impl MusicApp {
         let about_key = format!("artist-{id}");
 
         let full_w = content_w + SIDEBAR_W;
+        self.scroll_dependent_until.set(hero_h);
         let hero = div()
             .relative()
             .ml(px(-SIDEBAR_W))
@@ -641,6 +642,10 @@ impl MusicApp {
         });
 
         let full_w = content_w + SIDEBAR_W;
+        // The header's height isn't known until layout; until then the page must render
+        // on every scroll.
+        let until = self.scroll_dependent_until.clone();
+        until.set(f32::INFINITY);
         div()
             .relative()
             .ml(px(-SIDEBAR_W))
@@ -648,6 +653,11 @@ impl MusicApp {
             .pl(px(SIDEBAR_W))
             .overflow_hidden()
             .bg(t.window)
+            .child(
+                gpui::canvas(move |bounds, _, _| until.set(f32::from(bounds.size.height)), |_, _, _, _| {})
+                    .absolute()
+                    .size_full(),
+            )
             .child(div().absolute().top_0().left_0().right_0().h(px(wash_h)).bg(linear_gradient(
                 180.,
                 linear_color_stop(glow, 0.),
