@@ -242,6 +242,8 @@ pub struct Fx {
     pub pill_bg: crate::anim::ColorBlend,
     pub hovers: HashMap<SharedString, crate::anim::Presence>,
     pub sections: HashMap<&'static str, crate::anim::Presence>,
+    /// When the current page was navigated to, for its entrance.
+    pub page_entered: std::time::Instant,
 }
 
 impl Fx {
@@ -264,7 +266,18 @@ impl Fx {
             pill_bg: ColorBlend::new(t.pill, Duration::from_millis(600)),
             hovers: HashMap::new(),
             sections: HashMap::new(),
+            page_entered: std::time::Instant::now().checked_sub(PAGE_ENTRANCE).unwrap_or_else(std::time::Instant::now),
         }
+    }
+
+    /// How far the current page's entrance has come, eased, from 0 to 1. It's timed from the
+    /// navigation rather than held in element state, so a redraw can never restart it.
+    pub(crate) fn page_progress(&self) -> f32 {
+        if crate::anim::reduce_motion() {
+            return 1.;
+        }
+        let t = (self.page_entered.elapsed().as_secs_f32() / PAGE_ENTRANCE.as_secs_f32()).min(1.);
+        1. - (1. - t).powi(5)
     }
 
     /// Transitions drawn by the root view: overlays and panels.
@@ -285,8 +298,8 @@ impl Fx {
         use crate::ui::regions::Region;
         let hovers = |sidebar: bool| self.hovers.iter().any(|(k, h)| k.starts_with("nav-") == sidebar && h.animating());
         match region {
-            Region::Page => self.page_bg.animating() || hovers(false),
-            Region::Content => hovers(false),
+            Region::Page => self.page_bg.animating() || hovers(false) || self.page_progress() < 1.,
+            Region::Content => hovers(false) || self.page_progress() < 1.,
             Region::Sidebar => {
                 self.sidebar_bg.animating() || self.sections.values().any(|s| s.animating()) || hovers(true)
             }
@@ -294,6 +307,8 @@ impl Fx {
         }
     }
 }
+
+const PAGE_ENTRANCE: Duration = Duration::from_millis(280);
 
 pub(crate) type DeferredFetch = Box<dyn FnOnce(&mut MusicApp, &mut Context<MusicApp>)>;
 

@@ -25,6 +25,7 @@ use gpui::{
 use app::{MusicApp, NextTrack, PlayPause, PreviousTrack, Quit, ToggleQueue, VolumeDown, VolumeUp};
 
 fn main() {
+    log_panics();
     perf::init();
     // ENCORE_APPEARANCE=light|dark and ENCORE_REDUCE_MOTION=1, for checking both without
     // changing the system settings.
@@ -123,4 +124,30 @@ fn main() {
         .unwrap();
         cx.activate(true);
     });
+}
+
+/// Appends every panic, with where it happened, to ~/Library/Logs/Encore/crash.log. Launched
+/// from Finder the app has nowhere to print it, and macOS's crash report only shows `abort`.
+fn log_panics() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(dir) = dirs::home_dir().map(|home| home.join("Library/Logs/Encore")) {
+            let _ = std::fs::create_dir_all(&dir);
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("crash.log")) {
+                use std::io::Write as _;
+                let when = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs());
+                let thread = std::thread::current();
+                let _ = writeln!(
+                    file,
+                    "--- {when} (unix), thread {}, version {}\n{info}\n{}",
+                    thread.name().unwrap_or("?"),
+                    env!("CARGO_PKG_VERSION"),
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
+        }
+        default(info);
+    }));
 }

@@ -60,7 +60,10 @@ impl MusicApp {
         // Whatever the pointer was over goes with the page and never sees it leave, so
         // nothing would fade its hover back out. The sidebar's keys stay.
         self.hovered_link.replace(None);
-        self.fx.borrow_mut().hovers.retain(|key, _| key.starts_with("nav-"));
+        let mut fx = self.fx.borrow_mut();
+        fx.hovers.retain(|key, _| key.starts_with("nav-"));
+        fx.page_entered = std::time::Instant::now();
+        drop(fx);
         self.route = route;
         self.route_generation += 1;
         self.menu = None;

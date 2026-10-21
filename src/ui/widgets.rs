@@ -181,28 +181,22 @@ pub(crate) fn skeleton_detail(t: &Theme) -> impl IntoElement {
         .child(skeleton_rows(t, 6))
 }
 
-/// Fades and lifts each new page into place. Keyed by navigation count so it replays.
+/// Fades and lifts a new page into place; `progress` is `Fx::page_progress`.
 pub(crate) fn page_transition(
-    generation: usize,
+    progress: f32,
     direction: crate::app::NavDirection,
     fill: bool,
     page: AnyElement,
 ) -> impl IntoElement {
     use crate::app::NavDirection;
-    let ms = if crate::anim::reduce_motion() { 1 } else { 280 };
-    div().when(fill, |d| d.size_full()).pl(px(SIDEBAR_W)).child(page).with_animation(
-        ("page-transition", generation),
-        Animation::new(Duration::from_millis(ms)).with_easing(ease_out_quint()),
-        move |el, p| {
-            let el = el.opacity(p);
-            match direction {
-                NavDirection::Root => el.mt(px((1. - p) * 14.)),
-                // Detail pages arrive from the right; going back, the previous page from the left.
-                NavDirection::Forward => el.ml(px((1. - p) * 28.)),
-                NavDirection::Back => el.ml(px((1. - p) * -28.)),
-            }
-        },
-    )
+    let p = progress;
+    let el = div().when(fill, |d| d.size_full()).pl(px(SIDEBAR_W)).child(page).when(p < 1., |d| d.opacity(p));
+    match direction {
+        NavDirection::Root => el.mt(px((1. - p) * 14.)),
+        // Detail pages arrive from the right; going back, the previous page from the left.
+        NavDirection::Forward => el.ml(px((1. - p) * 28.)),
+        NavDirection::Back => el.ml(px((1. - p) * -28.)),
+    }
 }
 
 pub(crate) fn art_overlay(size: f32, child: Svg) -> Div {

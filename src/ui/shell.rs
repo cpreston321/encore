@@ -552,9 +552,10 @@ impl MusicApp {
         let page_theme = self.page_palette(cx).map(|p| t.tinted(p));
         let page_t = page_theme.as_ref().unwrap_or(t);
         self.scroll_dependent_until.set(0.);
+        let progress = self.fx.borrow().page_progress();
         div()
             .child(page_transition(
-                self.route_generation,
+                progress,
                 self.nav_direction,
                 false,
                 self.render_route(page_t, content_w, search_focused, cx),
@@ -577,6 +578,7 @@ impl MusicApp {
         let page_t = page_theme.as_ref().unwrap_or(t);
         // Background color blends between pages instead of snapping.
         let page_bg = self.fx.borrow_mut().page_bg.update(page_t.window);
+        let progress = self.fx.borrow().page_progress();
         let (queue, notice) = {
             let fx = self.fx.borrow();
             (fx.queue, fx.notice)
@@ -596,7 +598,7 @@ impl MusicApp {
                     // Pages inherit text color from here, so tinted pages read in light mode too.
                     .text_color(page_t.text)
                     .child(page_transition(
-                        self.route_generation,
+                        progress,
                         direction,
                         true,
                         self.render_route(page_t, content_w, search_focused, cx),
