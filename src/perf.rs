@@ -29,6 +29,12 @@ pub fn init() {
     process_start();
 }
 
+pub fn log(message: &str) {
+    if enabled() {
+        eprintln!("[perf] {message}");
+    }
+}
+
 pub fn milestone(name: &str) {
     if enabled() {
         eprintln!("[perf] {name} at {:.0}ms", process_start().elapsed().as_secs_f64() * 1000.);

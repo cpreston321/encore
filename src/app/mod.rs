@@ -362,6 +362,9 @@ pub struct MusicApp {
     load_generation: u64,
     pub(crate) volume: f32,
     pub(crate) images: RefCell<HashMap<String, ImageState>>,
+    /// When each loaded image file was last drawn (see `start_image_eviction`).
+    pub(crate) image_used: RefCell<HashMap<Arc<std::path::Path>, std::time::Instant>>,
+    pub(crate) evict_after: Duration,
     /// Average color per artwork URL, for tinting page headers. `None` while computing.
     art_colors: RefCell<HashMap<String, Option<gpui::Hsla>>>,
     pub(crate) menu: Option<ContextMenu>,
@@ -486,6 +489,8 @@ impl MusicApp {
             load_generation: 0,
             volume: 0.8,
             images: RefCell::default(),
+            image_used: RefCell::default(),
+            evict_after: Duration::from_secs(120),
             art_colors: RefCell::default(),
             menu: None,
             show_queue: false,
@@ -521,6 +526,7 @@ impl MusicApp {
         }
         this.load_browse(cx);
         this.restore_session(cx);
+        this.start_image_eviction(cx);
         cx.on_app_quit(|this, _| {
             this.save_session();
             async {}

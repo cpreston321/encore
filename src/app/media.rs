@@ -2,6 +2,12 @@
 
 use super::*;
 
+/// How often to look for artwork to free, and how long unused artwork is kept.
+const EVICT_CHECK: Duration = Duration::from_secs(30);
+const EVICT_AFTER: Duration = Duration::from_secs(120);
+/// Below this many loaded images, nothing is freed.
+const KEEP_IMAGES: usize = 100;
+
 impl MusicApp {
     /// Returns the cached file for `url`, starting a download if needed.
     pub(crate) fn image(&self, url: &str, cx: &mut Context<Self>) -> Option<Arc<std::path::Path>> {
@@ -10,7 +16,7 @@ impl MusicApp {
         }
         if let Some(state) = self.images.borrow().get(url) {
             return match state {
-                ImageState::Ready(path, _) => Some(path.clone()),
+                ImageState::Ready(path, _) => Some(self.mark_used(path)),
                 _ => None,
             };
         }
@@ -59,10 +65,80 @@ impl MusicApp {
         None
     }
 
+    fn mark_used(&self, path: &Arc<std::path::Path>) -> Arc<std::path::Path> {
+        self.image_used.borrow_mut().insert(path.clone(), std::time::Instant::now());
+        path.clone()
+    }
+
+    /// Frees artwork that hasn't been drawn for a while. gpui keeps every decoded image and its
+    /// GPU texture until the app quits, so browsing grows memory without bound. Evicted images
+    /// are decoded again from the disk cache if they're needed later.
+    ///
+    /// Cached views replay their last frame without asking for their images again, so an image
+    /// one of them still shows can look unused. Each pass therefore redraws every view first
+    /// (notifying the app does that), and only evicts images that redraw didn't use.
+    pub(crate) fn start_image_eviction(&mut self, cx: &mut Context<Self>) {
+        // ENCORE_TOUR_EVICT_FAST=1 checks every 5 s and frees after 15 s, for testing.
+        #[cfg(any(debug_assertions, feature = "tour"))]
+        let fast = std::env::var_os("ENCORE_TOUR_EVICT_FAST").is_some();
+        #[cfg(not(any(debug_assertions, feature = "tour")))]
+        let fast = false;
+        let (check, after) =
+            if fast { (Duration::from_secs(5), Duration::from_secs(15)) } else { (EVICT_CHECK, EVICT_AFTER) };
+        self.evict_after = after;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(check).await;
+                let crowded = this.update(cx, |this, cx| {
+                    let crowded = this.image_used.borrow().len() > KEEP_IMAGES;
+                    if crowded {
+                        cx.notify();
+                    }
+                    crowded
+                });
+                match crowded {
+                    Err(_) => break,
+                    Ok(false) => continue,
+                    Ok(true) => {}
+                }
+                // Let the full redraw happen and mark what's on screen.
+                cx.background_executor().timer(Duration::from_millis(500)).await;
+                if this.update(cx, |this, cx| this.evict_images(cx)).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn evict_images(&mut self, cx: &mut Context<Self>) {
+        use futures::FutureExt as _;
+        let stale: Vec<Arc<std::path::Path>> = {
+            let mut used = self.image_used.borrow_mut();
+            let stale: Vec<_> =
+                used.iter().filter(|(_, at)| at.elapsed() > self.evict_after).map(|(p, _)| p.clone()).collect();
+            for path in &stale {
+                used.remove(path);
+            }
+            stale
+        };
+        for path in &stale {
+            let resource = gpui::Resource::Path(path.clone());
+            let (task, _) = cx.fetch_asset::<gpui::ImgResourceLoader>(&resource);
+            if let Some(Ok(image)) = task.now_or_never() {
+                cx.drop_image(image, None);
+            }
+            cx.remove_asset::<gpui::ImgResourceLoader>(&resource);
+        }
+        if !stale.is_empty() {
+            crate::perf::log(&format!("evicted {} images, {} kept", stale.len(), self.image_used.borrow().len()));
+        }
+    }
+
     /// An already-downloaded image (for other windows, which can't start downloads).
     pub(crate) fn cached_image(&self, url: &str) -> Option<Arc<std::path::Path>> {
         match self.images.borrow().get(url) {
-            Some(ImageState::Ready(path, _)) => Some(path.clone()),
+            Some(ImageState::Ready(path, _)) => Some(self.mark_used(path)),
             _ => None,
         }
     }
