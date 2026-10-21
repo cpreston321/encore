@@ -8,7 +8,7 @@
 
 Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-length playback for subscribers.
 
-[Features](#features) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Benchmarks](docs/benchmarks.md) · [Contributing](CONTRIBUTING.md)
+[Features](#features) · [Benchmarks](#benchmarks) · [Getting started](#getting-started) · [Apple Music setup](docs/musickit.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -16,22 +16,16 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 
 ## Features
 
-- **Your library.** Sign in with your Apple Music account to browse your Recently Added, Artists, Albums, Songs, playlists and Favorite Songs. You can also add to your library and playlists.
-- **Full songs.** Subscribers hear complete tracks through Apple's native MusicKit player on macOS 14 and later, or through MusicKit JS in a hidden web view on macOS 13. Everyone else gets 30-second previews.
-- **Crossfade and gapless playback.** Choose a 3, 6 or 12 second crossfade, or none. Consecutive album tracks hand off without a gap, which the native player does by itself. Since there's only one native player, a crossfade plays the incoming song on a web player while the outgoing one fades out, and the two swap each track.
-- **Animate Artwork (optional).** View → Animate Artwork makes hero cards, album, playlist and artist headers, and Now Playing slowly drift and zoom, a stand-in for Apple Music's motion artwork, which the public API doesn't provide. It's off by default, pauses while Encore isn't the active app, and respects Reduce Motion.
-- **Picks up where you left off.** Quit midway through a song and Encore reopens on it, paused at the same spot with the rest of the queue intact.
-- **Synced lyrics.** Lyrics come from [LRCLIB](https://lrclib.net) and follow along with the song. Click a line to jump there.
-- **Detail pages that take on the artwork's colors.** Album, artist and playlist pages tint to match their artwork, the header moves with parallax, and a compact title bar fades in as you scroll.
-- **Quick search (⌘K).** Spotlight-style results show a top result, artists, albums, songs and playlists from both your library and the Apple Music catalog.
-- **Easy to set up.** A new install opens on a welcome screen that signs you in and only shows the app once your library has loaded. Without a MusicKit key, it walks you through adding one: a link to Apple's key page, a file picker for the `.p8` file, and a check with Apple before saving.
-- **A Mac app first.** Media keys and Control Center's Now Playing work. There are Dock menu controls, a menu bar item for every page, and full keyboard navigation.
-- **Mini Player (⇧⌘M).** A small floating window with the cover, and the player bar's glass, scrubber and controls on hover. It stands in for the main window, which hides while it's open, and remembers where you put it.
-- **Trackpad gestures.** Swipe sideways with two fingers to go back and forward, swipe the player to skip songs, scroll over the volume to change it, and shelves settle on a tile when you let go. Scroll views stretch and bounce at their edges, as in AppKit.
-- **See All.** Every shelf opens a full page: 200 entries deep for the charts, and up to 100 of an artist's top songs.
-- **Visualizer.** Hovering the progress bar shows a live spectrum of the song as it plays. Before volume control is on, or on the web player, it's computed from the song's preview instead.
-- **Library tools.** Sort and filter your Songs, Favorites and Albums. ⌘-click or ⇧-click to select several songs, and drag songs onto a playlist or into Playing Next.
-- **Fast and accessible.** Encore scrolls and animates at 120 fps on ProMotion displays. It launches in about a quarter of a second and uses less CPU than Music.app while playing ([benchmarks](docs/benchmarks.md)). It follows the system's light or dark appearance and honors Reduce Motion.
+- **Your Apple Music library**, playlists and favorites, with full songs for subscribers
+- **Synced lyrics**, crossfade and gapless playback
+- **Pages that take on the artwork's colors**, with parallax headers
+- **Quick search (⌘K)** across your library and the catalog
+- **Mini Player (⇧⌘M)** that stands in for the main window
+- **Trackpad gestures**: swipe back and forward, swipe the player to skip
+- **A real Mac app**: media keys, Control Center, VoiceOver, menus for everything
+- **Fast and light**: launches in a quarter of a second, 120 fps scrolling
+
+[All features →](docs/features.md)
 
 <table>
   <tr>
@@ -53,6 +47,17 @@ Styled after the macOS Tahoe Music app, with iOS-style detail pages and full-len
 </p>
 
 The screenshots use stand-in gradients in place of album artwork (`ENCORE_TOUR_PLACEHOLDER_ART`); [CONTRIBUTING.md](CONTRIBUTING.md) explains how to take them.
+
+## Benchmarks
+
+Against Apple's Music app on the same Mac, both signed in and streaming full songs. Lower is better.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/benchmarks-dark.svg">
+  <img src="docs/benchmarks-light.svg" width="880" alt="Encore against Music: launch 270 ms vs 848 ms; memory idle 234 MB vs 362 MB; memory playing 272 MB vs 404 MB; CPU idle 0.0% vs 0.6%; CPU playing 1.7% vs 8.7%; size on disk 18 MB vs 67 MB">
+</picture>
+
+<sub>Apple M4 Max, macOS 26.5.2, Encore 0.1.0 and Music 1.6.5. Memory and CPU include each app's helper processes; CPU is a 30-second average of one core. [Full results and how they're measured →](docs/benchmarks.md)</sub>
 
 ## Getting started
 
