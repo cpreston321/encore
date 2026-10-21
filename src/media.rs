@@ -28,7 +28,18 @@ pub struct MediaControls {
     commands: Option<UnboundedReceiver<Command>>,
     // The command center keeps targets alive as long as these tokens exist.
     _targets: Vec<Retained<AnyObject>>,
-    last_key: Option<(String, bool, i64)>,
+    last: Option<Published>,
+    /// The artwork published for the current song, kept so republishing reuses it: each new
+    /// MPMediaItemArtwork is rendered again by the system, a few MB at a time.
+    artwork: Option<(String, Retained<MPMediaItemArtwork>)>,
+}
+
+/// What was last published, to tell whether the system needs telling again.
+struct Published {
+    id: String,
+    playing: bool,
+    position: f64,
+    at: std::time::Instant,
 }
 
 impl MediaControls {
@@ -65,7 +76,7 @@ impl MediaControls {
                 },
             )));
         }
-        Self { commands: Some(rx), _targets: targets, last_key: None }
+        Self { commands: Some(rx), _targets: targets, last: None, artwork: None }
     }
 
     pub fn take_commands(&mut self) -> Option<UnboundedReceiver<Command>> {
@@ -73,11 +84,13 @@ impl MediaControls {
     }
 
     /// Publishes what's playing. Cheap to call every tick: it only touches the system when
-    /// the song, play state or position (to the second) changes.
+    /// the song or play state changes, or the position jumps (a seek). In between, the system
+    /// advances the elapsed time itself from the playback rate.
     pub fn update(&mut self, now: Option<NowPlaying>) {
         let center = unsafe { MPNowPlayingInfoCenter::defaultCenter() };
         let Some(now) = now else {
-            if self.last_key.take().is_some() {
+            self.artwork = None;
+            if self.last.take().is_some() {
                 unsafe {
                     center.setNowPlayingInfo(None);
                     center.setPlaybackState(MPNowPlayingPlaybackState::Stopped);
@@ -85,11 +98,36 @@ impl MediaControls {
             }
             return;
         };
-        let key = (now.id.clone(), now.playing, now.position as i64);
-        if self.last_key.as_ref().is_some_and(|k| k.0 == key.0 && k.1 == key.1 && (k.2 - key.2).abs() <= 1) {
+        let unchanged = self.last.as_ref().is_some_and(|last| {
+            let expected = last.position + if last.playing { last.at.elapsed().as_secs_f64() } else { 0. };
+            last.id == now.id && last.playing == now.playing && (now.position - expected).abs() < 2.
+        });
+        if unchanged {
             return;
         }
-        self.last_key = Some(key);
+        self.last = Some(Published {
+            id: now.id.clone(),
+            playing: now.playing,
+            position: now.position,
+            at: std::time::Instant::now(),
+        });
+        if self.artwork.as_ref().is_some_and(|(id, _)| *id != now.id) {
+            self.artwork = None;
+        }
+        if self.artwork.is_none()
+            && let Some(path) = &now.artwork_path
+            && let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path))
+        {
+            let size = image.size();
+            let artwork = unsafe {
+                MPMediaItemArtwork::initWithBoundsSize_requestHandler(
+                    MPMediaItemArtwork::alloc(),
+                    size,
+                    &RcBlock::new(move |_: NSSize| std::ptr::NonNull::from(&*image)),
+                )
+            };
+            self.artwork = Some((now.id.clone(), artwork));
+        }
         unsafe {
             let mut keys: Vec<&NSString> = vec![
                 MPMediaItemPropertyTitle,
@@ -110,17 +148,9 @@ impl MediaControls {
                         if now.playing { 1. } else { 0. },
                     )))),
                 ];
-            if let Some(path) = &now.artwork_path
-                && let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(path))
-            {
-                let size = image.size();
-                let artwork = MPMediaItemArtwork::initWithBoundsSize_requestHandler(
-                    MPMediaItemArtwork::alloc(),
-                    size,
-                    &RcBlock::new(move |_: NSSize| std::ptr::NonNull::from(&*image)),
-                );
+            if let Some((_, artwork)) = &self.artwork {
                 keys.push(MPMediaItemPropertyArtwork);
-                values.push(Retained::into_super(Retained::into_super(artwork)));
+                values.push(Retained::into_super(Retained::into_super(artwork.clone())));
             }
             let refs: Vec<&AnyObject> = values.iter().map(|v| &**v).collect();
             let info = NSDictionary::from_slices(&keys, &refs);
