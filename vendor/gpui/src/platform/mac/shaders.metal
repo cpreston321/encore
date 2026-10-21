@@ -1517,11 +1517,14 @@ fragment float4 backdrop_blur_fragment(BackdropFragmentInput input [[stage_in]],
   color = mix(color, tint.rgb, tint.a);
 
   if (blur->rim > 0.) {
-    // Light from the top left: a bright rim on the edges facing it, fading around the
-    // shape, and a faint shade inside the opposite edge.
-    float facing = dot(normal, normalize(float2(-1., -1.4)));
+    // Light from above and a little to the left: a bright rim on the edges facing it,
+    // fading around the shape, and a faint shade inside the opposite edge. Light from
+    // further left lit the top edge but died halfway round the top-right corner, which
+    // made that corner look flatter than the rest. Falling off linearly, rather than
+    // faster, the highlight follows each corner round instead of stopping on it.
+    float facing = dot(normal, normalize(float2(-0.4, -1.)));
     float rim_band = saturate(1. - depth / blur->rim_width);
-    float lit = 0.22 + 0.78 * pow(saturate(facing), 1.5) + 0.18 * pow(saturate(-facing), 2.);
+    float lit = 0.22 + 0.78 * saturate(facing) + 0.18 * pow(saturate(-facing), 2.);
     float highlight = rim_band * rim_band * lit * 0.7;
     float sheen = lens * lens * saturate(facing) * 0.07;
     float shade = saturate(1. - depth / (blur->rim_width * 5.)) * saturate(-facing) * 0.1;
