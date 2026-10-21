@@ -445,13 +445,7 @@ impl MusicApp {
     /// Tiny cover for a playlist row: its artwork, or its first song's when it has none.
     pub(crate) fn playlist_thumb(&self, playlist: &Playlist, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let art = if playlist.artwork.is_empty() {
-            self.ensure_playlist_tracks(playlist, cx);
-            match self.playlist_tracks.get(&playlist.id) {
-                Some(Load::Ready(Some(tracks))) => {
-                    tracks.iter().find(|s| !s.artwork.is_empty()).map(|s| s.artwork.clone())
-                }
-                _ => None,
-            }
+            self.playlist_covers(playlist, cx).into_iter().next()
         } else {
             Some(playlist.artwork.clone())
         };

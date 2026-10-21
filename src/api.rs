@@ -251,11 +251,23 @@ fn get_json(url: &str, auth: Option<&Auth>) -> Result<Value> {
     }
 }
 
+/// The part of `url` that identifies the file. Photos people upload for their playlists are
+/// served from signed URLs (`X-Amz-*`) that are re-signed on every library fetch and expire
+/// after a day, so the signature is left out: the same photo keeps its cached copy.
+fn cache_key(url: &str) -> std::borrow::Cow<'_, str> {
+    let Some((base, query)) = url.split_once('?') else { return url.into() };
+    if !query.contains("X-Amz-") {
+        return url.into();
+    }
+    let kept: Vec<&str> = query.split('&').filter(|p| !p.starts_with("X-Amz-")).collect();
+    if kept.is_empty() { base.to_string().into() } else { format!("{base}?{}", kept.join("&")).into() }
+}
+
 /// Downloads `url` into the cache directory (once) and returns the file path.
 pub fn download_cached(url: &str, kind: &str, ext: &str) -> Result<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    url.hash(&mut hasher);
+    cache_key(url).hash(&mut hasher);
     let dir = cache_dir().join(kind);
     let path = dir.join(format!("{:016x}.{ext}", hasher.finish()));
     if path.exists() {
@@ -1080,6 +1092,16 @@ pub fn sign_developer_token(team_id: &str, key_id: &str, p8_pem: &[u8]) -> Resul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn signed_urls_share_a_cache_key() {
+        let a = "https://store-032.blobstore.apple.com/x/image?X-Amz-Date=1&X-Amz-Signature=aa";
+        let b = "https://store-032.blobstore.apple.com/x/image?X-Amz-Date=2&X-Amz-Signature=bb";
+        assert_eq!(super::cache_key(a), super::cache_key(b));
+        assert_eq!(super::cache_key(a), "https://store-032.blobstore.apple.com/x/image");
+        let plain = "https://is1-ssl.mzstatic.com/image/gen/1200x1200AM.jpg?c1=B3B3B3&signature=x";
+        assert_eq!(super::cache_key(plain), plain);
+    }
+
     use super::*;
 
     #[test]

@@ -301,6 +301,9 @@ pub struct MusicApp {
     pub(crate) albums: HashMap<String, Load<(Album, Vec<Song>)>>,
     pub(crate) artists: HashMap<String, Load<ArtistDetail>>,
     pub(crate) playlist_tracks: HashMap<String, Load<Option<Vec<Song>>>>,
+    /// Up to four song covers per playlist without its own artwork, saved so the sidebar and
+    /// mosaics show them at launch instead of waiting for every playlist's tracks.
+    pub(crate) playlist_covers: RefCell<HashMap<String, Vec<crate::model::Artwork>>>,
     /// Playlists whose tracks were requested only to build a cover mosaic.
     requested_playlists: RefCell<std::collections::HashSet<String>>,
     /// Artists fetched in the background (e.g. for "More by" under an album).
@@ -457,6 +460,7 @@ impl MusicApp {
             albums: HashMap::new(),
             artists: HashMap::new(),
             playlist_tracks: HashMap::new(),
+            playlist_covers: RefCell::new(data::load_playlist_covers()),
             requested_playlists: RefCell::default(),
             requested_artists: RefCell::default(),
             stations: None,

@@ -103,8 +103,43 @@ impl MusicApp {
 
     /// Loads a playlist's tracks in the background (e.g. to draw a cover mosaic for
     /// playlists Apple gives no artwork). Safe to call every frame.
+    /// Covers for a playlist without its own artwork: from its songs once they've loaded,
+    /// otherwise the ones saved last time.
+    pub(crate) fn playlist_covers(&self, playlist: &Playlist, cx: &mut Context<Self>) -> Vec<crate::model::Artwork> {
+        self.ensure_playlist_tracks(playlist, cx);
+        let Some(Load::Ready(Some(tracks))) = self.playlist_tracks.get(&playlist.id) else {
+            return self.playlist_covers.borrow().get(&playlist.id).cloned().unwrap_or_default();
+        };
+        let mut covers: Vec<crate::model::Artwork> = Vec::new();
+        for song in tracks {
+            if !song.artwork.is_empty() && !covers.contains(&song.artwork) {
+                covers.push(song.artwork.clone());
+                if covers.len() == 4 {
+                    break;
+                }
+            }
+        }
+        let mut saved = self.playlist_covers.borrow_mut();
+        if saved.get(&playlist.id) != Some(&covers) {
+            saved.insert(playlist.id.clone(), covers.clone());
+            let snapshot = saved.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    if let Ok(json) = serde_json::to_vec(&snapshot) {
+                        let _ = std::fs::write(playlist_covers_path(), json);
+                    }
+                })
+                .detach();
+        }
+        covers
+    }
+
     pub(crate) fn ensure_playlist_tracks(&self, playlist: &Playlist, cx: &mut Context<Self>) {
-        if self.playlist_tracks.contains_key(&playlist.id)
+        // The saved library draws before the Keychain hands over the user token, and library
+        // playlists asked for without it fail (403) for good. Signing in redraws, asking again.
+        let library_playlist = playlist.id.starts_with("p.");
+        if (library_playlist && self.catalog.user_token().is_none())
+            || self.playlist_tracks.contains_key(&playlist.id)
             || !self.requested_playlists.borrow_mut().insert(playlist.id.clone())
         {
             return;
@@ -240,4 +275,12 @@ impl MusicApp {
             .ok();
         }));
     }
+}
+
+fn playlist_covers_path() -> std::path::PathBuf {
+    api::cache_dir().join("playlist-covers.json")
+}
+
+pub(super) fn load_playlist_covers() -> HashMap<String, Vec<crate::model::Artwork>> {
+    std::fs::read(playlist_covers_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }

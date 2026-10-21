@@ -908,18 +908,7 @@ impl MusicApp {
         if !playlist.artwork.is_empty() {
             return self.art(&playlist.artwork, size, radius, t, cx);
         }
-        self.ensure_playlist_tracks(playlist, cx);
-        let mut covers: Vec<Artwork> = Vec::new();
-        if let Some(Load::Ready(Some(tracks))) = self.playlist_tracks.get(&playlist.id) {
-            for song in tracks {
-                if !song.artwork.is_empty() && !covers.contains(&song.artwork) {
-                    covers.push(song.artwork.clone());
-                    if covers.len() == 4 {
-                        break;
-                    }
-                }
-            }
-        }
+        let covers = self.playlist_covers(playlist, cx);
         match covers.len() {
             0 => div()
                 .size(px(size))
