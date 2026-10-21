@@ -678,13 +678,7 @@ impl MusicApp {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .child(
-                        div()
-                            .opacity(fade)
-                            .rounded(px(10.))
-                            .shadow_lg()
-                            .child(cover(cover_size, cx)),
-                    )
+                    .child(div().opacity(fade).rounded(px(10.)).shadow_lg().child(cover(cover_size, cx)))
                     .child(
                         div()
                             .pt_6()

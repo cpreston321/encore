@@ -135,9 +135,8 @@ fn log_panics() {
             let _ = std::fs::create_dir_all(&dir);
             if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("crash.log")) {
                 use std::io::Write as _;
-                let when = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_secs());
+                let when =
+                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
                 let thread = std::thread::current();
                 let _ = writeln!(
                     file,
