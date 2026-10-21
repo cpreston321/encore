@@ -6,15 +6,17 @@ Apple M4 Max, 64 GB, macOS 26.5.2 · Encore 0.1.0 · Music 1.6.5 · 2026-10-21
 
 | | Encore | Music |
 | --- | ---: | ---: |
-| Launch to first window (warm, median of 5) | **267 ms** | 717 ms |
-| Memory, idle | **223 MB** | 618 MB |
-| Memory, playing | 657 MB | **393 MB** |
-| CPU, idle (30 s average) | **0.0%** | 5.2% |
-| CPU, playing (30 s average) | **3.9%** | 14.4% |
+| Launch to first window (warm, median of 5) | **270 ms** | 848 ms |
+| Memory, idle | **234 MB** | 362 MB |
+| Memory, playing | **272 MB** | 404 MB |
+| CPU, idle (30 s average) | **0.0%** | 0.6% |
+| CPU, playing (30 s average) | **1.7%** | 8.7% |
 | Processes while playing | **3** | 6 |
 | Size on disk | **18 MB** | 67 MB |
 
-Playing, about 390 MB of Encore's total is buffers macOS keeps for a window while it presents frames (the progress bar redraws a few times a second). They're charged to Encore but aren't its allocations: its renderer holds about 75 MB of GPU memory. They go as soon as the window stops drawing (paused, minimized, or idle), and builds from before this session's changes show them too. Music's idle CPU includes it still settling after launch.
+Every frame a window presents makes macOS hold about 390 MB for it for a second or so, charged to the app. The progress bar used to redraw a few times a second during playback, which kept that held for as long as a song played (657 MB). Now, while nothing disturbs the bar, its fill is a Core Animation layer that moves by itself, and the window presents no frames at all during playback.
+
+Run the script with nothing else playing. A playback helper left running from an earlier song is counted in the app's group, and once put idle at 790 MB and 10% CPU.
 
 How each number is measured:
 - **Memory and CPU** cover the app plus every helper process macOS holds it responsible for, the same grouping Activity Monitor uses. For Encore, that includes WebKit's content, network and GPU processes, which run MusicKit JS. For Music, it includes its XPC services.
