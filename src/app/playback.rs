@@ -601,7 +601,9 @@ impl MusicApp {
     }
 
     pub(crate) fn catalog_duration(&self) -> f32 {
-        let full = self.audio.borrow().as_ref().is_some_and(Audio::is_full);
+        // A restored song isn't loaded yet; the bar shows it at its own length.
+        let restored = self.audio.borrow().is_none() && self.resume_at.is_some();
+        let full = restored || self.audio.borrow().as_ref().is_some_and(Audio::is_full);
         match self.queue.current() {
             Some(s) if full && s.duration_ms > 0 => s.duration_ms as f32 / 1000.,
             _ => 30.,
@@ -717,6 +719,14 @@ impl MusicApp {
         if let Some(audio) = self.audio.borrow().as_ref() {
             audio.seek(secs);
         }
+        // A restored song is moved to its saved position once it starts playing
+        // (`apply_resume`), which would undo this seek; move the saved position instead.
+        if let Some((_, at)) = self.resume_at.as_mut() {
+            *at = secs;
+            let duration = self.duration();
+            self.progress.read(cx).set_resume(Some((secs, duration)));
+            self.save_session();
+        }
         // Let the lyrics jump to the new line right away.
         self.lyrics_follow.borrow_mut().user_until = None;
         cx.notify();
@@ -732,14 +742,23 @@ impl MusicApp {
             return;
         }
         if self.drag.take() == Some(Drag::Progress) {
-            let fraction = self.progress.read(cx).scrub();
-            let duration = self.duration();
-            if let (Some(f), Some(audio)) = (fraction, self.audio.borrow().as_ref()) {
-                audio.seek(f * duration);
-            }
-            // Keep showing the target until the player reports the new position.
+            let Some(target) = self.progress.read(cx).scrub().map(|f| f * self.duration()) else { return };
+            self.seek_to(target, cx);
+            // Keep showing the target until the player reports it: a paused player can take a
+            // moment, and showing the old position meanwhile looks like the seek didn't stick.
             cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(Duration::from_millis(600)).await;
+                for _ in 0..30 {
+                    cx.background_executor().timer(Duration::from_millis(100)).await;
+                    let arrived = this
+                        .update(cx, |this, _| {
+                            this.drag.is_some()
+                                || this.audio.borrow().as_ref().is_none_or(|a| (a.position() - target).abs() < 1.)
+                        })
+                        .unwrap_or(true);
+                    if arrived {
+                        break;
+                    }
+                }
                 this.update(cx, |this, cx| {
                     if this.drag.is_none() {
                         this.progress.update(cx, |p, cx| {

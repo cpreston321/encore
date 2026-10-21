@@ -126,7 +126,7 @@ pub enum Account {
     SignedIn,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Drag {
     Progress,
     Volume,
