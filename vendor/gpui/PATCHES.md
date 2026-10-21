@@ -1,6 +1,6 @@
 # Changes from gpui 0.2.2
 
-This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus four changes. `git log vendor/gpui` shows each one on its own.
+This is the crates.io release of [gpui](https://crates.io/crates/gpui) 0.2.2 without its examples and tests, plus five changes. `git log vendor/gpui` shows each one on its own.
 
 ## The display link sleeps when there's nothing to draw
 
@@ -29,3 +29,11 @@ When the app isn't active, Cocoa can send `windowDidBecomeKey:` to a window that
 - **The motion clock** advances only while it's presenting moving sprites, so motion that stopped resumes where it was. It caps each step at 0.1 s.
 
 Encore's Animate Artwork costs about 2% of a core this way, against 3–4% when it re-rendered the page at 10 fps. Only the Metal renderer supports it.
+
+## `overflow_hidden` clips to rounded corners
+
+Content masks only had a rectangle, so a rounded element with `overflow_hidden` let its children show square in the corners. Every layer inside a rounded card had to repeat the card's rounding, and anything slightly larger leaked.
+- **The mask.** `ContentMask` now carries `corner_radii`. `Style::overflow_mask` fills them from the element's rounding, inset by its border, when both axes are hidden.
+- **Nesting.** Intersecting masks keeps a corner's radius wherever the intersection keeps that corner.
+- **The shaders.** Quads, shadows, underlines, glyphs and images multiply their coverage by the mask's rounded-rectangle distance in the fragment shader, which the generated wrappers around each fragment function do. Square masks skip it.
+- **Not covered:** paths and video surfaces still clip to the rectangle. Only the Metal renderer supports rounded masks.

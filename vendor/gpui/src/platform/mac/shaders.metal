@@ -18,6 +18,7 @@ float2 to_tile_position(float2 unit_vertex, AtlasTile tile,
                         constant Size_DevicePixels *atlas_size);
 float4 distance_from_clip_rect(float2 unit_vertex, Bounds_ScaledPixels bounds,
                                Bounds_ScaledPixels clip_bounds);
+float content_mask_alpha(float2 position, ContentMask_ScaledPixels mask);
 float4 distance_from_clip_rect_transformed(float2 unit_vertex, Bounds_ScaledPixels bounds,
                                Bounds_ScaledPixels clip_bounds, TransformationMatrix transformation);
 float corner_dash_velocity(float dv1, float dv2);
@@ -97,9 +98,7 @@ vertex QuadVertexOutput quad_vertex(uint unit_vertex_id [[vertex_id]],
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
-fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
-                              constant Quad *quads
-                              [[buffer(QuadInputIndex_Quads)]]) {
+float4 quad_fragment_body(QuadFragmentInput input, constant Quad *quads) {
   Quad quad = quads[input.quad_id];
   float4 background_color = fill_color(quad.background, input.position.xy, quad.bounds,
     input.background_solid, input.background_color0, input.background_color1);
@@ -396,6 +395,14 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   return color * float4(1.0, 1.0, 1.0, saturate(antialias_threshold - outer_sdf));
 }
 
+fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
+                              constant Quad *quads
+                              [[buffer(QuadInputIndex_Quads)]]) {
+  float4 color = quad_fragment_body(input, quads);
+  color.a *= content_mask_alpha(input.position.xy, quads[input.quad_id].content_mask);
+  return color;
+}
+
 // Returns the dash velocity of a corner given the dash velocity of the two
 // sides, by returning the slower velocity (larger dashes).
 //
@@ -490,9 +497,7 @@ vertex ShadowVertexOutput shadow_vertex(
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
-fragment float4 shadow_fragment(ShadowFragmentInput input [[stage_in]],
-                                constant Shadow *shadows
-                                [[buffer(ShadowInputIndex_Shadows)]]) {
+float4 shadow_fragment_body(ShadowFragmentInput input, constant Shadow *shadows) {
   Shadow shadow = shadows[input.shadow_id];
 
   float2 origin = float2(shadow.bounds.origin.x, shadow.bounds.origin.y);
@@ -541,6 +546,14 @@ fragment float4 shadow_fragment(ShadowFragmentInput input [[stage_in]],
   return input.color * float4(1., 1., 1., alpha);
 }
 
+fragment float4 shadow_fragment(ShadowFragmentInput input [[stage_in]],
+                                constant Shadow *shadows
+                                [[buffer(ShadowInputIndex_Shadows)]]) {
+  float4 color = shadow_fragment_body(input, shadows);
+  color.a *= content_mask_alpha(input.position.xy, shadows[input.shadow_id].content_mask);
+  return color;
+}
+
 struct UnderlineVertexOutput {
   float4 position [[position]];
   float4 color [[flat]];
@@ -574,9 +587,7 @@ vertex UnderlineVertexOutput underline_vertex(
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
-fragment float4 underline_fragment(UnderlineFragmentInput input [[stage_in]],
-                                   constant Underline *underlines
-                                   [[buffer(UnderlineInputIndex_Underlines)]]) {
+float4 underline_fragment_body(UnderlineFragmentInput input, constant Underline *underlines) {
   const float WAVE_FREQUENCY = 2.0;
   const float WAVE_HEIGHT_RATIO = 0.8;
 
@@ -605,11 +616,20 @@ fragment float4 underline_fragment(UnderlineFragmentInput input [[stage_in]],
   }
 }
 
+fragment float4 underline_fragment(UnderlineFragmentInput input [[stage_in]],
+                                   constant Underline *underlines
+                                   [[buffer(UnderlineInputIndex_Underlines)]]) {
+  float4 color = underline_fragment_body(input, underlines);
+  color.a *= content_mask_alpha(input.position.xy, underlines[input.underline_id].content_mask);
+  return color;
+}
+
 struct MonochromeSpriteVertexOutput {
   float4 position [[position]];
   float2 tile_position;
   float4 color [[flat]];
   float4 clip_distance;
+  uint sprite_id [[flat]];
 };
 
 struct MonochromeSpriteFragmentInput {
@@ -617,6 +637,7 @@ struct MonochromeSpriteFragmentInput {
   float2 tile_position;
   float4 color [[flat]];
   float4 clip_distance;
+  uint sprite_id [[flat]];
 };
 
 vertex MonochromeSpriteVertexOutput monochrome_sprite_vertex(
@@ -639,13 +660,11 @@ vertex MonochromeSpriteVertexOutput monochrome_sprite_vertex(
       device_position,
       tile_position,
       color,
-      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w},
+      sprite_id};
 }
 
-fragment float4 monochrome_sprite_fragment(
-    MonochromeSpriteFragmentInput input [[stage_in]],
-    constant MonochromeSprite *sprites [[buffer(SpriteInputIndex_Sprites)]],
-    texture2d<float> atlas_texture [[texture(SpriteInputIndex_AtlasTexture)]]) {
+float4 monochrome_sprite_fragment_body(MonochromeSpriteFragmentInput input, constant MonochromeSprite *sprites, texture2d<float> atlas_texture) {
   if (any(input.clip_distance < float4(0.0))) {
     return float4(0.0);
   }
@@ -656,6 +675,15 @@ fragment float4 monochrome_sprite_fragment(
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
   float4 color = input.color;
   color.a *= sample.a;
+  return color;
+}
+
+fragment float4 monochrome_sprite_fragment(
+    MonochromeSpriteFragmentInput input [[stage_in]],
+    constant MonochromeSprite *sprites [[buffer(SpriteInputIndex_Sprites)]],
+    texture2d<float> atlas_texture [[texture(SpriteInputIndex_AtlasTexture)]]) {
+  float4 color = monochrome_sprite_fragment_body(input, sprites, atlas_texture);
+  color.a *= content_mask_alpha(input.position.xy, sprites[input.sprite_id].content_mask);
   return color;
 }
 
@@ -712,10 +740,7 @@ vertex PolychromeSpriteVertexOutput polychrome_sprite_vertex(
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
-fragment float4 polychrome_sprite_fragment(
-    PolychromeSpriteFragmentInput input [[stage_in]],
-    constant PolychromeSprite *sprites [[buffer(SpriteInputIndex_Sprites)]],
-    texture2d<float> atlas_texture [[texture(SpriteInputIndex_AtlasTexture)]]) {
+float4 polychrome_sprite_fragment_body(PolychromeSpriteFragmentInput input, constant PolychromeSprite *sprites, texture2d<float> atlas_texture) {
   PolychromeSprite sprite = sprites[input.sprite_id];
   constexpr sampler atlas_texture_sampler(mag_filter::linear,
                                           min_filter::linear);
@@ -732,6 +757,15 @@ fragment float4 polychrome_sprite_fragment(
     color.b = grayscale;
   }
   color.a *= sprite.opacity * saturate(0.5 - distance);
+  return color;
+}
+
+fragment float4 polychrome_sprite_fragment(
+    PolychromeSpriteFragmentInput input [[stage_in]],
+    constant PolychromeSprite *sprites [[buffer(SpriteInputIndex_Sprites)]],
+    texture2d<float> atlas_texture [[texture(SpriteInputIndex_AtlasTexture)]]) {
+  float4 color = polychrome_sprite_fragment_body(input, sprites, atlas_texture);
+  color.a *= content_mask_alpha(input.position.xy, sprites[input.sprite_id].content_mask);
   return color;
 }
 
@@ -1253,4 +1287,14 @@ float4 fill_color(Background background,
   }
 
   return color;
+}
+
+// Coverage of a pixel by a rounded content mask (the rectangle is already clipped in the
+// vertex stage). Square masks skip the distance computation.
+float content_mask_alpha(float2 position, ContentMask_ScaledPixels mask) {
+  Corners_ScaledPixels r = mask.corner_radii;
+  if (r.top_left == 0. && r.top_right == 0. && r.bottom_right == 0. && r.bottom_left == 0.) {
+    return 1.;
+  }
+  return saturate(0.5 - quad_sdf(position, mask.bounds, r));
 }

@@ -575,6 +575,8 @@ impl Style {
                     max.y -= self.border_widths.bottom.to_pixels(rem_size);
                 }
 
+                let both_hidden =
+                    self.overflow.x != Overflow::Visible && self.overflow.y != Overflow::Visible;
                 let bounds = match (
                     self.overflow.x == Overflow::Visible,
                     self.overflow.y == Overflow::Visible,
@@ -595,7 +597,34 @@ impl Style {
                     (false, false) => Bounds::from_corners(min, max),
                 };
 
-                Some(ContentMask { bounds })
+                // Clipping both ways follows the element's rounded corners, measured on the
+                // inside of its border.
+                let corner_radii = if both_hidden {
+                    let border = |w: AbsoluteLength| w.to_pixels(rem_size);
+                    let radii = self.corner_radii.to_pixels(rem_size);
+                    let inset = |r: Pixels, a: Pixels, b: Pixels| (r - a.max(b)).max(Pixels::ZERO);
+                    let has_border = self.border_color.is_some_and(|color| !color.is_transparent());
+                    let (top, right, bottom, left) = if has_border {
+                        (
+                            border(self.border_widths.top),
+                            border(self.border_widths.right),
+                            border(self.border_widths.bottom),
+                            border(self.border_widths.left),
+                        )
+                    } else {
+                        (Pixels::ZERO, Pixels::ZERO, Pixels::ZERO, Pixels::ZERO)
+                    };
+                    Corners {
+                        top_left: inset(radii.top_left, top, left),
+                        top_right: inset(radii.top_right, top, right),
+                        bottom_right: inset(radii.bottom_right, bottom, right),
+                        bottom_left: inset(radii.bottom_left, bottom, left),
+                    }
+                    .clamp_radii_for_quad_size(bounds.size)
+                } else {
+                    Corners::default()
+                };
+                Some(ContentMask { bounds, corner_radii })
             }
         }
     }
@@ -686,29 +715,23 @@ impl Style {
                 self.border_style,
             );
 
-            window.with_content_mask(Some(ContentMask { bounds: top_bounds }), |window| {
+            window.with_content_mask(Some(ContentMask::new(top_bounds)), |window| {
                 window.paint_quad(quad.clone());
             });
             window.with_content_mask(
-                Some(ContentMask {
-                    bounds: right_bounds,
-                }),
+                Some(ContentMask::new(right_bounds)),
                 |window| {
                     window.paint_quad(quad.clone());
                 },
             );
             window.with_content_mask(
-                Some(ContentMask {
-                    bounds: bottom_bounds,
-                }),
+                Some(ContentMask::new(bottom_bounds)),
                 |window| {
                     window.paint_quad(quad.clone());
                 },
             );
             window.with_content_mask(
-                Some(ContentMask {
-                    bounds: left_bounds,
-                }),
+                Some(ContentMask::new(left_bounds)),
                 |window| {
                     window.paint_quad(quad);
                 },

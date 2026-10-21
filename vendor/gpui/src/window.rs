@@ -1370,20 +1370,65 @@ pub(crate) struct DispatchEventResult {
 pub struct ContentMask<P: Clone + Debug + Default + PartialEq> {
     /// The bounds
     pub bounds: Bounds<P>,
+    /// Rounded corners of the mask, so `overflow_hidden` on a rounded element clips its
+    /// children to the rounded shape. Zero is a square corner.
+    pub corner_radii: Corners<P>,
 }
 
 impl ContentMask<Pixels> {
+    /// A rectangular mask.
+    pub fn new(bounds: Bounds<Pixels>) -> Self {
+        Self { bounds, corner_radii: Corners::default() }
+    }
+
     /// Scale the content mask's pixel units by the given scaling factor.
     pub fn scale(&self, factor: f32) -> ContentMask<ScaledPixels> {
         ContentMask {
             bounds: self.bounds.scale(factor),
+            corner_radii: self.corner_radii.scale(factor),
         }
     }
 
-    /// Intersect the content mask with the given content mask.
+    /// Intersect the content mask with the given content mask. A rounded corner survives
+    /// where the intersection keeps that corner of either mask.
     pub fn intersect(&self, other: &Self) -> Self {
         let bounds = self.bounds.intersect(&other.bounds);
-        ContentMask { bounds }
+        let near = |a: Point<Pixels>, b: Point<Pixels>| (a.x - b.x).abs() < px(0.5) && (a.y - b.y).abs() < px(0.5);
+        let corner = |at: Point<Pixels>, mine: (Point<Pixels>, Pixels), theirs: (Point<Pixels>, Pixels)| {
+            let mut radius = px(0.);
+            for (point, r) in [mine, theirs] {
+                if near(at, point) && r > radius {
+                    radius = r;
+                }
+            }
+            radius
+        };
+        let (a, b) = (self, other);
+        ContentMask {
+            corner_radii: Corners {
+                top_left: corner(
+                    bounds.origin,
+                    (a.bounds.origin, a.corner_radii.top_left),
+                    (b.bounds.origin, b.corner_radii.top_left),
+                ),
+                top_right: corner(
+                    bounds.top_right(),
+                    (a.bounds.top_right(), a.corner_radii.top_right),
+                    (b.bounds.top_right(), b.corner_radii.top_right),
+                ),
+                bottom_right: corner(
+                    bounds.bottom_right(),
+                    (a.bounds.bottom_right(), a.corner_radii.bottom_right),
+                    (b.bounds.bottom_right(), b.corner_radii.bottom_right),
+                ),
+                bottom_left: corner(
+                    bounds.bottom_left(),
+                    (a.bounds.bottom_left(), a.corner_radii.bottom_left),
+                    (b.bounds.bottom_left(), b.corner_radii.bottom_left),
+                ),
+            },
+            bounds,
+        }
     }
 }
 
@@ -2653,11 +2698,11 @@ impl Window {
         self.content_mask_stack
             .last()
             .cloned()
-            .unwrap_or_else(|| ContentMask {
-                bounds: Bounds {
+            .unwrap_or_else(|| {
+                ContentMask::new(Bounds {
                     origin: Point::default(),
                     size: self.viewport_size,
-                },
+                })
             })
     }
 
