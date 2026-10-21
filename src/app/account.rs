@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// How long requests wait for the saved user token before going out without it.
+const TOKEN_WAIT: Duration = Duration::from_secs(2);
+
 impl MusicApp {
     /// Reads the saved Music User Token off the main thread: macOS can show a Keychain
     /// prompt (e.g. after an app update), and the window shouldn't wait on it. If a cached
@@ -19,16 +22,26 @@ impl MusicApp {
         }
         if self.catalog.is_musickit() {
             *self.awaiting_token.borrow_mut() = Some(Vec::new());
+            // A Keychain prompt can wait on the user indefinitely; past this, requests go out
+            // without the token, and what fails for want of it is asked for again once it's in.
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(TOKEN_WAIT).await;
+                this.update(cx, |this, cx| this.send_waiting_requests(cx)).ok();
+            })
+            .detach();
         }
         cx.spawn(async move |this, cx| {
             let token = cx.background_executor().spawn(async { auth::stored_user_token() }).await;
             crate::perf::milestone("keychain read");
             this.update(cx, |this, cx| {
-                let waiting = this.awaiting_token.borrow_mut().take().unwrap_or_default();
+                let waited_too_long = this.awaiting_token.borrow().is_none();
                 match token {
                     Some(token) => {
                         this.catalog.set_user_token(Some(token));
                         this.account = Account::SignedIn;
+                        if waited_too_long {
+                            this.retry_failed_loads();
+                        }
                         this.load_remote_library(cx);
                         this.load_personal_home(cx);
                         this.ensure_route_data(cx);
@@ -38,14 +51,26 @@ impl MusicApp {
                         this.remote = Load::Loading;
                     }
                 }
-                for fetch in waiting {
-                    fetch(this, cx);
-                }
+                this.send_waiting_requests(cx);
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+
+    fn send_waiting_requests(&mut self, cx: &mut Context<Self>) {
+        let waiting = self.awaiting_token.borrow_mut().take().unwrap_or_default();
+        for fetch in waiting {
+            fetch(self, cx);
+        }
+    }
+
+    /// Lets loads that failed while signed out, or before the token arrived, run again.
+    fn retry_failed_loads(&mut self) {
+        self.playlist_tracks.retain(|_, load| !matches!(load, Load::Failed(_)));
+        self.requested_playlists.borrow_mut().clear();
+        self.albums.retain(|_, load| !matches!(load, Load::Failed(_)));
     }
 
     /// Apple doesn't expose Apple Music profile photos to third-party apps, so the user
@@ -176,9 +201,7 @@ impl MusicApp {
                 Ok(token) => {
                     this.catalog.set_user_token(Some(token));
                     this.account = Account::SignedIn;
-                    // Library playlists asked for while signed out failed; let them load now.
-                    this.playlist_tracks.retain(|_, load| !matches!(load, Load::Failed(_)));
-                    this.requested_playlists.borrow_mut().clear();
+                    this.retry_failed_loads();
                     this.load_remote_library(cx);
                     this.load_personal_home(cx);
                     this.show_notice("Signed in to Apple Music".into(), cx);

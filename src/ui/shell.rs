@@ -246,10 +246,15 @@ impl MusicApp {
                     )
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().text_color(color).child(label))
-                            .children(detail.map(|d| div().text_size(px(11.5)).text_color(t.text_tertiary).child(d))),
+                            .child(div().truncate().text_color(color).child(label))
+                            .children(
+                                detail
+                                    .map(|d| div().truncate().text_size(px(11.5)).text_color(t.text_tertiary).child(d)),
+                            ),
                     )
             };
 
@@ -310,7 +315,7 @@ impl MusicApp {
                     "account-photo",
                     "person",
                     if self.avatar.is_some() { "Change Photo…" } else { "Choose Photo…" },
-                    Some("Apple doesn't share your Apple Music photo".into()),
+                    Some("Apple Music doesn't share it".into()),
                     t.text,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {

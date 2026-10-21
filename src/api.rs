@@ -756,8 +756,12 @@ mod musickit {
     }
 
     pub fn related_albums(auth: &Auth, id: &str) -> Result<Vec<Album>> {
-        let json = get(auth, &format!("albums/{id}/view/related-albums?limit=10"))?;
-        Ok(list(&json["data"], parse_album))
+        // Apple answers 404 for albums it has no suggestions for.
+        match get(auth, &format!("albums/{id}/view/related-albums?limit=10")) {
+            Ok(json) => Ok(list(&json["data"], parse_album)),
+            Err(e) if format!("{e:#}").contains("http status: 404") => Ok(Vec::new()),
+            Err(e) => Err(e),
+        }
     }
 
     pub fn playlist_tracks(auth: &Auth, id: &str) -> Result<Vec<Song>> {
