@@ -36,7 +36,14 @@ pub(crate) fn table_header(t: &Theme) -> impl IntoElement {
 
 pub(crate) fn page_title(title: impl Into<SharedString>) -> impl IntoElement {
     let title = title.into();
-    div().px(px(PAD)).pt(px(46.)).pb_4().text_size(px(28.)).font_weight(FontWeight::BOLD).child(title)
+    div()
+        .accessibility_role(Role::Heading)
+        .px(px(PAD))
+        .pt(px(46.))
+        .pb_4()
+        .text_size(px(28.))
+        .font_weight(FontWeight::BOLD)
+        .child(title)
 }
 
 /// A section title with nothing more to show. Sections that open a fuller page use

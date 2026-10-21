@@ -2,6 +2,16 @@
 
 use super::*;
 
+/// How VoiceOver reads a song row: "Title, Artist, Album, 3:45".
+pub(crate) fn song_label(song: &Song) -> String {
+    let duration = format_ms(song.duration_ms);
+    [song.title.as_str(), song.artist.as_str(), song.album.as_str(), duration.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 impl MusicApp {
     pub(crate) fn album_track_row(
         &self,
@@ -54,6 +64,9 @@ impl MusicApp {
 
         div()
             .id(("track", ix))
+            .accessibility_role(Role::Row)
+            .accessibility_label(song_label(song))
+            .accessibility_selected(selected)
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -111,7 +124,7 @@ impl MusicApp {
             .child(self.more_button(t, ("track-more", ix).into(), song, "track", cx))
             .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
                 let m = e.modifiers();
-                if e.click_count() >= 2 && !m.platform && !m.shift {
+                if (e.click_count() >= 2 || e.is_keyboard()) && !m.platform && !m.shift {
                     this.multi.clear();
                     this.play(list.as_ref().clone(), ix, false, cx);
                 }
@@ -408,6 +421,8 @@ impl MusicApp {
 
         div()
             .id(ElementId::from((SharedString::from(prefix), ix)))
+            .accessibility_role(Role::Row)
+            .accessibility_label(song_label(song))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -432,6 +447,7 @@ impl MusicApp {
             .child(
                 div()
                     .id(ElementId::from((SharedString::from(format!("{prefix}-art")), ix)))
+                    .accessibility_label(format!("Play {}", song.title))
                     .relative()
                     .flex_none()
                     .cursor_pointer()
@@ -492,7 +508,7 @@ impl MusicApp {
                 cx,
             ))
             .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
-                if e.click_count() >= 2 {
+                if e.click_count() >= 2 || e.is_keyboard() {
                     this.play(dbl_list.as_ref().clone(), ix, false, cx);
                 }
             }))
@@ -534,6 +550,9 @@ impl MusicApp {
 
         div()
             .id(ElementId::from((SharedString::from(format!("{id}-row")), ix)))
+            .accessibility_role(Role::Row)
+            .accessibility_label(song_label(song))
+            .accessibility_selected(selected)
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -606,7 +625,7 @@ impl MusicApp {
             ))
             .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
                 let m = e.modifiers();
-                if e.click_count() >= 2 && !m.platform && !m.shift {
+                if (e.click_count() >= 2 || e.is_keyboard()) && !m.platform && !m.shift {
                     this.multi.clear();
                     this.play(list.as_ref().clone(), ix, false, cx);
                 }
@@ -687,6 +706,7 @@ impl MusicApp {
         let hovered = self.hovered_link.borrow().as_ref().is_some_and(|(r, s)| *r == row && *s == slot);
         div()
             .id(ElementId::from((SharedString::from(format!("{row}-link")), slot as usize)))
+            .accessibility_role(Role::Link)
             .cursor_pointer()
             .text_color(if hovered { hover_color } else { color })
             .when(hovered, |d| d.underline())
@@ -725,8 +745,10 @@ impl MusicApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let song = song.clone();
+        let keyboard_song = song.clone();
         div()
             .id(id)
+            .accessibility_label("More")
             .size(px(26.))
             .flex_none()
             .rounded_full()
@@ -745,7 +767,14 @@ impl MusicApp {
                     cx.notify();
                 }),
             )
-            .on_click(|_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
+                cx.stop_propagation();
+                if let ClickEvent::Keyboard(k) = e {
+                    let list = this.page_songs().unwrap_or_default();
+                    this.open_song_menu(&keyboard_song, &list, k.bounds.bottom_left());
+                    cx.notify();
+                }
+            }))
     }
 
     pub(crate) fn album_tile(
@@ -765,6 +794,8 @@ impl MusicApp {
         let menu_album = album.clone();
         div()
             .id(ElementId::from((SharedString::from(prefix), i)))
+            .accessibility_role(Role::Button)
+            .accessibility_label(format!("{} by {}", album.title, album.artist))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, _, cx| {

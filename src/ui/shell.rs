@@ -164,6 +164,8 @@ impl MusicApp {
                 .when(self.show_account, |d| d.bg(t.selected))
                 .when(!self.show_account, |d| d.hover(|s| s.bg(t.hover)))
                 .cursor_pointer()
+                .accessibility_role(Role::Button)
+                .accessibility_label(format!("Account, {}", self.user_name))
                 .child(capture_bounds(self.account_bounds.clone()))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -173,7 +175,14 @@ impl MusicApp {
                         cx.stop_propagation();
                         cx.notify();
                     }),
-                ),
+                )
+                .on_click(cx.listener(|this, e: &ClickEvent, _, cx| {
+                    if e.is_keyboard() {
+                        this.show_account = !this.show_account;
+                        this.menu = None;
+                        cx.notify();
+                    }
+                })),
             Account::SigningIn => row.child(
                 div()
                     .id("cancel-sign-in")
@@ -384,6 +393,8 @@ impl MusicApp {
             .child(
                 div()
                     .id(SharedString::from(format!("section-header-{name}")))
+                    .accessibility_label(name)
+                    .accessibility_value(if open > 0.5 { "expanded" } else { "collapsed" })
                     .group(group.clone())
                     .mt_4()
                     .mb_1()
@@ -487,6 +498,9 @@ impl MusicApp {
         let color = crate::anim::lerp(t.icon, t.accent, amount);
         div()
             .id(("nav", ix))
+            .accessibility_role(Role::Tab)
+            .accessibility_label(label.clone())
+            .accessibility_selected(selected)
             .px_2()
             .h(px(ROW_H))
             .flex()

@@ -9,12 +9,12 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, Div, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
-    Refineable, RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
+    Refineable, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder, px, white,
 };
 
 use crate::{
-    icons::icon,
+    icons::{icon, icon_label},
     primitives,
     theme::{Theme, readable_on},
 };
@@ -94,6 +94,8 @@ impl RenderOnce for Button {
         };
         let el = div()
             .id(self.id)
+            .accessibility_role(Role::Button)
+            .accessibility_label(self.label.clone())
             .min_w(px(96.))
             .px_4()
             .h(px(32.))
@@ -133,11 +135,13 @@ pub enum IconButtonStyle {
     Plain,
 }
 
-/// A round button holding a single icon.
+/// A round button holding a single icon. VoiceOver reads it by `.label(..)`, or by its icon
+/// (see [`icon_label`]) without one.
 #[derive(IntoElement)]
 pub struct IconButton {
     id: ElementId,
     icon: &'static str,
+    label: Option<SharedString>,
     size: f32,
     style: IconButtonStyle,
     theme: Option<Theme>,
@@ -146,7 +150,21 @@ pub struct IconButton {
 
 impl IconButton {
     pub fn new(id: impl Into<ElementId>, icon: &'static str) -> Self {
-        Self { id: id.into(), icon, size: 32., style: IconButtonStyle::default(), theme: None, on_click: None }
+        Self {
+            id: id.into(),
+            icon,
+            label: None,
+            size: 32.,
+            style: IconButtonStyle::default(),
+            theme: None,
+            on_click: None,
+        }
+    }
+
+    /// What the button does, for VoiceOver.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// The diameter in points (32 by default).
@@ -182,6 +200,7 @@ impl RenderOnce for IconButton {
                 primitives::icon_button(&t, self.id, self.icon, self.size * 0.45, t.icon).size(px(self.size))
             }
         }
+        .accessibility_label(self.label.unwrap_or_else(|| icon_label(self.icon)))
         .cursor_pointer();
         match self.on_click {
             Some(f) => el.on_click(f),
@@ -240,6 +259,7 @@ impl RenderOnce for Link {
         let is_hovered = *hovered.read(cx);
         let el = div()
             .id(self.id)
+            .accessibility_role(Role::Link)
             .min_w_0()
             .truncate()
             .cursor_pointer()
@@ -328,13 +348,15 @@ impl SectionHeader {
 impl RenderOnce for SectionHeader {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let t = theme_for(self.theme, window);
-        let title = div().text_size(px(19.)).font_weight(FontWeight::BOLD).child(self.title);
+        let title = div().text_size(px(19.)).font_weight(FontWeight::BOLD).child(self.title.clone());
         let row = div().px(px(self.inset)).pt_7().pb_2p5().flex();
         match self.on_click {
-            None => row.child(title),
+            None => row.child(title.accessibility_role(Role::Heading)),
             Some(f) => row.child(
                 div()
                     .id(self.id)
+                    .accessibility_role(Role::Button)
+                    .accessibility_label(self.title)
                     .flex()
                     .items_center()
                     .gap_1()
@@ -393,7 +415,15 @@ impl RenderOnce for PageHeader {
             .when_some(self.on_back, |d, f| {
                 d.child(primitives::toolbar_button(&t, "page-back", "chevron-left", 32.).on_click(f))
             })
-            .child(div().min_w_0().truncate().text_size(px(28.)).font_weight(FontWeight::BOLD).child(self.title))
+            .child(
+                div()
+                    .accessibility_role(Role::Heading)
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(28.))
+                    .font_weight(FontWeight::BOLD)
+                    .child(self.title),
+            )
     }
 }
 
@@ -540,11 +570,13 @@ impl RenderOnce for Avatar {
     }
 }
 
-/// An icon toggle, filled with the accent when on.
+/// An icon toggle, filled with the accent when on. VoiceOver reads it as a toggle button,
+/// on or off, named by `.label(..)` or its icon.
 #[derive(IntoElement)]
 pub struct ToggleButton {
     id: ElementId,
     icon: &'static str,
+    label: Option<SharedString>,
     on: bool,
     theme: Option<Theme>,
     on_click: Option<ClickHandler>,
@@ -552,7 +584,13 @@ pub struct ToggleButton {
 
 impl ToggleButton {
     pub fn new(id: impl Into<ElementId>, icon: &'static str, on: bool) -> Self {
-        Self { id: id.into(), icon, on, theme: None, on_click: None }
+        Self { id: id.into(), icon, label: None, on, theme: None, on_click: None }
+    }
+
+    /// What the toggle turns on and off, for VoiceOver.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     pub fn theme(mut self, theme: Theme) -> Self {
@@ -569,7 +607,9 @@ impl ToggleButton {
 impl RenderOnce for ToggleButton {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let t = theme_for(self.theme, window);
-        primitives::toggle_button(&t, self.id, self.icon, self.on).when_some(self.on_click, |d, f| d.on_click(f))
+        primitives::toggle_button(&t, self.id, self.icon, self.on)
+            .when_some(self.label, |d, label| d.accessibility_label(label))
+            .when_some(self.on_click, |d, f| d.on_click(f))
     }
 }
 
@@ -640,7 +680,13 @@ impl RenderOnce for SegmentedControl {
             if glass { div().flex().gap_1() } else { div().flex().p(px(2.)).gap(px(2.)).rounded(px(9.)).bg(t.button) };
         row.children(self.segments.into_iter().map(|s| {
             let on = s.selected;
-            let seg = div().id(s.id).flex().items_center().font_weight(FontWeight::MEDIUM);
+            let seg = div()
+                .id(s.id)
+                .accessibility_role(Role::RadioButton)
+                .accessibility_selected(on)
+                .flex()
+                .items_center()
+                .font_weight(FontWeight::MEDIUM);
             let seg = if glass {
                 seg.px_3()
                     .h(px(28.))
@@ -733,6 +779,7 @@ impl RenderOnce for ExpandableText {
                         .text_color(t.text)
                         .cursor_pointer()
                         .hover(|s| s.opacity(0.7))
+                        .accessibility_label(if self.expanded { "Show Less" } else { "Show More" })
                         .child(if self.expanded { "LESS" } else { "MORE" })
                         .when_some(self.on_toggle, |d, f| d.on_click(f)),
                 )

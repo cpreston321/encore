@@ -46,19 +46,32 @@ impl MusicApp {
             .flex_none()
             .items_center()
             .gap_0p5()
-            .child(icon_button(t, "shuffle", "shuffle", 14., toggle_color(self.queue.shuffle)).on_click(cx.listener(
-                |this, _, _, cx| {
-                    this.queue.toggle_shuffle();
-                    cx.notify();
-                },
-            )))
-            .child(icon_button(t, "prev", "prev", 19., dim).on_click(cx.listener(|this, _, _, cx| this.previous(cx))))
+            .child(
+                icon_button(t, "shuffle", "shuffle", 14., toggle_color(self.queue.shuffle))
+                    .accessibility_role(Role::ToggleButton)
+                    .accessibility_label("Shuffle")
+                    .accessibility_toggled(self.queue.shuffle)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.queue.toggle_shuffle();
+                        cx.notify();
+                    })),
+            )
+            .child(
+                icon_button(t, "prev", "prev", 19., dim)
+                    .accessibility_label("Previous")
+                    .on_click(cx.listener(|this, _, _, cx| this.previous(cx))),
+            )
             .child(
                 icon_button(t, "play", if playing { "pause" } else { "play" }, 24., t.icon)
                     .size(px(40.))
+                    .accessibility_label(if playing { "Pause" } else { "Play" })
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_play(cx))),
             )
-            .child(icon_button(t, "next", "next", 19., dim).on_click(cx.listener(|this, _, _, cx| this.next(cx))))
+            .child(
+                icon_button(t, "next", "next", 19., dim)
+                    .accessibility_label("Next")
+                    .on_click(cx.listener(|this, _, _, cx| this.next(cx))),
+            )
             .child(
                 icon_button(
                     t,
@@ -67,6 +80,9 @@ impl MusicApp {
                     14.,
                     toggle_color(self.queue.repeat != Repeat::Off),
                 )
+                .accessibility_role(Role::ToggleButton)
+                .accessibility_label(if self.queue.repeat == Repeat::One { "Repeat One" } else { "Repeat" })
+                .accessibility_toggled(self.queue.repeat != Repeat::Off)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.queue.cycle_repeat();
                     cx.notify();
@@ -100,6 +116,7 @@ impl MusicApp {
                     .child(
                         div()
                             .id("np-art")
+                            .accessibility_label("Show Now Playing")
                             .flex_none()
                             .cursor_pointer()
                             .rounded(px(6.))
@@ -117,6 +134,8 @@ impl MusicApp {
                             .child(
                                 div()
                                     .id("np-title")
+                                    .accessibility_role(Role::Link)
+                                    .accessibility_label(format!("{}, Go to Album", song.title))
                                     .flex()
                                     .items_center()
                                     .gap_1()
@@ -156,18 +175,31 @@ impl MusicApp {
             .flex_none()
             .items_center()
             .gap_0p5()
-            .child(icon_button(t, "player-more", "ellipsis", 15., dim).on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                    if let Some(song) = &more {
-                        this.menu = Some(this.song_menu(song, e.position));
-                        cx.stop_propagation();
-                        cx.notify();
-                    }
-                }),
-            ))
+            .child({
+                let more_keyboard = more.clone();
+                icon_button(t, "player-more", "ellipsis", 15., dim)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                            if let Some(song) = &more {
+                                this.menu = Some(this.song_menu(song, e.position));
+                                cx.stop_propagation();
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
+                        if let (ClickEvent::Keyboard(k), Some(song)) = (e, &more_keyboard) {
+                            this.menu = Some(this.song_menu(song, k.bounds.origin));
+                            cx.notify();
+                        }
+                    }))
+            })
             .child(
                 icon_button(t, "lyrics", "lyrics", 16., if self.show_now_playing { t.accent } else { t.icon })
+                    .accessibility_role(Role::ToggleButton)
+                    .accessibility_label("Lyrics")
+                    .accessibility_toggled(self.show_now_playing)
                     .on_click(cx.listener(|this, _, _, cx| {
                         use crate::ui::now_playing::NowPlayingTab;
                         if this.show_now_playing {
@@ -178,15 +210,21 @@ impl MusicApp {
                         }
                     })),
             )
-            .child(icon_button(t, "queue", "queue", 16., if self.show_queue { t.accent } else { t.icon }).on_click(
-                cx.listener(|this, _, _, cx| {
-                    this.show_queue = !this.show_queue;
-                    cx.notify();
-                }),
-            ))
+            .child(
+                icon_button(t, "queue", "queue", 16., if self.show_queue { t.accent } else { t.icon })
+                    .accessibility_role(Role::ToggleButton)
+                    .accessibility_label("Queue")
+                    .accessibility_toggled(self.show_queue)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_queue = !this.show_queue;
+                        cx.notify();
+                    })),
+            )
             .child(
                 div().relative().child(capture_bounds(self.volume_button_bounds.clone())).child(
                     icon_button(t, "volume", volume_icon, 17., if self.show_volume { t.accent } else { t.icon })
+                        .accessibility_label("Volume")
+                        .accessibility_value(format!("{}%", (self.volume * 100.).round()))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.show_volume = !this.show_volume;
@@ -391,6 +429,9 @@ impl MusicApp {
         let knob = px(14.);
         div()
             .id("volume")
+            .accessibility_role(Role::Slider)
+            .accessibility_label("Volume")
+            .accessibility_value(format!("{}%", (value * 100.).round()))
             .relative()
             .w(px(22.))
             .h(height)

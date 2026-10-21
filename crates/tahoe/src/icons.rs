@@ -68,3 +68,51 @@ impl AssetSource for Assets {
 pub fn icon(name: &'static str, size: f32, color: Hsla) -> Svg {
     svg().path(format!("icons/{name}.svg")).size(px(size)).flex_none().text_color(color)
 }
+
+/// What an icon-only control with the icon `name` does, for VoiceOver, when nothing more
+/// specific is given.
+pub fn icon_label(name: &str) -> SharedString {
+    let label = match name {
+        "chevron-left" => "Back",
+        "chevron-right" => "Forward",
+        "chevron-down" => "Show Options",
+        "ellipsis" => "More",
+        "heart" | "heart-fill" => "Favorite",
+        "next" => "Next",
+        "prev" => "Previous",
+        "play-next" => "Play Next",
+        "plus" => "Add",
+        "queue" => "Queue",
+        "repeat" | "repeat-one" => "Repeat",
+        "speaker" | "speaker-loud" => "Volume",
+        "xmark" => "Close",
+        "open" => "Open",
+        _ => {
+            let mut words = String::new();
+            for word in name.split('-') {
+                if !words.is_empty() {
+                    words.push(' ');
+                }
+                let mut chars = word.chars();
+                if let Some(first) = chars.next() {
+                    words.extend(first.to_uppercase());
+                    words.push_str(chars.as_str());
+                }
+            }
+            return words.into();
+        }
+    };
+    label.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::icon_label;
+
+    #[test]
+    fn labels_icons() {
+        assert_eq!(icon_label("ellipsis").as_ref(), "More");
+        assert_eq!(icon_label("star-square").as_ref(), "Star Square");
+        assert_eq!(icon_label("play").as_ref(), "Play");
+    }
+}

@@ -5,7 +5,7 @@ use std::{ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
     Animation, AnimationExt, AnyElement, ClickEvent, Context, Div, ElementId, FontWeight, Hsla, MouseButton,
-    MouseDownEvent, ObjectFit, Pixels, SharedString, Stateful, Svg, anchored, deferred, div, ease_out_quint, img,
+    MouseDownEvent, ObjectFit, Pixels, Role, SharedString, Stateful, Svg, anchored, deferred, div, ease_out_quint, img,
     linear_color_stop, linear_gradient, prelude::*, pulsating_between, px, relative, rgb, uniform_list, white,
 };
 

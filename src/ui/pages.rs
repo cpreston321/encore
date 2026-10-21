@@ -479,6 +479,9 @@ impl MusicApp {
 
         let field = div()
             .id("search-field")
+            .accessibility_role(Role::SearchField)
+            .accessibility_label("Search")
+            .accessibility_value(self.search.text().to_string())
             .key_context("SearchField")
             .when(!self.palette_open, |d| d.track_focus(&self.search_focus))
             .mx(px(PAD))
@@ -498,6 +501,7 @@ impl MusicApp {
                 d.child(
                     div()
                         .id("search-clear")
+                        .accessibility_label("Clear Search")
                         .size(px(18.))
                         .rounded_full()
                         .bg(t.text_tertiary)

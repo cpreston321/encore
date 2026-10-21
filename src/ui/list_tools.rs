@@ -246,6 +246,9 @@ impl MusicApp {
                     Some("search"),
                     focused,
                 )
+                .accessibility_role(gpui::Role::SearchField)
+                .accessibility_label("Filter")
+                .accessibility_value(self.list_view(key).filter.text().to_string())
                 .key_context("SearchField")
                 .track_focus(&self.filter_focus)
                 .w(px(240.))

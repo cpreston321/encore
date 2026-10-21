@@ -678,6 +678,7 @@ pub fn text_input_box(
 ) -> Stateful<Div> {
     div()
         .id(id)
+        .accessibility_role(gpui::Role::TextField)
         .h(px(30.))
         .px_2p5()
         .flex()

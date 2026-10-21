@@ -3,12 +3,12 @@
 //! built on these; use whichever reads better at the call site.
 
 use gpui::{
-    Div, ElementId, Fill, FontWeight, Hsla, InteractiveElement, ParentElement, SharedString, Stateful,
+    Div, ElementId, Fill, FontWeight, Hsla, InteractiveElement, ParentElement, Role, SharedString, Stateful,
     StatefulInteractiveElement, Styled, div, px, white,
 };
 
 use crate::{
-    icons::icon,
+    icons::{icon, icon_label},
     theme::{Theme, readable_on},
 };
 
@@ -21,8 +21,11 @@ pub fn button(
     bg: Fill,
     fg: Hsla,
 ) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
+        .accessibility_role(Role::Button)
+        .accessibility_label(label.clone())
         .min_w(px(112.))
         .px_4()
         .h(px(32.))
@@ -37,7 +40,7 @@ pub fn button(
         .hover(|s| s.opacity(0.85))
         .active(|s| s.opacity(0.7))
         .child(icon(icon_name, 12., fg))
-        .child(label.into())
+        .child(label)
 }
 
 /// A capsule button in the accent (`filled`) or the quieter tinted fill. The filled label
@@ -56,10 +59,13 @@ pub fn pill_button(
     }
 }
 
-/// A borderless round button that shows a fill on hover, for toolbars and rows.
+/// A borderless round button that shows a fill on hover, for toolbars and rows. VoiceOver
+/// reads it by its icon (see [`icon_label`]) unless `.accessibility_label(..)` says more.
 pub fn icon_button(t: &Theme, id: impl Into<ElementId>, name: &'static str, size: f32, color: Hsla) -> Stateful<Div> {
     div()
         .id(id)
+        .accessibility_role(Role::Button)
+        .accessibility_label(icon_label(name))
         .size(px(30.))
         .flex_none()
         .rounded_full()
@@ -83,6 +89,8 @@ pub fn circle_button(
     let fg = readable_on(bg, fg);
     div()
         .id(id)
+        .accessibility_role(Role::Button)
+        .accessibility_label(icon_label(icon_name))
         .size(px(size))
         .flex_none()
         .rounded_full()
@@ -99,6 +107,8 @@ pub fn circle_button(
 pub fn glass_button(id: impl Into<ElementId>, icon_name: &'static str, size: f32) -> Stateful<Div> {
     div()
         .id(id)
+        .accessibility_role(Role::Button)
+        .accessibility_label(icon_label(icon_name))
         .size(px(size))
         .flex_none()
         .rounded_full()
@@ -118,6 +128,8 @@ pub fn glass_button(id: impl Into<ElementId>, icon_name: &'static str, size: f32
 pub fn toolbar_button(t: &Theme, id: impl Into<ElementId>, icon_name: &'static str, size: f32) -> Stateful<Div> {
     div()
         .id(id)
+        .accessibility_role(Role::Button)
+        .accessibility_label(icon_label(icon_name))
         .size(px(size))
         .flex_none()
         .rounded_full()
@@ -158,6 +170,9 @@ pub fn skeleton_block(t: &Theme, w: f32, h: f32, radius: f32) -> Div {
 pub fn toggle_button(t: &Theme, id: impl Into<ElementId>, icon_name: &'static str, on: bool) -> Stateful<Div> {
     div()
         .id(id)
+        .accessibility_role(Role::ToggleButton)
+        .accessibility_label(icon_label(icon_name))
+        .accessibility_toggled(on)
         .w(px(34.))
         .h(px(26.))
         .rounded(px(8.))
@@ -193,7 +208,13 @@ pub fn empty_state(t: &Theme, title: impl Into<SharedString>, hint: impl Into<Sh
         .flex_col()
         .items_center()
         .gap_1()
-        .child(div().text_size(px(18.)).font_weight(FontWeight::BOLD).child(title.into()))
+        .child(
+            div()
+                .accessibility_role(Role::Heading)
+                .text_size(px(18.))
+                .font_weight(FontWeight::BOLD)
+                .child(title.into()),
+        )
         .child(div().text_color(t.text_secondary).child(hint.into()))
 }
 
