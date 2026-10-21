@@ -375,7 +375,7 @@ impl MusicApp {
             );
         }
         if let Some(latest) = detail.latest() {
-            page = page.child(div().pt_6().child(self.latest_release(t, latest, cx)));
+            page = page.child(div().pt_6().child(self.latest_release(t, latest, content_w - 2. * PAD, cx)));
         }
         if !detail.top_songs.is_empty() {
             page = page.child(section_header(t, "Top Songs")).child(self.song_columns_by_album(
@@ -422,61 +422,160 @@ impl MusicApp {
         page.into_any_element()
     }
 
-    /// Frosted card with the artist's newest release, as on iOS.
-    fn latest_release(&self, t: &Theme, album: &Album, cx: &mut Context<Self>) -> impl IntoElement {
-        let id = album.id.clone();
+    /// The artist's newest release as a full-width strip in the album's own colors, as in
+    /// Apple Music: a wash of its artwork behind, the cover with a play button on hover, and
+    /// Play / Add on the right.
+    fn latest_release(&self, t: &Theme, album: &Album, width: f32, cx: &mut Context<Self>) -> impl IntoElement {
+        const ART: f32 = 84.;
+        const H: f32 = ART + 28.;
+        const RADIUS: f32 = 16.;
         let in_library = self.album_in_library(album);
-        let add = album.clone();
-        let count = album.track_count.map(|n| if n == 1 { "1 Song".to_string() } else { format!("{n} Songs") });
+        let kind = match album.track_count {
+            Some(1..=3) => "Single",
+            Some(4..=6) => "EP",
+            _ => "Album",
+        };
+        let meta = match album.track_count {
+            Some(1) => format!("{kind} · 1 song · {}", format_date(&album.release_date)),
+            Some(n) => format!("{kind} · {n} songs · {}", format_date(&album.release_date)),
+            None => format!("{kind} · {}", format_date(&album.release_date)),
+        };
+        // Apple's own background color for the artwork when it has one, darkened so white text
+        // reads on it; otherwise the artwork's average color.
+        let base = album
+            .colors
+            .map(|c| Palette::from_art_colors(c).bg)
+            .or_else(|| self.art_color(&album.artwork, cx))
+            .unwrap_or(t.hover);
+        let bg = Hsla { s: base.s.min(0.55), l: base.l.clamp(0.1, 0.2), a: 1., ..base };
+        let wash = self.image(&album.artwork.url(24), cx);
+        let (open, play, play_art, add) = (album.id.clone(), album.id.clone(), album.id.clone(), album.clone());
+
         div()
             .id("latest-release")
+            .group("latest-release")
             .mx(px(PAD))
-            .p_3p5()
-            .max_w(px(620.))
-            .flex()
-            .items_center()
-            .gap_4()
-            .rounded(px(22.))
-            .bg(t.hover)
+            .w(px(width))
+            .h(px(H))
+            .relative()
+            .overflow_hidden()
+            .rounded(px(RADIUS))
+            .bg(bg)
             .border_1()
-            .border_color(t.separator)
+            .border_color(white().opacity(0.08))
+            .shadow_md()
             .cursor_pointer()
-            .hover(|s| s.bg(t.selected))
-            .on_click(cx.listener(move |this, _, _, cx| this.push(Route::Album(id.clone()), cx)))
-            .child(self.art(&album.artwork, 112., 10., t, cx))
+            .hover(|s| s.border_color(white().opacity(0.16)))
+            .on_click(cx.listener(move |this, _, _, cx| this.push(Route::Album(open.clone()), cx)))
+            // A soft, stretched copy of the cover, strongest behind the art and fading out.
+            .children(wash.map(|path| {
+                div().absolute().left_0().top_0().opacity(0.6).child(
+                    img(path).min_w(px(width)).max_w(px(width)).min_h(px(H)).max_h(px(H)).object_fit(ObjectFit::Cover),
+                )
+            }))
+            .child(div().absolute().inset_0().bg(linear_gradient(
+                90.,
+                linear_color_stop(bg.opacity(0.2), 0.),
+                linear_color_stop(bg.opacity(0.9), 0.6),
+            )))
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
+                    .relative()
+                    .size_full()
+                    .px(px(14.))
                     .flex()
-                    .flex_col()
-                    .gap_0p5()
+                    .items_center()
+                    .gap_4()
                     .child(
-                        div().text_size(px(13.)).text_color(t.text_secondary).child(format_date(&album.release_date)),
+                        div()
+                            .relative()
+                            .flex_none()
+                            .rounded(px(8.))
+                            .shadow_md()
+                            .child(self.art(&album.artwork, ART, 8., t, cx))
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .rounded(px(8.))
+                                    .bg(gpui::black().opacity(0.3))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .opacity(0.)
+                                    .group_hover("latest-release", |s| s.opacity(1.))
+                                    .child(
+                                        circle(t, "latest-play-art", "play", 36., white().opacity(0.92), gpui::black())
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                cx.stop_propagation();
+                                                this.play_album(play_art.clone(), cx);
+                                            })),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap_1p5()
+                            .flex_1()
                             .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .text_color(white())
                             .child(
                                 div()
-                                    .text_size(px(17.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .truncate()
-                                    .child(album.title.clone()),
+                                    .text_size(px(11.))
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(white().opacity(0.6))
+                                    .child("LATEST RELEASE"),
                             )
-                            .when(album.explicit, |d| d.child(explicit_badge(t))),
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_shrink()
+                                            .truncate()
+                                            .text_size(px(17.))
+                                            .font_weight(FontWeight::BOLD)
+                                            .child(album.title.clone()),
+                                    )
+                                    .when(album.explicit, |d| d.child(div().flex_none().child(explicit_badge(t)))),
+                            )
+                            .child(div().truncate().text_size(px(13.)).text_color(white().opacity(0.7)).child(meta)),
                     )
-                    .children(count.map(|c| div().text_color(t.text_secondary).child(c))),
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                crate::ui::button(t, "latest-play", "play", "Play", white().into(), gpui::black())
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.play_album(play.clone(), cx);
+                                    })),
+                            )
+                            .child(
+                                circle(
+                                    t,
+                                    "latest-add",
+                                    if in_library { "check" } else { "plus" },
+                                    32.,
+                                    white().opacity(0.14),
+                                    white(),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.add_album(&add, cx);
+                                })),
+                            ),
+                    ),
             )
-            .child(circle(t, "latest-add", if in_library { "check" } else { "plus" }, 40., t.button, t.text).on_click(
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.add_album(&add, cx);
-                }),
-            ))
     }
 
     /// Adds an album to the library (Apple Music when signed in), fetching tracks if needed.
