@@ -909,6 +909,11 @@ pub struct Window {
     hovered: Rc<Cell<bool>>,
     pub(crate) needs_present: Rc<Cell<bool>>,
     pub(crate) last_input_timestamp: Rc<Cell<Instant>>,
+    /// When the platform asked for the frame being drawn (`frame_time`).
+    frame_started: Cell<Instant>,
+    /// Set by the platform's frame request and taken by the draw it leads to; draws without one
+    /// (snapshots, tests) use the time they start.
+    frame_requested: Rc<Cell<Option<Instant>>>,
     motion_clock: Cell<f32>,
     /// While set, images keep fractional device-pixel positions (`with_subpixel_images`).
     subpixel_images: bool,
@@ -1053,6 +1058,7 @@ impl Window {
         let needs_present = Rc::new(Cell::new(false));
         let next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>> = Default::default();
         let last_input_timestamp = Rc::new(Cell::new(Instant::now()));
+        let frame_requested = Rc::new(Cell::new(None));
 
         platform_window
             .request_decorations(window_decorations.unwrap_or(WindowDecorations::Server));
@@ -1084,7 +1090,9 @@ impl Window {
             let next_frame_callbacks = next_frame_callbacks.clone();
             let last_input_timestamp = last_input_timestamp.clone();
             let idle_frames = idle_frames.clone();
+            let frame_requested = frame_requested.clone();
             move |request_frame_options| {
+                frame_requested.set(Some(Instant::now()));
                 let next_frame_callbacks = next_frame_callbacks.take();
                 let had_callbacks = !next_frame_callbacks.is_empty();
                 if !next_frame_callbacks.is_empty() {
@@ -1376,6 +1384,8 @@ impl Window {
             hovered,
             needs_present,
             last_input_timestamp,
+            frame_started: Cell::new(Instant::now()),
+            frame_requested,
             motion_clock: Cell::new(0.),
             subpixel_images: false,
             last_motion_present: Cell::new(None),
@@ -2175,6 +2185,7 @@ impl Window {
     #[profiling::function]
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
         let draw_start = Instant::now();
+        self.frame_started.set(self.frame_requested.take().unwrap_or(draw_start));
         self.draw_count += 1;
         self.phase_clock.totals = Default::default();
         self.invalidate_entities();
@@ -2799,6 +2810,14 @@ impl Window {
         } else {
             f(self)
         }
+    }
+
+    /// When the platform asked for the frame being drawn. Animations that step by this rather
+    /// than by `Instant::now()` move evenly: frames that only replay the last one finish
+    /// in a millisecond and frames that render take several, so the time partway through a
+    /// frame wobbles while the display shows frames at a steady rate.
+    pub fn frame_time(&self) -> Instant {
+        self.frame_started.get()
     }
 
     /// Paints images in `f` at their exact position, fractions of a device pixel included,

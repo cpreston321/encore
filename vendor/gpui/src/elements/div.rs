@@ -1859,7 +1859,7 @@ impl Interactivity {
             return Point::default();
         };
         let mut physics = physics.borrow_mut();
-        if physics.elastic.tick(Instant::now()) {
+        if physics.elastic.tick(window.frame_time()) {
             window.request_animation_frame();
         }
         physics.overscroll()

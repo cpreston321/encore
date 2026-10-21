@@ -145,3 +145,8 @@ GPUI left the `CAMetalLayer`'s `colorspace` unset, which tells the compositor no
 ## Images can be drawn between pixels
 
 `Window::insert_image_sprite` snaps every image's origin down to a whole device pixel, so an image moved by a fraction of a pixel (an element offset during paint, say) jumps a pixel at a time instead of gliding. `Window::with_subpixel_images(f)` paints the images in `f` at their exact position and size. Outside it, images snap as before, so still and scrolled images stay crisp; inside, an image between pixels is sampled with linear filtering and looks slightly softer.
+
+## Animations step by when the frame was asked for
+
+The rubber-band spring stepped by `Instant::now()` during prepaint. How far into a frame prepaint runs depends on the frame: one that replays the last frame moved by a scroll reaches it in about a millisecond, one that renders takes several. The display shows frames at a steady rate, so the spring's positions landed unevenly in time and the bounce juddered. `Window::frame_time` is when the platform asked for the frame being drawn, recorded in the frame callback and taken by the draw it leads to; a draw without one (a snapshot, a test) uses the time it starts. The spring steps by it.
+
