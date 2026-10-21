@@ -488,8 +488,6 @@ pub struct MusicApp {
     pub(crate) scroll: ScrollHandle,
     pub(crate) artist_pane_scroll: ScrollHandle,
     pub(crate) user_name: String,
-    /// Profile photo the user chose (Apple doesn't share Apple Music profile photos).
-    pub(crate) avatar: Option<Arc<std::path::Path>>,
     pub(crate) regions: Option<crate::ui::regions::Regions>,
     /// The playback tick is running (see `ensure_ticker`).
     pub(crate) ticking: bool,
@@ -626,7 +624,6 @@ impl MusicApp {
             scroll: ScrollHandle::new(),
             artist_pane_scroll: ScrollHandle::new(),
             user_name: user_full_name(),
-            avatar: saved_photo().map(|p| Arc::from(p.as_path())),
             regions: None,
             ticking: false,
         };
@@ -941,26 +938,6 @@ fn drag_tracker(app: gpui::WeakEntity<MusicApp>) -> impl IntoElement {
 
 fn remote_cache_path() -> PathBuf {
     api::cache_dir().join("library-remote.json")
-}
-
-fn saved_photo() -> Option<PathBuf> {
-    std::fs::read_dir(api::data_dir())
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("profile-photo-")))
-        .max()
-}
-
-fn remove_old_photos(keep: &std::path::Path) {
-    if let Ok(entries) = std::fs::read_dir(api::data_dir()) {
-        for path in entries.flatten().map(|e| e.path()) {
-            let is_photo = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("profile-photo-"));
-            if is_photo && path != keep {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
 }
 
 fn user_full_name() -> String {

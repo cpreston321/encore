@@ -91,11 +91,7 @@ impl MusicApp {
     }
 
     fn user_avatar(&self, size: f32) -> tahoe::Avatar {
-        let avatar = tahoe::Avatar::new(self.user_name.clone()).size(size);
-        match &self.avatar {
-            Some(path) => avatar.image(img(path.clone()).size_full().object_fit(ObjectFit::Cover)),
-            None => avatar,
-        }
+        tahoe::Avatar::new(self.user_name.clone()).size(size)
     }
 
     pub(crate) fn render_account(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -310,27 +306,6 @@ impl MusicApp {
                     .child(stats),
             )
             .child(div().mx_4().my_1().h(px(1.)).bg(t.separator))
-            .child(
-                action(
-                    "account-photo",
-                    "person",
-                    if self.avatar.is_some() { "Change Photo…" } else { "Choose Photo…" },
-                    Some("Apple Music doesn't share it".into()),
-                    t.text,
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_account = false;
-                    this.choose_photo(cx);
-                })),
-            )
-            .when(self.avatar.is_some(), |d| {
-                d.child(action("account-photo-remove", "xmark", "Remove Photo", None, t.text).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.show_account = false;
-                        this.remove_photo(cx);
-                    },
-                )))
-            })
             .child(action("account-refresh", "repeat", "Refresh Library", Some(updated), t.text).on_click(cx.listener(
                 |this, _, _, cx| {
                     this.show_account = false;
