@@ -404,6 +404,8 @@ pub struct MusicApp {
     pub(crate) images: RefCell<HashMap<String, ImageState>>,
     /// When each loaded image file was last drawn (see `start_image_eviction`).
     pub(crate) image_used: RefCell<HashMap<Arc<std::path::Path>, std::time::Instant>>,
+    /// The song row whose artist or album link is under the pointer; that row doesn't highlight.
+    pub(crate) hovered_link: RefCell<Option<SharedString>>,
     pub(crate) evict_after: Duration,
     /// Average color per artwork URL, for tinting page headers. `None` while computing.
     art_colors: RefCell<HashMap<String, Option<gpui::Hsla>>>,
@@ -530,6 +532,7 @@ impl MusicApp {
             volume: 0.8,
             images: RefCell::default(),
             image_used: RefCell::default(),
+            hovered_link: RefCell::default(),
             evict_after: Duration::from_secs(120),
             art_colors: RefCell::default(),
             menu: None,

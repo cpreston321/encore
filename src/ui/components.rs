@@ -413,7 +413,8 @@ impl MusicApp {
         let play_list = list.clone();
         let dbl_list = list.clone();
         let group: SharedString = format!("{prefix}-cell-{ix}").into();
-        let hover = self.hover_value(&group);
+        // Over the artist link only the link reacts, not the whole row.
+        let hover = if self.link_hovered(&group) { 0. } else { self.hover_value(&group) };
         let hover_key = group.clone();
         let menu_list = list.clone();
 
@@ -495,6 +496,8 @@ impl MusicApp {
                                 song,
                                 by_album,
                                 ElementId::from((SharedString::from(format!("{prefix}-by")), ix)),
+                                group.clone(),
+                                t.text,
                                 cx,
                             )
                             .truncate()
@@ -546,6 +549,9 @@ impl MusicApp {
         let is_current = self.queue.current().is_some_and(|c| c.id == song.id);
         let selected = self.is_selected(&song.id);
         let fg2 = if selected { white().opacity(0.85) } else { t.text_secondary };
+        let fg1 = if selected { white() } else { t.text };
+        let row_key: SharedString = format!("{id}-row-{ix}").into();
+        let link_hovered = self.link_hovered(&row_key);
         let list = list.clone();
         let menu_list = list.clone();
 
@@ -575,7 +581,7 @@ impl MusicApp {
             .rounded(px(6.))
             .when(ix % 2 == 1 && !selected, |d| d.bg(t.row_alt))
             .when(selected, |d| d.bg(t.accent).text_color(white()))
-            .when(!selected, |d| d.hover(|s| s.bg(t.hover)))
+            .when(!selected && !link_hovered, |d| d.hover(|s| s.bg(t.hover)))
             .child(
                 div()
                     .flex_1()
@@ -600,18 +606,32 @@ impl MusicApp {
             )
             .child(
                 div().w(relative(0.22)).min_w_0().flex().child(
-                    self.song_link(song, false, ElementId::from((SharedString::from(format!("{id}-artist")), ix)), cx)
-                        .truncate()
-                        .text_color(fg2)
-                        .child(song.artist.clone()),
+                    self.song_link(
+                        song,
+                        false,
+                        ElementId::from((SharedString::from(format!("{id}-artist")), ix)),
+                        row_key.clone(),
+                        fg1,
+                        cx,
+                    )
+                    .truncate()
+                    .text_color(fg2)
+                    .child(song.artist.clone()),
                 ),
             )
             .child(
                 div().w(relative(0.22)).min_w_0().flex().child(
-                    self.song_link(song, true, ElementId::from((SharedString::from(format!("{id}-album")), ix)), cx)
-                        .truncate()
-                        .text_color(fg2)
-                        .child(song.album.clone()),
+                    self.song_link(
+                        song,
+                        true,
+                        ElementId::from((SharedString::from(format!("{id}-album")), ix)),
+                        row_key.clone(),
+                        fg1,
+                        cx,
+                    )
+                    .truncate()
+                    .text_color(fg2)
+                    .child(song.album.clone()),
                 ),
             )
             .child(div().w(px(44.)).flex().justify_end().text_color(fg2).child(format_ms(song.duration_ms)))
@@ -634,20 +654,44 @@ impl MusicApp {
     }
 
     /// "⋯" button that opens the song menu. With a `hover_group`, it only shows on row hover.
-    /// A song's artist (or, with `album`, its album) as a link: underlined on hover, and a
-    /// click opens that page instead of playing the song.
-    pub(crate) fn song_link(&self, song: &Song, album: bool, id: ElementId, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// A song's artist (or, with `album`, its album) as a link: underlined and brightened to
+    /// `hover_color` on hover, while its row (`row`) stops highlighting, and a click opens that
+    /// page instead of playing the song.
+    pub(crate) fn song_link(
+        &self,
+        song: &Song,
+        album: bool,
+        id: ElementId,
+        row: SharedString,
+        hover_color: Hsla,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let (artist, artist_id, album_id) = (song.artist.clone(), song.artist_id.clone(), song.album_id.clone());
         let target = if album { album_id.is_some() } else { !artist.is_empty() };
         div().id(id).min_w_0().when(target, |d| {
-            d.cursor_pointer().hover(|s| s.underline()).on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                match (&album_id, album) {
-                    (Some(album_id), true) => this.push(Route::Album(album_id.clone()), cx),
-                    _ => this.open_artist(artist.clone(), artist_id.clone(), cx),
-                }
-            }))
+            d.cursor_pointer()
+                .hover(move |s| s.underline().text_color(hover_color))
+                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                    let mut link = this.hovered_link.borrow_mut();
+                    if *hovered {
+                        *link = Some(row.clone());
+                    } else if link.as_ref() == Some(&row) {
+                        *link = None;
+                    }
+                    cx.notify();
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    match (&album_id, album) {
+                        (Some(album_id), true) => this.push(Route::Album(album_id.clone()), cx),
+                        _ => this.open_artist(artist.clone(), artist_id.clone(), cx),
+                    }
+                }))
         })
+    }
+
+    pub(crate) fn link_hovered(&self, row: &str) -> bool {
+        self.hovered_link.borrow().as_ref().is_some_and(|link| link.as_ref() == row)
     }
 
     pub(crate) fn more_button(

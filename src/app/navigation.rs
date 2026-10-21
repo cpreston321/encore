@@ -57,6 +57,8 @@ impl MusicApp {
 
     pub(crate) fn set_route(&mut self, route: Route, cx: &mut Context<Self>) {
         self.multi.clear();
+        // A link clicked to get here never sees the pointer leave it.
+        self.hovered_link.replace(None);
         self.route = route;
         self.route_generation += 1;
         self.menu = None;
